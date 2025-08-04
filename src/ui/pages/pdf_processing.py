@@ -148,6 +148,27 @@ def upload_pdf(db: Session, parser_service: PDFParserService):
                                 
                                 df = pd.DataFrame(results_data)
                                 st.dataframe(df, use_container_width=True, hide_index=True)
+                            
+                            # Add APPROVE button
+                            st.divider()
+                            if st.button("✅ APPROVE", type="primary", use_container_width=True, key="approve_parsed"):
+                                try:
+                                    # Update the parsing queue entry to approved/resolved status
+                                    if "queue_id" in result:
+                                        queue_entry = db.query(ParsingQueue).filter(
+                                            ParsingQueue.id == result["queue_id"]
+                                        ).first()
+                                        if queue_entry:
+                                            queue_entry.status = ParsingStatus.RESOLVED
+                                            db.commit()
+                                            st.success("✅ PDF parsing approved! Data is ready for processing.")
+                                            st.balloons()
+                                        else:
+                                            st.error("Could not find parsing queue entry")
+                                    else:
+                                        st.error("No queue ID found in parsing result")
+                                except Exception as e:
+                                    st.error(f"Error approving parsing: {str(e)}")
 
                     elif result["status"] == "review_needed":
                         st.warning("⚠️ PDF parsed but requires manual review")
@@ -185,6 +206,27 @@ def upload_pdf(db: Session, parser_service: PDFParserService):
                             st.info(
                                 f"Queue ID: {result['queue_id']} - Please check the Manual Review Queue"
                             )
+                            
+                            # Add APPROVE button for manual review
+                            st.divider()
+                            if st.button("✅ APPROVE ANYWAY", type="primary", use_container_width=True, key="approve_review"):
+                                try:
+                                    # Update the parsing queue entry to approved/resolved status
+                                    if "queue_id" in result:
+                                        queue_entry = db.query(ParsingQueue).filter(
+                                            ParsingQueue.id == result["queue_id"]
+                                        ).first()
+                                        if queue_entry:
+                                            queue_entry.status = ParsingStatus.RESOLVED
+                                            db.commit()
+                                            st.success("✅ PDF parsing approved! Data is ready for processing.")
+                                            st.balloons()
+                                        else:
+                                            st.error("Could not find parsing queue entry")
+                                    else:
+                                        st.error("No queue ID found in parsing result")
+                                except Exception as e:
+                                    st.error(f"Error approving parsing: {str(e)}")
 
                     else:
                         st.error(
@@ -272,18 +314,8 @@ def show_processing_queue(db: Session, parser_service: PDFParserService):
 
         df = pd.DataFrame(queue_data)
 
-        # Color code by status
-        def highlight_status(row):
-            colors = {
-                "pending": "background-color: #FFE5B4",
-                "processing": "background-color: #B4E5FF",
-                "resolved": "background-color: #B4FFB4",
-                "failed": "background-color: #FFB4B4",
-            }
-            return [colors.get(row["Status"], "")] * len(row)
-
-        styled_df = df.style.apply(highlight_status, axis=1)
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        # Display without color coding to match dark theme
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
         # Actions
         col1, col2 = st.columns(2)

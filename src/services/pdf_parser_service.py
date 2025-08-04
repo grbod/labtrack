@@ -125,7 +125,8 @@ class PDFParserService:
         """Parse a PDF file and extract test data."""
         logger.info(f"Parsing PDF: {pdf_path}")
 
-        # Create parsing queue entry
+        # Create new parsing queue entry
+        # Always create a new entry to allow re-parsing
         queue_entry = ParsingQueue(
             pdf_filename=pdf_path.name, status=ParsingStatus.PROCESSING
         )
@@ -200,8 +201,10 @@ class PDFParserService:
 
         except Exception as e:
             logger.error(f"Failed to parse PDF {pdf_path}: {e}")
-            queue_entry.status = ParsingStatus.FAILED
-            queue_entry.error_message = str(e)
+            # Only update status if not already in a terminal state
+            if queue_entry.status not in [ParsingStatus.RESOLVED]:
+                queue_entry.status = ParsingStatus.FAILED
+                queue_entry.error_message = str(e)
             db.commit()
 
             return {"status": "failed", "error": str(e), "queue_id": queue_entry.id}
@@ -223,7 +226,35 @@ class PDFParserService:
             return
 
         # Create test results
-        test_date = datetime.strptime(data.get("test_date", ""), "%Y-%m-%d").date()
+        # Parse test date with flexible format handling
+        test_date_str = data.get("test_date", "")
+        if not test_date_str:
+            logger.warning("No test date found in parsed data")
+            test_date = datetime.now().date()
+        else:
+            # Try multiple date formats
+            date_formats = [
+                "%m/%d/%Y",  # MM/DD/YYYY (07/30/2025)
+                "%Y-%m-%d",  # YYYY-MM-DD
+                "%d/%m/%Y",  # DD/MM/YYYY
+                "%Y/%m/%d",  # YYYY/MM/DD
+                "%m-%d-%Y",  # MM-DD-YYYY
+                "%d-%m-%Y",  # DD-MM-YYYY
+                "%B %d, %Y", # Month DD, YYYY
+                "%b %d, %Y", # Mon DD, YYYY
+            ]
+            
+            test_date = None
+            for fmt in date_formats:
+                try:
+                    test_date = datetime.strptime(test_date_str.strip(), fmt).date()
+                    break
+                except ValueError:
+                    continue
+            
+            if not test_date:
+                logger.warning(f"Could not parse test date: {test_date_str}. Using current date.")
+                test_date = datetime.now().date()
 
         for test_name, test_data in data.get("test_results", {}).items():
             test_result = TestResult(

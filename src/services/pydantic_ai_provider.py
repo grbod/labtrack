@@ -68,16 +68,19 @@ class PydanticAIProvider(AIProvider):
         return """You are an expert at parsing Certificate of Analysis (COA) documents.
         
         CRITICAL INSTRUCTIONS:
-        1. Extract the reference number (format: YYMMDD-XXX) - this is REQUIRED
-           - For DaaneLabs PDFs: Look for "SAMPLE NAME" field - this contains our reference number
+        1. Extract the reference number - this is REQUIRED
+           - For DaaneLabs PDFs: The "SAMPLE NAME" field IS our reference number - DO NOT look elsewhere
            - For other labs: Look for "Reference", "Ref #", "Sample ID", or similar fields
+           - Reference numbers can be in various formats (not just YYMMDD-XXX)
         2. Extract lot/batch numbers
         3. Parse ALL test results from tables
         4. Each table row typically represents one test
         5. Common table columns: Test Name, Result/Value, Unit, Spec/Limit, Status
         
         LAB-SPECIFIC INSTRUCTIONS:
-        - DaaneLabs: The "SAMPLE NAME" field contains our internal reference number (YYMMDD-XXX format)
+        - DaaneLabs: ALWAYS use the "SAMPLE NAME" field as the reference_number (whatever format it's in)
+        - DaaneLabs: Do NOT confuse other fields like batch numbers or lot numbers with the reference
+        - DaaneLabs: Extract the EXACT value from SAMPLE NAME without modification
         - Look for lab name/logo to identify the lab source
         
         For test results:
@@ -162,8 +165,9 @@ class PydanticAIProvider(AIProvider):
             {text}
             
             IMPORTANT LAB-SPECIFIC NOTES:
-            - If this is a DaaneLabs report, the "SAMPLE NAME" field contains our reference number (format: YYMMDD-XXX)
-            - Look for lab identification (name, logo, header) to determine the source lab
+            - If this is a DaaneLabs report, the "SAMPLE NAME" field IS the reference_number (any format)
+            - DaaneLabs: Extract the EXACT value from "SAMPLE NAME" field as reference_number, do not modify or validate format
+            - Look for lab identification (name, logo, header) to determine the source lab first
             
             NOTE: {"This document contains tabular data. Pay special attention to table structure." if has_tables else "This document may not have clear table structure. Look for test results in any format."}
             

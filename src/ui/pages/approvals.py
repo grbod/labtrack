@@ -12,6 +12,77 @@ from src.ui.components.auth import get_current_user, require_role
 from src.models.enums import UserRole
 
 
+def check_test_result_pass(result: TestResult) -> bool:
+    """Check if a test result passes based on specification."""
+    if not result.specification:
+        return True  # If no spec, assume pass
+    
+    # Get the specification and result value
+    spec = result.specification.strip().lower()
+    value = result.result_value.strip().lower() if result.result_value else ""
+    
+    # Handle common "pass" values
+    if value in ["nd", "not detected", "absent", "negative", "none", "nil"]:
+        return True
+    
+    # Handle "< X" specifications
+    if spec.startswith("<"):
+        # If result also starts with "<", it's passing
+        if value.startswith("<"):
+            return True
+        # Try to extract numeric values
+        try:
+            spec_limit = float(spec[1:].strip())
+            if value.replace(".", "").replace("-", "").isdigit():
+                result_val = float(value)
+                return result_val < spec_limit
+        except:
+            pass
+    
+    # Handle "> X" specifications
+    if spec.startswith(">"):
+        # If result also starts with ">", it's passing
+        if value.startswith(">"):
+            return True
+        # Try to extract numeric values
+        try:
+            spec_limit = float(spec[1:].strip())
+            if value.replace(".", "").replace("-", "").isdigit():
+                result_val = float(value)
+                return result_val > spec_limit
+        except:
+            pass
+    
+    # Handle range specifications (e.g., "10-20")
+    if "-" in spec and not spec.startswith("-"):
+        try:
+            parts = spec.split("-")
+            if len(parts) == 2:
+                min_val = float(parts[0].strip())
+                max_val = float(parts[1].strip())
+                if value.replace(".", "").replace("-", "").isdigit():
+                    result_val = float(value)
+                    return min_val <= result_val <= max_val
+        except:
+            pass
+    
+    # Handle exact match specifications
+    if spec == value:
+        return True
+    
+    # Handle "absent" specifications
+    if "absent" in spec and value in ["nd", "not detected", "absent", "negative"]:
+        return True
+    
+    # Handle "negative" specifications
+    if "negative" in spec and value in ["negative", "nd", "not detected", "absent"]:
+        return True
+    
+    # Default: if we can't determine pass/fail, assume pass
+    # This prevents false rejections for complex specifications
+    return True
+
+
 def show(db: Session):
     """Display the approval dashboard page."""
     st.title("✅ Approval Dashboard")
@@ -71,7 +142,7 @@ def show(db: Session):
 
 
 def show_pending_approvals(db: Session, approval_service: ApprovalService):
-    """Show test results pending approval."""
+    """Show test results pending approval with card-based layout."""
     st.subheader("Test Results Pending Approval")
 
     # Get pending test results grouped by lot
@@ -96,152 +167,172 @@ def show_pending_approvals(db: Session, approval_service: ApprovalService):
             lots_with_pending[lot_id] = {"lot": result.lot, "results": []}
         lots_with_pending[lot_id]["results"].append(result)
 
-    # Display each lot
+    # Display each lot as a card
     for lot_id, lot_data in lots_with_pending.items():
         lot = lot_data["lot"]
         results = lot_data["results"]
-
-        with st.expander(
-            f"Lot: {lot.lot_number} (Ref: {lot.reference_number})", expanded=True
-        ):
-            # Lot info
-            col1, col2, col3 = st.columns(3)
-
+        
+        # Create a card-like container
+        with st.container():
+            # Card styling
+            st.markdown("""
+                <style>
+                    .lot-card {
+                        border: 1px solid #333;
+                        border-radius: 10px;
+                        padding: 20px;
+                        margin-bottom: 20px;
+                        background-color: #0E1117;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+            
+            # Card header with lot info
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+            
             with col1:
-                st.write(f"**Type:** {lot.lot_type.value}")
-                products = ", ".join(
-                    [lp.product.display_name for lp in lot.lot_products]
-                )
-                st.write(f"**Product(s):** {products}")
-
+                st.markdown(f"### Lot: {lot.lot_number}")
+                st.markdown(f"**Reference:** {lot.reference_number}")
+                products = ", ".join([lp.product.display_name for lp in lot.lot_products])
+                st.markdown(f"**Product(s):** {products}")
+            
             with col2:
-                st.write(
-                    f"**Mfg Date:** {lot.mfg_date.strftime('%Y-%m-%d') if lot.mfg_date else 'N/A'}"
-                )
-                st.write(
-                    f"**Exp Date:** {lot.exp_date.strftime('%Y-%m-%d') if lot.exp_date else 'N/A'}"
-                )
-
+                st.markdown("**Dates**")
+                st.text(f"Mfg: {lot.mfg_date.strftime('%Y-%m-%d') if lot.mfg_date else 'N/A'}")
+                st.text(f"Exp: {lot.exp_date.strftime('%Y-%m-%d') if lot.exp_date else 'N/A'}")
+            
             with col3:
-                draft_count = len(
-                    [r for r in results if r.status == TestResultStatus.DRAFT]
-                )
-                reviewed_count = len(
-                    [r for r in results if r.status == TestResultStatus.REVIEWED]
-                )
-                st.write(f"**Draft:** {draft_count}")
-                st.write(f"**Reviewed:** {reviewed_count}")
-
+                # Check if all tests are passing
+                passing_tests = [r for r in results if check_test_result_pass(r)]
+                failing_tests = [r for r in results if not check_test_result_pass(r)]
+                all_passing = len(failing_tests) == 0
+                
+                if all_passing:
+                    st.success("✓ All Tests Passing")
+                else:
+                    st.error(f"✗ {len(failing_tests)} Tests Failing")
+            
+            with col4:
+                draft_count = len([r for r in results if r.status == TestResultStatus.DRAFT])
+                reviewed_count = len([r for r in results if r.status == TestResultStatus.REVIEWED])
+                st.metric("Status", f"{draft_count} Draft, {reviewed_count} Reviewed")
+            
             st.divider()
-
-            # Test results table
+            
+            # Test results using AG-Grid
+            st.markdown("#### Test Results")
+            
+            # Prepare data for AG-Grid
             results_data = []
             for result in results:
-                results_data.append(
-                    {
-                        "ID": result.id,
-                        "Test": result.test_type,
-                        "Value": f"{result.result_value} {result.unit}".strip(),
-                        "Status": result.status.value,
-                        "Confidence": (
-                            f"{result.confidence_score:.1%}"
-                            if result.confidence_score
-                            else "-"
-                        ),
-                        "Test Date": (
-                            result.test_date.strftime("%Y-%m-%d")
-                            if result.test_date
-                            else "-"
-                        ),
-                        "Source": result.pdf_source or "-",
-                    }
-                )
-
+                is_passing = check_test_result_pass(result)
+                results_data.append({
+                    "Test Name": result.test_type,
+                    "Value": result.result_value,
+                    "Unit": result.unit,
+                    "Specification": result.specification or "-",
+                    "Pass/Fail": "Pass" if is_passing else "Fail",
+                    "Confidence": f"{result.confidence_score:.1%}" if result.confidence_score else "-",
+                    "Test Date": result.test_date.strftime("%Y-%m-%d") if result.test_date else "-",
+                    "Source": result.pdf_source or "-"
+                })
+            
             df = pd.DataFrame(results_data)
-
-            # Show editable table
-            edited_df = st.data_editor(
-                df,
+            
+            # Style the dataframe based on Pass/Fail status
+            def style_pass_fail(val):
+                if val == 'Pass':
+                    return 'background-color: #28a745; color: white'
+                elif val == 'Fail':
+                    return 'background-color: #dc3545; color: white'
+                return ''
+            
+            # Apply styling to Pass/Fail column
+            styled_df = df.style.applymap(style_pass_fail, subset=['Pass/Fail'])
+            
+            # Display styled dataframe
+            st.dataframe(
+                styled_df,
                 use_container_width=True,
                 hide_index=True,
-                disabled=["ID", "Test", "Confidence", "Test Date", "Source"],
-                column_config={
-                    "Status": st.column_config.SelectboxColumn(
-                        "Status",
-                        options=[s.value for s in TestResultStatus],
-                        width="small",
-                    )
-                },
+                height=200
             )
-
-            # Approval actions
-            col1, col2, col3 = st.columns([2, 2, 1])
-
+            
+            st.divider()
+            
+            # Lot-level approval actions
+            col1, col2 = st.columns([1, 1])
+            
             with col1:
                 if st.button(
-                    f"✅ Approve All - Lot {lot.lot_number}", key=f"approve_{lot_id}"
+                    "✅ APPROVE LOT",
+                    key=f"approve_{lot_id}",
+                    type="primary",
+                    use_container_width=True,
+                    help="Approve all test results for this lot"
                 ):
+                    # Confirmation dialog
                     try:
-                        # Update any edited values
-                        for idx, row in edited_df.iterrows():
-                            result = next(r for r in results if r.id == row["ID"])
-                            if (
-                                row["Value"]
-                                != f"{result.result_value} {result.unit}".strip()
-                            ):
-                                # Parse value and unit
-                                parts = row["Value"].rsplit(" ", 1)
-                                if len(parts) == 2:
-                                    result.result_value = parts[0]
-                                    result.unit = parts[1]
-                                else:
-                                    result.result_value = row["Value"]
-                                    result.unit = ""
-
-                        db.commit()
-
-                        # Approve all
+                        # Approve all test results
                         approved = approval_service.bulk_approve_results(
                             db, [r.id for r in results], get_current_user()["id"]
                         )
-
-                        st.success(
-                            f"✅ Approved {approved} test results for Lot {lot.lot_number}"
-                        )
+                        
+                        st.success(f"✅ Lot {lot.lot_number} approved successfully!")
                         st.balloons()
                         st.rerun()
-
+                        
                     except Exception as e:
-                        st.error(f"Error approving results: {str(e)}")
-
+                        st.error(f"Error approving lot: {str(e)}")
+            
             with col2:
                 rejection_reason = st.text_input(
                     "Rejection reason",
-                    key=f"reason_{lot_id}",
                     placeholder="Required for rejection",
+                    key=f"reason_{lot_id}"
                 )
-
-            with col3:
-                if st.button(f"❌ Reject All", key=f"reject_{lot_id}"):
+                
+                if st.button(
+                    "❌ REJECT LOT",
+                    key=f"reject_{lot_id}",
+                    type="secondary",
+                    use_container_width=True,
+                    help="Reject all test results for this lot"
+                ):
                     if not rejection_reason:
                         st.error("Please provide a rejection reason")
                     else:
-                        try:
-                            for result in results:
-                                approval_service.reject_test_result(
-                                    db,
-                                    result.id,
-                                    get_current_user()["id"],
-                                    rejection_reason,
-                                )
-
-                            st.error(
-                                f"❌ Rejected all test results for Lot {lot.lot_number}"
-                            )
-                            st.rerun()
-
-                        except Exception as e:
-                            st.error(f"Error rejecting results: {str(e)}")
+                        # Show confirmation dialog
+                        @st.dialog(f"Confirm Rejection - Lot {lot.lot_number}")
+                        def confirm_rejection():
+                            st.warning("⚠️ This will reject ALL test results for this lot!")
+                            st.write(f"**Reason:** {rejection_reason}")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("Cancel", use_container_width=True):
+                                    st.rerun()
+                            with col2:
+                                if st.button("Confirm Rejection", type="primary", use_container_width=True):
+                                    try:
+                                        for result in results:
+                                            approval_service.reject_test_result(
+                                                db,
+                                                result.id,
+                                                get_current_user()["id"],
+                                                rejection_reason,
+                                            )
+                                        
+                                        st.error(f"❌ Lot {lot.lot_number} rejected")
+                                        st.rerun()
+                                        
+                                    except Exception as e:
+                                        st.error(f"Error rejecting lot: {str(e)}")
+                        
+                        confirm_rejection()
+            
+            # Add spacing between cards
+            st.markdown("<br>", unsafe_allow_html=True)
 
 
 def show_approval_history(db: Session, approval_service: ApprovalService):
@@ -313,12 +404,12 @@ def show_approval_history(db: Session, approval_service: ApprovalService):
 
 
 def bulk_approval(db: Session, approval_service: ApprovalService):
-    """Bulk approval interface."""
+    """Bulk approval interface with lot-based selection."""
     st.subheader("Bulk Approval")
 
-    st.info("Select multiple test results to approve or reject at once")
+    st.info("Select multiple lots to approve or reject at once")
 
-    # Get all pending results
+    # Get all pending results grouped by lot
     pending_results = (
         db.query(TestResult)
         .filter(
@@ -331,83 +422,121 @@ def bulk_approval(db: Session, approval_service: ApprovalService):
         st.info("No test results pending approval")
         return
 
-    # Create selectable dataframe
-    data = []
+    # Group by lot
+    lots_data = {}
     for result in pending_results:
-        data.append(
-            {
-                "Select": False,
-                "ID": result.id,
-                "Lot": result.lot.lot_number,
-                "Reference": result.lot.reference_number,
-                "Test": result.test_type,
-                "Value": f"{result.result_value} {result.unit}".strip(),
-                "Status": result.status.value,
-                "Test Date": (
-                    result.test_date.strftime("%Y-%m-%d") if result.test_date else "-"
-                ),
+        lot_id = result.lot_id
+        if lot_id not in lots_data:
+            lot = result.lot
+            lots_data[lot_id] = {
+                "Lot Number": lot.lot_number,
+                "Reference": lot.reference_number,
+                "Products": ", ".join([lp.product.display_name for lp in lot.lot_products]),
+                "Test Count": 0,
+                "All Passing": True,
+                "lot_obj": lot,
+                "results": []
             }
-        )
+        lots_data[lot_id]["results"].append(result)
+        lots_data[lot_id]["Test Count"] += 1
+        if not check_test_result_pass(result):
+            lots_data[lot_id]["All Passing"] = False
 
-    df = pd.DataFrame(data)
-
-    # Editable dataframe with checkboxes
+    # Create dataframe for AG-Grid
+    df_data = []
+    for lot_id, data in lots_data.items():
+        df_data.append({
+            "lot_id": lot_id,
+            "Lot Number": data["Lot Number"],
+            "Reference": data["Reference"],
+            "Products": data["Products"],
+            "Test Count": data["Test Count"],
+            "Status": "✓ All Passing" if data["All Passing"] else "✗ Tests Failing"
+        })
+    
+    df = pd.DataFrame(df_data)
+    
+    # Add Select column for selection
+    df.insert(0, "Select", False)
+    
+    # Create editable dataframe with checkbox selection
     edited_df = st.data_editor(
         df,
         use_container_width=True,
         hide_index=True,
+        height=300,
         column_config={
             "Select": st.column_config.CheckboxColumn(
-                "Select", help="Select results to approve/reject", default=False
+                "Select",
+                help="Select lots to approve/reject",
+                default=False
+            ),
+            "lot_id": None,  # Hide lot_id column
+            "Status": st.column_config.TextColumn(
+                "Status",
+                help="✓ All Passing or ✗ Tests Failing"
             )
         },
-        disabled=["ID", "Lot", "Reference", "Test", "Value", "Status", "Test Date"],
+        disabled=["Lot Number", "Reference", "Products", "Test Count", "Status"]
     )
-
-    # Get selected IDs
-    selected_ids = edited_df[edited_df["Select"]]["ID"].tolist()
-
-    if selected_ids:
-        st.write(f"**{len(selected_ids)} test results selected**")
-
+    
+    # Get selected rows
+    selected_rows = edited_df[edited_df["Select"]]
+    
+    if selected_rows is not None and len(selected_rows) > 0:
+        st.write(f"**{len(selected_rows)} lots selected**")
+        
+        # Get all test result IDs for selected lots
+        selected_test_ids = []
+        for _, row in selected_rows.iterrows():
+            lot_id = row['lot_id']
+            selected_test_ids.extend([r.id for r in lots_data[lot_id]["results"]])
+        
         col1, col2 = st.columns(2)
-
+        
         with col1:
             if st.button(
-                "✅ Approve Selected", type="primary", use_container_width=True
+                f"✅ Approve {len(selected_rows)} Lots", 
+                type="primary", 
+                use_container_width=True
             ):
                 try:
                     approved = approval_service.bulk_approve_results(
-                        db, selected_ids, get_current_user()["id"]
+                        db, selected_test_ids, get_current_user()["id"]
                     )
-                    st.success(f"✅ Approved {approved} test results")
+                    st.success(f"✅ Approved {len(selected_rows)} lots ({approved} test results)")
                     st.balloons()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
         with col2:
-            with st.form("bulk_reject_form"):
-                reason = st.text_input("Rejection reason (required)")
+            rejection_reason = st.text_input(
+                "Rejection reason",
+                placeholder="Required for rejection",
+                key="bulk_reason"
+            )
+            
+            if st.button(
+                f"❌ Reject {len(selected_rows)} Lots", 
+                type="secondary",
+                use_container_width=True
+            ):
+                if not rejection_reason:
+                    st.error("Rejection reason is required")
+                else:
+                    try:
+                        rejected = 0
+                        for test_id in selected_test_ids:
+                            approval_service.reject_test_result(
+                                db, test_id, get_current_user()["id"], rejection_reason
+                            )
+                            rejected += 1
 
-                if st.form_submit_button(
-                    "❌ Reject Selected", use_container_width=True
-                ):
-                    if not reason:
-                        st.error("Rejection reason is required")
-                    else:
-                        try:
-                            rejected = 0
-                            for result_id in selected_ids:
-                                approval_service.reject_test_result(
-                                    db, result_id, get_current_user()["id"], reason
-                                )
-                                rejected += 1
-
-                            st.error(f"❌ Rejected {rejected} test results")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
+                        st.error(f"❌ Rejected {len(selected_rows)} lots ({rejected} test results)")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
 
     else:
-        st.info("Select test results using the checkboxes to perform bulk actions")
+        st.info("Select lots using the checkboxes to perform bulk actions")

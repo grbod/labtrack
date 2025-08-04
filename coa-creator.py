@@ -2,8 +2,8 @@ import pandas as pd
 from docx import Document
 from datetime import datetime
 import os
-import win32com.client
-import pythoncom
+# import win32com.client  # Not available on macOS
+# import pythoncom  # Not available on macOS
 import sys
 
 
@@ -77,34 +77,16 @@ def save_as_docx_and_pdf(doc, filename_base, output_directory):
     else:
         print("File does not exist!")
 
-    # Convert to PDF
-    pdf_path = os.path.join(output_directory, f"{filename_base}.pdf")
-    try:
-        pythoncom.CoInitialize()
-        word = win32com.client.Dispatch("Word.Application")
-        doc = word.Documents.Open(docx_path)
-        doc.SaveAs(pdf_path, FileFormat=17)  # FileFormat=17 is for PDF
-        doc.Close()
-        word.Quit()
-        print(f"PDF document saved: {pdf_path}")
-    except Exception as e:
-        print(f"Error converting to PDF: {e}")
-    finally:
-        pythoncom.CoUninitialize()
+    # PDF conversion is not available on macOS without Word application
+    print("Note: PDF conversion is not available on macOS. Only Word document generated.")
+    pdf_path = None
 
     return docx_path, pdf_path
 
 def main():
     # Load the COA results Excel file
-    excel_file_path = os.path.join(
-        os.path.expanduser("~"),
-        "bodynutrition.com",
-        "Quality Team - Documents",
-        "SQF Documents",
-        "2.4 Food SafetyQuality System",
-        "2.4.4 Product Sampling",
-        "2.4.4 New COA Register.xlsx"
-    )
+    # Note: On macOS, using local file instead of SharePoint path
+    excel_file_path = os.path.join(os.getcwd(), "COA results.xlsx")
     
     try:
         coa_results = pd.read_excel(excel_file_path)

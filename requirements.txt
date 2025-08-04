@@ -46,6 +46,7 @@ requests>=2.31.0
 # Additional Streamlit components
 streamlit-aggrid>=0.3.0
 streamlit-option-menu>=0.3.0
+streamlit-pdf-viewer>=0.0.26  # For PDF preview display
 
 # Logging and monitoring
 loguru>=0.7.0

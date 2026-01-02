@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { ProductAutocomplete } from "@/components/form/ProductAutocomplete"
 
 import { useProducts } from "@/hooks/useProducts"
 import { useCreateLot, useLots, useCreateSublotsBulk } from "@/hooks/useLots"
@@ -98,7 +99,7 @@ export function CreateSamplePage() {
   const [nextCompositeId, setNextCompositeId] = useState(2)
   const [editingCompositeCell, setEditingCompositeCell] = useState<{ rowId: number; columnId: string } | null>(null)
 
-  const { data: productsData } = useProducts({ page_size: 100 })
+  const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
   const { data: lotsData } = useLots({ page: 1, page_size: 10 })
   const createMutation = useCreateLot()
   const createSublotsMutation = useCreateSublotsBulk()
@@ -153,18 +154,34 @@ export function CreateSamplePage() {
         navigate("/")
       } else if (formData.lot_type === "MULTI_SKU_COMPOSITE") {
         // For MULTI_SKU_COMPOSITE: Use composite products grid data
-        const validProducts = compositeProducts.filter(cp => cp.product_id !== null && cp.batch_number.trim() !== '')
-        if (validProducts.length === 0) {
-          alert("Please add at least one product")
+
+        // Check if there are any rows
+        if (compositeProducts.length === 0) {
+          alert("Please add at least one product row")
           return
         }
+
+        // Check for products without valid product_id
+        const invalidProducts = compositeProducts.filter(cp => cp.product_id === null)
+        if (invalidProducts.length > 0) {
+          alert("Please select valid products from the database for all rows. Hover over invalid entries to see the error.")
+          return
+        }
+
+        // Check for products without batch numbers
+        const productsWithoutBatch = compositeProducts.filter(cp => cp.batch_number.trim() === '')
+        if (productsWithoutBatch.length > 0) {
+          alert("Please enter batch numbers for all products")
+          return
+        }
+
+        const validProducts = compositeProducts.filter(cp => cp.product_id !== null && cp.batch_number.trim() !== '')
 
         // Generate composite lot number from batch numbers
         const compositeLotNumber = "COMP-" + validProducts.map(p => p.batch_number).join("-")
 
-        // Calculate equal percentages if not set
-        const totalPercentage = validProducts.reduce((sum, p) => sum + (p.percentage || 0), 0)
-        const equalPercentage = totalPercentage === 0 ? 100 / validProducts.length : undefined
+        // Calculate equal percentages for all products
+        const equalPercentage = 100 / validProducts.length
 
         // Calculate earliest mfg date
         const earliestMfgDate = validProducts.reduce((min, cp) =>
@@ -179,7 +196,7 @@ export function CreateSamplePage() {
           generate_coa: formData.generate_coa,
           products: validProducts.map((cp) => ({
             product_id: cp.product_id!,
-            percentage: cp.percentage || equalPercentage,
+            percentage: equalPercentage,
           })),
         })
 
@@ -283,66 +300,171 @@ export function CreateSamplePage() {
     [productsData]
   )
 
-  const compositeColDefs = useMemo<ColDef<CompositeProductRow>[]>(() => [
-    {
-      field: 'product_name',
-      headerName: 'Product',
-      editable: true,
-      cellEditor: 'agSelectCellEditor',
-      cellEditorParams: {
-        values: productOptions,
+  // TanStack Table columns for Composite Products
+  const compositeColumnHelper = createColumnHelper<CompositeProductRow>()
+  const compositeColumns = useMemo<ColumnDef<CompositeProductRow>[]>(() => [
+    compositeColumnHelper.accessor('product_name', {
+      header: 'Product',
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const currentProduct = info.row.original
+
+        return (
+          <ProductAutocomplete
+            value={currentProduct}
+            products={productsData?.items || []}
+            isLoading={isProductsLoading}
+            onSelect={(product) => {
+              setCompositeProducts(prev =>
+                prev.map(cp => cp.id === rowId
+                  ? { ...cp, product_id: product.id, product_name: product.display_name }
+                  : cp
+                )
+              )
+            }}
+            onChange={(text) => {
+              // Clear product_id when user starts typing (always editable)
+              setCompositeProducts(prev =>
+                prev.map(cp => cp.id === rowId
+                  ? { ...cp, product_id: null, product_name: text }
+                  : cp
+                )
+              )
+            }}
+            error={!currentProduct.product_id && currentProduct.product_name.trim() !== ''}
+            onNextCell={() => {
+              // Move to mfg_date column
+              setEditingCompositeCell({ rowId, columnId: 'mfg_date' })
+            }}
+          />
+        )
       },
-      valueSetter: (params) => {
-        const product = productsData?.items.find(p => p.display_name === params.newValue)
-        if (product) {
-          params.data.product_id = product.id
-          params.data.product_name = product.display_name
-          return true
+    }),
+    compositeColumnHelper.accessor('mfg_date', {
+      header: 'Mfg Date',
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'mfg_date'
+
+        if (isEditing) {
+          return (
+            <input
+              type="date"
+              value={info.getValue()}
+              onChange={(e) => {
+                setCompositeProducts(prev =>
+                  prev.map(cp => cp.id === rowId ? { ...cp, mfg_date: e.target.value } : cp)
+                )
+              }}
+              onBlur={() => setEditingCompositeCell(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setEditingCompositeCell(null)
+                } else if (e.key === 'Tab') {
+                  e.preventDefault()
+                  // Move to batch_number column
+                  setEditingCompositeCell({ rowId, columnId: 'batch_number' })
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )
         }
-        return false
+
+        return (
+          <div
+            onClick={() => setEditingCompositeCell({ rowId, columnId: 'mfg_date' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
+          >
+            {info.getValue()}
+          </div>
+        )
       },
-      flex: 2,
-    },
-    {
-      field: 'mfg_date',
-      headerName: 'Mfg Date',
-      editable: true,
-      cellEditor: 'agDateStringCellEditor',
-      flex: 1,
-    },
-    {
-      field: 'batch_number',
-      headerName: 'Batch #',
-      editable: true,
-      flex: 1,
-    },
-    {
-      field: 'percentage',
-      headerName: '%',
-      editable: true,
-      cellEditor: 'agNumberCellEditor',
-      cellEditorParams: {
-        min: 0,
-        max: 100,
-        precision: 1,
+    }),
+    compositeColumnHelper.accessor('batch_number', {
+      header: 'Batch #',
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'batch_number'
+
+        if (isEditing) {
+          return (
+            <input
+              type="text"
+              value={info.getValue()}
+              onChange={(e) => {
+                setCompositeProducts(prev =>
+                  prev.map(cp => cp.id === rowId ? { ...cp, batch_number: e.target.value } : cp)
+                )
+              }}
+              onBlur={() => setEditingCompositeCell(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setEditingCompositeCell(null)
+                } else if (e.key === 'Tab') {
+                  // Close editing
+                  setEditingCompositeCell(null)
+
+                  // Check if we're on the last row
+                  const currentRowIndex = compositeProducts.findIndex(cp => cp.id === rowId)
+                  if (currentRowIndex === compositeProducts.length - 1) {
+                    // Add new row immediately so Tab can find it
+                    const newRow = {
+                      id: nextCompositeId,
+                      product_id: null,
+                      product_name: '',
+                      mfg_date: new Date().toISOString().split('T')[0],
+                      batch_number: ''
+                    }
+                    setCompositeProducts(prev => [...prev, newRow])
+                    setNextCompositeId(prev => prev + 1)
+                  }
+                  // Don't preventDefault - let Tab naturally move to next row's Product input
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )
+        }
+
+        return (
+          <div
+            onClick={() => setEditingCompositeCell({ rowId, columnId: 'batch_number' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
+          >
+            {info.getValue() || <span className="text-slate-400 italic text-xs">Click to edit...</span>}
+          </div>
+        )
       },
-      valueFormatter: (params: ValueFormatterParams) => params.value ? `${params.value}%` : '',
-      width: 80,
-    },
-    {
-      headerName: '',
-      width: 60,
-      cellRenderer: (params: ICellRendererParams<CompositeProductRow>) => (
+    }),
+    compositeColumnHelper.display({
+      id: 'actions',
+      header: '',
+      cell: (info) => (
         <button
-          onClick={() => removeCompositeProduct(params.data?.id ?? 0)}
-          className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+          onClick={() => removeCompositeProduct(info.row.original.id)}
+          className="text-slate-400 hover:text-red-600 transition-colors p-1"
           type="button"
+          title="Delete row"
         >
           <Trash2 className="h-4 w-4" />
         </button>
       ),
-    },
-  ], [productOptions, productsData, removeCompositeProduct])
+      size: 40,
+    }),
+  ], [editingCompositeCell, productsData, removeCompositeProduct])
+
+  // TanStack Table instance for Composite Products
+  const compositeTable = useReactTable({
+    data: compositeProducts,
+    columns: compositeColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id.toString(),
+  })
 
   const defaultColDef = useMemo<ColDef>(() => ({
     resizable: true,
@@ -607,21 +729,34 @@ export function CreateSamplePage() {
                 </Button>
               </div>
             </div>
-            <div className="ag-theme-alpine" style={{ height: Math.min(350, 56 + compositeProducts.length * 42) }}>
-              <AgGridReact<CompositeProductRow>
-                rowData={compositeProducts}
-                columnDefs={compositeColDefs}
-                defaultColDef={defaultColDef}
-                getRowId={(params) => params.data.id.toString()}
-                onCellValueChanged={(event) => {
-                  setCompositeProducts(prev =>
-                    prev.map(cp => cp.id === event.data.id ? event.data : cp)
-                  )
-                }}
-                domLayout="autoHeight"
-                suppressRowClickSelection
-                stopEditingWhenCellsLoseFocus
-              />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    {compositeTable.getHeaderGroups().map((headerGroup) =>
+                      headerGroup.headers.map((header) => (
+                        <th
+                          key={header.id}
+                          className="text-left font-semibold text-slate-700 text-xs tracking-wide px-3 py-2 uppercase"
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                        </th>
+                      ))
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {compositeTable.getRowModel().rows.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="px-3 py-1.5">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

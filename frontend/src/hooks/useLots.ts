@@ -1,0 +1,85 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { lotsApi, type LotFilters, type CreateLotData, type UpdateLotData } from "@/api/lots"
+import type { LotStatus } from "@/types"
+
+export const lotKeys = {
+  all: ["lots"] as const,
+  lists: () => [...lotKeys.all, "list"] as const,
+  list: (filters: LotFilters) => [...lotKeys.lists(), filters] as const,
+  details: () => [...lotKeys.all, "detail"] as const,
+  detail: (id: number) => [...lotKeys.details(), id] as const,
+  statusCounts: () => [...lotKeys.all, "statusCounts"] as const,
+}
+
+export function useLots(filters: LotFilters = {}) {
+  return useQuery({
+    queryKey: lotKeys.list(filters),
+    queryFn: () => lotsApi.list(filters),
+  })
+}
+
+export function useLot(id: number) {
+  return useQuery({
+    queryKey: lotKeys.detail(id),
+    queryFn: () => lotsApi.get(id),
+    enabled: !!id,
+  })
+}
+
+export function useLotStatusCounts() {
+  return useQuery({
+    queryKey: lotKeys.statusCounts(),
+    queryFn: () => lotsApi.getStatusCounts(),
+  })
+}
+
+export function useCreateLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: CreateLotData) => lotsApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}
+
+export function useUpdateLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: UpdateLotData }) =>
+      lotsApi.update(id, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
+    },
+  })
+}
+
+export function useUpdateLotStatus() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, status }: { id: number; status: LotStatus }) =>
+      lotsApi.updateStatus(id, status),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}
+
+export function useDeleteLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => lotsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}

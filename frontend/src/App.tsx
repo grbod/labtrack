@@ -12,6 +12,7 @@ import { CreateSamplePage } from "@/pages/CreateSample"
 import { ImportResultsPage } from "@/pages/ImportResults"
 import { ApprovalsPage } from "@/pages/Approvals"
 import { PublishPage } from "@/pages/Publish"
+import { GridShowcasePage } from "@/pages/GridShowcase"
 
 // Create a client
 const queryClient = new QueryClient({
@@ -22,16 +23,6 @@ const queryClient = new QueryClient({
     },
   },
 })
-
-// Placeholder pages for routes not yet implemented
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-64">
-      <h1 className="text-2xl font-bold mb-2">{title}</h1>
-      <p className="text-muted-foreground">Coming soon...</p>
-    </div>
-  )
-}
 
 function AppRoutes() {
   const { checkAuth, isAuthenticated } = useAuthStore()
@@ -59,6 +50,7 @@ function AppRoutes() {
         <Route path="/import" element={<ImportResultsPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/publish" element={<PublishPage />} />
+        <Route path="/grid-showcase" element={<GridShowcasePage />} />
       </Route>
 
       {/* Catch all */}

@@ -9,9 +9,17 @@ from app.models.enums import UserRole
 
 
 def check_authentication() -> bool:
-    """Check if user is authenticated."""
-    # Streamlit's session_state persists across reruns/refreshes
-    return st.session_state.get("authenticated", False)
+    """Check if user is authenticated - bypassed for development."""
+    if not st.session_state.get("authenticated", False):
+        # Auto-authenticate with admin user
+        st.session_state.authenticated = True
+        st.session_state.user = {
+            "id": 1,
+            "username": "admin",
+            "email": "admin@example.com",
+            "role": UserRole.ADMIN,
+        }
+    return True
 
 
 def login_page():

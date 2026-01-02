@@ -40,9 +40,24 @@ export interface Product {
   display_name: string
   serving_size: number | null
   expiry_duration_months: number
-  is_active: boolean
   created_at: string
   updated_at: string | null
+}
+
+// Product test specification
+export interface ProductTestSpecification {
+  id: number
+  lab_test_type_id: number
+  test_name: string
+  test_category: string | null
+  test_method: string | null
+  test_unit: string | null
+  specification: string
+  is_required: boolean
+}
+
+export interface ProductWithSpecs extends Product {
+  test_specifications: ProductTestSpecification[]
 }
 
 // Lot types

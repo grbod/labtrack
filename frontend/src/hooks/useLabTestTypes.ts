@@ -1,5 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { labTestTypesApi, type LabTestTypeFilters, type CreateLabTestTypeData, type UpdateLabTestTypeData } from "@/api/labTestTypes"
+import {
+  labTestTypesApi,
+  type LabTestTypeFilters,
+  type CreateLabTestTypeData,
+  type UpdateLabTestTypeData,
+  type BulkImportLabTestTypeRow,
+} from "@/api/labTestTypes"
 
 export const labTestTypeKeys = {
   all: ["labTestTypes"] as const,
@@ -63,6 +69,18 @@ export function useDeleteLabTestType() {
 
   return useMutation({
     mutationFn: (id: number) => labTestTypesApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: labTestTypeKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })
+    },
+  })
+}
+
+export function useBulkImportLabTestTypes() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (rows: BulkImportLabTestTypeRow[]) => labTestTypesApi.bulkImport(rows),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.lists() })
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })

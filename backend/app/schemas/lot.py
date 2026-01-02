@@ -101,6 +101,12 @@ class SublotCreate(SublotBase):
     pass
 
 
+class SublotBulkCreate(BaseModel):
+    """Schema for creating multiple sublots at once."""
+
+    sublots: List[SublotCreate] = Field(..., min_length=1)
+
+
 class SublotResponse(SublotBase):
     """Sublot response schema."""
 

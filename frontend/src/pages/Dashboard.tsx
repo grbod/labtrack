@@ -4,12 +4,11 @@ import {
   TestTube,
   CheckSquare,
   FileText,
-  TrendingUp,
-  Clock,
+  ArrowRight,
   FlaskConical,
   Loader2,
+  TrendingUp,
 } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 import { useProducts } from "@/hooks/useProducts"
 import { useLots, useLotStatusCounts } from "@/hooks/useLots"
@@ -18,33 +17,32 @@ import { usePendingReviewCount } from "@/hooks/useTestResults"
 interface StatCardProps {
   title: string
   value: string | number
-  description?: string
+  subtitle?: string
   icon: React.ReactNode
+  iconBg: string
   isLoading?: boolean
 }
 
-function StatCard({ title, value, description, icon, isLoading }: StatCardProps) {
+function StatCard({ title, value, subtitle, icon, iconBg, isLoading }: StatCardProps) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
-        <div className="text-muted-foreground">{icon}</div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        ) : (
-          <>
-            <div className="text-2xl font-bold">{value}</div>
-            {description && (
-              <p className="text-xs text-muted-foreground">{description}</p>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-slate-200/60 bg-white p-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.05)] transition-shadow duration-200">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[13px] font-medium text-slate-500 tracking-wide">{title}</p>
+          {isLoading ? (
+            <Loader2 className="mt-3 h-7 w-7 animate-spin text-slate-300" />
+          ) : (
+            <p className="mt-2 text-[32px] font-bold text-slate-900 leading-none tracking-tight">{value}</p>
+          )}
+          {subtitle && !isLoading && (
+            <p className="mt-1.5 text-[13px] text-slate-500">{subtitle}</p>
+          )}
+        </div>
+        <div className={`rounded-xl ${iconBg} p-3 shadow-sm`}>
+          {icon}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -58,130 +56,176 @@ export function DashboardPage() {
   const activeSamples = (statusCounts?.pending ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Overview of your COA management system
+        <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Dashboard</h1>
+        <p className="mt-1.5 text-[15px] text-slate-500">
+          Overview of your quality control workflow
         </p>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Total Products"
+          title="Products"
           value={productsData?.total ?? 0}
-          description="Active in catalog"
-          icon={<Package className="h-4 w-4" />}
+          subtitle="In catalog"
+          icon={<Package className="h-5 w-5 text-blue-600" />}
+          iconBg="bg-blue-50"
           isLoading={productsLoading}
         />
         <StatCard
           title="Active Samples"
           value={activeSamples}
-          description="In progress"
-          icon={<TestTube className="h-4 w-4" />}
+          subtitle="In progress"
+          icon={<TestTube className="h-5 w-5 text-violet-600" />}
+          iconBg="bg-violet-50"
           isLoading={statusLoading}
         />
         <StatCard
-          title="Pending Approvals"
+          title="Pending Review"
           value={pendingApprovals}
-          description="Awaiting review"
-          icon={<CheckSquare className="h-4 w-4" />}
+          subtitle="Awaiting approval"
+          icon={<CheckSquare className="h-5 w-5 text-amber-600" />}
+          iconBg="bg-amber-50"
           isLoading={pendingLoading}
         />
         <StatCard
           title="Ready to Publish"
           value={statusCounts?.approved ?? 0}
-          description="Approved lots"
-          icon={<FileText className="h-4 w-4" />}
+          subtitle="Approved lots"
+          icon={<FileText className="h-5 w-5 text-emerald-600" />}
+          iconBg="bg-emerald-50"
           isLoading={statusLoading}
         />
       </div>
 
-      {/* Quick Actions & Recent Activity */}
-      <div className="grid gap-4 md:grid-cols-2">
+      {/* Two Column Layout */}
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2">
+        <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-[15px] font-semibold text-slate-900">Quick Actions</h2>
+          </div>
+          <div className="divide-y divide-slate-100">
             <Link
               to="/samples"
-              className="flex items-center gap-3 rounded-md border p-3 hover:bg-accent transition-colors"
+              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50/80 transition-colors group"
             >
-              <TestTube className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium text-sm">Create New Sample</p>
-                <p className="text-xs text-muted-foreground">Start a new lot submission</p>
+              <div className="flex items-center gap-4">
+                <div className="rounded-xl bg-blue-50 p-2.5 shadow-sm group-hover:shadow transition-shadow">
+                  <TestTube className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900 text-[14px]">Create New Sample</p>
+                  <p className="text-[13px] text-slate-500 mt-0.5">Start a new lot submission</p>
+                </div>
               </div>
+              <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />
             </Link>
             <Link
               to="/import"
-              className="flex items-center gap-3 rounded-md border p-3 hover:bg-accent transition-colors"
+              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50/80 transition-colors group"
             >
-              <TrendingUp className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium text-sm">Import Results</p>
-                <p className="text-xs text-muted-foreground">Upload PDF or enter manually</p>
+              <div className="flex items-center gap-4">
+                <div className="rounded-xl bg-emerald-50 p-2.5 shadow-sm group-hover:shadow transition-shadow">
+                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900 text-[14px]">Import Test Results</p>
+                  <p className="text-[13px] text-slate-500 mt-0.5">Upload PDF or enter manually</p>
+                </div>
               </div>
+              <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />
             </Link>
             <Link
               to="/approvals"
-              className="flex items-center gap-3 rounded-md border p-3 hover:bg-accent transition-colors"
+              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50/80 transition-colors group"
             >
-              <CheckSquare className="h-5 w-5 text-primary" />
-              <div>
-                <p className="font-medium text-sm">Review Approvals</p>
-                <p className="text-xs text-muted-foreground">{pendingApprovals} pending</p>
+              <div className="flex items-center gap-4">
+                <div className="rounded-xl bg-amber-50 p-2.5 shadow-sm group-hover:shadow transition-shadow">
+                  <CheckSquare className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900 text-[14px]">Review Approvals</p>
+                  <p className="text-[13px] text-slate-500 mt-0.5">{pendingApprovals} items pending review</p>
+                </div>
               </div>
+              <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />
             </Link>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Recent Lots */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Lots</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-[15px] font-semibold text-slate-900">Recent Lots</h2>
+          </div>
+          <div className="p-5">
             {lotsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
               </div>
             ) : lotsData?.items.length === 0 ? (
-              <p className="text-center text-muted-foreground py-4">
-                No lots yet. <Link to="/samples" className="text-primary hover:underline">Create one</Link>
-              </p>
+              <div className="py-10 text-center">
+                <div className="mx-auto w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
+                  <FlaskConical className="h-7 w-7 text-slate-400" />
+                </div>
+                <p className="mt-4 text-[14px] font-medium text-slate-600">No lots created yet</p>
+                <p className="mt-1 text-[13px] text-slate-500">Get started by creating your first sample</p>
+                <Link
+                  to="/samples"
+                  className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                >
+                  Create your first sample
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {lotsData?.items.slice(0, 5).map((lot) => (
-                  <div key={lot.id} className="flex items-center justify-between">
+                  <div
+                    key={lot.id}
+                    className="flex items-center justify-between rounded-lg border border-slate-100 p-3.5 hover:border-slate-200 hover:bg-slate-50/50 transition-all cursor-pointer"
+                  >
                     <div className="flex items-center gap-3">
-                      <FlaskConical className="h-4 w-4 text-muted-foreground" />
+                      <div className="rounded-lg bg-slate-100 p-2">
+                        <FlaskConical className="h-4 w-4 text-slate-500" />
+                      </div>
                       <div>
-                        <p className="text-sm font-mono">{lot.reference_number}</p>
-                        <p className="text-xs text-muted-foreground">{lot.lot_number}</p>
+                        <p className="text-[13px] font-semibold text-slate-900 font-mono tracking-wide">
+                          {lot.reference_number}
+                        </p>
+                        <p className="text-[12px] text-slate-500 mt-0.5">{lot.lot_number}</p>
                       </div>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      lot.status === "PENDING"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : lot.status === "APPROVED"
-                        ? "bg-green-100 text-green-800"
-                        : lot.status === "RELEASED"
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
-                      {lot.status.toLowerCase()}
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
+                        lot.status === "PENDING"
+                          ? "bg-amber-100 text-amber-700"
+                          : lot.status === "APPROVED"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : lot.status === "RELEASED"
+                          ? "bg-blue-100 text-blue-700"
+                          : lot.status === "REJECTED"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {lot.status.charAt(0) + lot.status.slice(1).toLowerCase()}
                     </span>
                   </div>
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Git Hash - Bottom Right */}
+      <div className="fixed bottom-4 right-4 text-[11px] text-slate-400 font-mono">
+        {__GIT_HASH__}
       </div>
     </div>
   )

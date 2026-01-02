@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2 } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, Package, ArrowRight, FlaskConical, Check, X, ChevronDown } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,10 +23,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { ProductBulkImport } from "@/components/bulk-import/ProductBulkImport"
 
-import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct } from "@/hooks/useProducts"
-import type { Product } from "@/types"
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useDeleteProduct,
+  useProductTestSpecs,
+  useCreateTestSpec,
+  useUpdateTestSpec,
+  useDeleteTestSpec,
+} from "@/hooks/useProducts"
+import { useLabTestTypes } from "@/hooks/useLabTestTypes"
+import type { Product, ProductTestSpecification, LabTestType } from "@/types"
 import type { CreateProductData } from "@/api/products"
 
 const productSchema = z.object({
@@ -46,11 +61,29 @@ export function ProductsPage() {
   const [search, setSearch] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false)
+
+  // Test specs dialog state
+  const [isTestSpecsDialogOpen, setIsTestSpecsDialogOpen] = useState(false)
+  const [selectedProductForSpecs, setSelectedProductForSpecs] = useState<Product | null>(null)
+  const [isAddTestDialogOpen, setIsAddTestDialogOpen] = useState(false)
+  const [selectedTestType, setSelectedTestType] = useState<LabTestType | null>(null)
+  const [testSpecification, setTestSpecification] = useState("")
+  const [isRequired, setIsRequired] = useState(true)
+  const [isEditTestDialogOpen, setIsEditTestDialogOpen] = useState(false)
+  const [selectedTestSpec, setSelectedTestSpec] = useState<ProductTestSpecification | null>(null)
 
   const { data, isLoading } = useProducts({ page, page_size: 50, search: search || undefined })
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
+
+  // Test specs hooks
+  const { data: testSpecs } = useProductTestSpecs(selectedProductForSpecs?.id ?? 0)
+  const { data: labTestTypes } = useLabTestTypes({ page_size: 100 })
+  const createTestSpecMutation = useCreateTestSpec()
+  const updateTestSpecMutation = useUpdateTestSpec()
+  const deleteTestSpecMutation = useDeleteTestSpec()
 
   const form = useForm<ProductForm>({
     resolver: zodResolver(productSchema),
@@ -119,241 +152,698 @@ export function ProductsPage() {
     }
   }
 
+  const openTestSpecsDialog = (product: Product) => {
+    setSelectedProductForSpecs(product)
+    setIsTestSpecsDialogOpen(true)
+  }
+
+  const openAddTestDialog = () => {
+    setSelectedTestType(null)
+    setTestSpecification("")
+    setIsRequired(true)
+    setIsAddTestDialogOpen(true)
+  }
+
+  const handleAddTestType = (labTest: LabTestType) => {
+    setSelectedTestType(labTest)
+    setTestSpecification(labTest.default_specification || "")
+  }
+
+  const handleCreateTestSpec = async () => {
+    if (!selectedProductForSpecs || !selectedTestType) return
+
+    try {
+      await createTestSpecMutation.mutateAsync({
+        productId: selectedProductForSpecs.id,
+        data: {
+          lab_test_type_id: selectedTestType.id,
+          specification: testSpecification,
+          is_required: isRequired,
+        },
+      })
+      setIsAddTestDialogOpen(false)
+      setSelectedTestType(null)
+      setTestSpecification("")
+    } catch {
+      // Error handled by mutation
+    }
+  }
+
+  const handleDeleteTestSpec = async (specId: number) => {
+    if (!selectedProductForSpecs) return
+    if (confirm("Are you sure you want to remove this test specification?")) {
+      await deleteTestSpecMutation.mutateAsync({
+        productId: selectedProductForSpecs.id,
+        specId,
+      })
+    }
+  }
+
+  const handleToggleRequired = async (spec: ProductTestSpecification) => {
+    if (!selectedProductForSpecs) return
+    await updateTestSpecMutation.mutateAsync({
+      productId: selectedProductForSpecs.id,
+      specId: spec.id,
+      data: { is_required: !spec.is_required },
+    })
+  }
+
+  const openEditTestDialog = (spec: ProductTestSpecification) => {
+    setSelectedTestSpec(spec)
+    setTestSpecification(spec.specification)
+    setIsRequired(spec.is_required)
+    setIsEditTestDialogOpen(true)
+  }
+
+  const handleUpdateTestSpec = async () => {
+    if (!selectedProductForSpecs || !selectedTestSpec) return
+
+    try {
+      await updateTestSpecMutation.mutateAsync({
+        productId: selectedProductForSpecs.id,
+        specId: selectedTestSpec.id,
+        data: {
+          specification: testSpecification,
+          is_required: isRequired,
+        },
+      })
+      setIsEditTestDialogOpen(false)
+      setSelectedTestSpec(null)
+      setTestSpecification("")
+    } catch {
+      // Error handled by mutation
+    }
+  }
+
   const isMutating = createMutation.isPending || updateMutation.isPending
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Products</h1>
-          <p className="text-muted-foreground text-sm">Manage your product catalog</p>
+          <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Products</h1>
+          <p className="mt-1.5 text-[15px] text-slate-500">Manage your product catalog</p>
         </div>
-        <Button onClick={openCreateDialog}>
+        <Button
+          onClick={openCreateDialog}
+          className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10 px-4"
+        >
           <Plus className="mr-2 h-4 w-4" />
           Add Product
         </Button>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="flex gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search products..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value)
-                  setPage(1)
-                }}
-                className="pl-8"
-              />
-            </div>
+      {/* Search */}
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search products..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
+            className="pl-10 h-11 bg-white border-slate-200 rounded-lg shadow-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-shadow"
+          />
+        </div>
+        <span className="text-[14px] font-medium text-slate-500">
+          {data?.total ?? 0} products
+        </span>
+      </div>
+
+      {/* Bulk Import */}
+      <Collapsible open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full justify-between h-11 bg-white hover:bg-slate-50"
+          >
+            <span className="font-semibold text-slate-700">📊 Bulk Import Products</span>
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${
+                isBulkImportOpen ? "rotate-180" : ""
+              }`}
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-4">
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
+            <ProductBulkImport />
           </div>
-        </CardContent>
-      </Card>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {data?.total ?? 0} Products
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
+          </div>
+        ) : data?.items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <Package className="h-8 w-8 text-slate-400" />
             </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Brand</TableHead>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>Flavor</TableHead>
-                  <TableHead>Size</TableHead>
-                  <TableHead>Serving</TableHead>
-                  <TableHead>Expiry</TableHead>
-                  <TableHead className="w-[80px]">Actions</TableHead>
+            <p className="mt-5 text-[15px] font-medium text-slate-600">No products found</p>
+            <p className="mt-1 text-[14px] text-slate-500">Get started by adding your first product</p>
+            <button
+              onClick={openCreateDialog}
+              className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+            >
+              Add your first product
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Brand</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Product Name</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Flavor</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Size</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Serving</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Expiry</TableHead>
+                <TableHead className="w-[120px] font-semibold text-slate-600 text-[13px] tracking-wide text-center">Specifications</TableHead>
+                <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.items.map((product) => (
+                <TableRow key={product.id} className="hover:bg-slate-50/50 transition-colors">
+                  <TableCell className="font-semibold text-slate-900 text-[14px]">{product.brand}</TableCell>
+                  <TableCell className="text-slate-700 text-[14px]">{product.product_name}</TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">{product.flavor || "-"}</TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">{product.size || "-"}</TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">
+                    {product.serving_size ? `${product.serving_size}g` : "-"}
+                  </TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">
+                    {product.expiry_duration_months} mo
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openTestSpecsDialog(product)}
+                      className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Test Specifications"
+                    >
+                      <FlaskConical className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(product)}
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(product.id)}
+                        disabled={deleteMutation.isPending}
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.brand}</TableCell>
-                    <TableCell>{product.product_name}</TableCell>
-                    <TableCell className="text-muted-foreground">{product.flavor || "-"}</TableCell>
-                    <TableCell className="text-muted-foreground">{product.size || "-"}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {product.serving_size ? `${product.serving_size}g` : "-"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {product.expiry_duration_months}mo
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => openEditDialog(product)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleDelete(product.id)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {data?.items.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      No products found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
-          {/* Pagination */}
-          {data && data.total_pages > 1 && (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-sm text-muted-foreground">
-                Page {data.page} of {data.total_pages}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
-                  disabled={page === data.total_pages}
-                >
-                  Next
-                </Button>
-              </div>
+        {/* Pagination */}
+        {data && data.total_pages > 1 && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+            <p className="text-[14px] text-slate-500">
+              Page {data.page} of {data.total_pages}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="border-slate-200 hover:bg-slate-50 h-9"
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
+                disabled={page === data.total_pages}
+                className="border-slate-200 hover:bg-slate-50 h-9"
+              >
+                Next
+              </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">
               {editingProduct ? "Edit Product" : "Add Product"}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-[14px] text-slate-500">
               {editingProduct
                 ? "Update product information"
                 : "Add a new product to the catalog"}
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="brand">Brand *</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="brand" className="text-[13px] font-semibold text-slate-700">Brand *</Label>
                 <Input
                   id="brand"
                   {...register("brand")}
                   aria-invalid={!!errors.brand}
+                  className="border-slate-200 h-10"
                 />
                 {errors.brand && (
-                  <p className="text-sm text-destructive">{errors.brand.message}</p>
+                  <p className="text-[13px] text-red-600">{errors.brand.message}</p>
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="product_name">Product Name *</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="product_name" className="text-[13px] font-semibold text-slate-700">Product Name *</Label>
                 <Input
                   id="product_name"
                   {...register("product_name")}
                   aria-invalid={!!errors.product_name}
+                  className="border-slate-200 h-10"
                 />
                 {errors.product_name && (
-                  <p className="text-sm text-destructive">{errors.product_name.message}</p>
+                  <p className="text-[13px] text-red-600">{errors.product_name.message}</p>
                 )}
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="flavor">Flavor</Label>
-                <Input id="flavor" {...register("flavor")} />
+              <div className="space-y-1.5">
+                <Label htmlFor="flavor" className="text-[13px] font-semibold text-slate-700">Flavor</Label>
+                <Input id="flavor" {...register("flavor")} className="border-slate-200 h-10" />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="size">Size</Label>
-                <Input id="size" {...register("size")} placeholder="e.g., 2.5 lbs" />
+              <div className="space-y-1.5">
+                <Label htmlFor="size" className="text-[13px] font-semibold text-slate-700">Size</Label>
+                <Input id="size" {...register("size")} placeholder="e.g., 2.5 lbs" className="border-slate-200 h-10" />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="display_name">Display Name *</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="display_name" className="text-[13px] font-semibold text-slate-700">Display Name *</Label>
               <Input
                 id="display_name"
                 {...register("display_name")}
                 aria-invalid={!!errors.display_name}
+                className="border-slate-200 h-10"
               />
               {errors.display_name && (
-                <p className="text-sm text-destructive">{errors.display_name.message}</p>
+                <p className="text-[13px] text-red-600">{errors.display_name.message}</p>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="serving_size">Serving Size (g)</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="serving_size" className="text-[13px] font-semibold text-slate-700">Serving Size (g)</Label>
                 <Input
                   id="serving_size"
                   type="number"
                   step="0.01"
                   {...register("serving_size")}
+                  className="border-slate-200 h-10"
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="expiry_duration_months">Expiry (months)</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="expiry_duration_months" className="text-[13px] font-semibold text-slate-700">Expiry (months)</Label>
                 <Input
                   id="expiry_duration_months"
                   type="number"
                   {...register("expiry_duration_months")}
+                  className="border-slate-200 h-10"
                 />
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="pt-4">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setIsDialogOpen(false)}
+                className="border-slate-200 h-10"
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isMutating}>
+              <Button
+                type="submit"
+                disabled={isMutating}
+                className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
+              >
                 {isMutating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {editingProduct ? "Save Changes" : "Add Product"}
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Specifications Dialog */}
+      <Dialog open={isTestSpecsDialogOpen} onOpenChange={setIsTestSpecsDialogOpen}>
+        <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">Test Specifications</DialogTitle>
+            <DialogDescription className="text-[14px] text-slate-500">
+              {selectedProductForSpecs?.display_name} - Configure required and optional tests
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[13px] text-slate-600">
+                {testSpecs?.length ?? 0} test{(testSpecs?.length ?? 0) !== 1 ? "s" : ""} configured
+              </p>
+              <Button
+                size="sm"
+                onClick={openAddTestDialog}
+                className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-9"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Test
+              </Button>
+            </div>
+
+            {testSpecs && testSpecs.length > 0 ? (
+              <div className="rounded-xl border border-slate-200/60 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
+                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Test Name</TableHead>
+                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Category</TableHead>
+                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Specification</TableHead>
+                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Required</TableHead>
+                      <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {testSpecs.map((spec) => (
+                      <TableRow key={spec.id} className="hover:bg-slate-50/50 transition-colors">
+                        <TableCell>
+                          <div>
+                            <p className="font-semibold text-slate-900 text-[14px]">{spec.test_name}</p>
+                            {spec.test_method && (
+                              <p className="text-[11px] text-slate-400 mt-0.5">{spec.test_method}</p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide bg-blue-100 text-blue-700">
+                            {spec.test_category}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-[13px] text-slate-700 font-mono">
+                            {spec.specification}
+                            {spec.test_unit && <span className="text-slate-500 ml-1">{spec.test_unit}</span>}
+                          </code>
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => handleToggleRequired(spec)}
+                            className="inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors"
+                          >
+                            {spec.is_required ? (
+                              <>
+                                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                <span className="text-emerald-700">Required</span>
+                              </>
+                            ) : (
+                              <>
+                                <X className="h-3.5 w-3.5 text-slate-400" />
+                                <span className="text-slate-500">Optional</span>
+                              </>
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditTestDialog(spec)}
+                              disabled={updateTestSpecMutation.isPending}
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit specification"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteTestSpec(spec.id)}
+                              disabled={deleteTestSpecMutation.isPending}
+                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete specification"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center py-10 rounded-xl border border-slate-200/60 bg-slate-50/30">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center">
+                  <FlaskConical className="h-7 w-7 text-slate-400" />
+                </div>
+                <p className="mt-4 text-[14px] font-medium text-slate-600">No test specifications configured</p>
+                <p className="mt-1 text-[13px] text-slate-500">Add tests from the catalog to define quality requirements</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsTestSpecsDialogOpen(false)
+                setSelectedProductForSpecs(null)
+              }}
+              className="border-slate-200 h-10"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Test Type Dialog */}
+      <Dialog open={isAddTestDialogOpen} onOpenChange={setIsAddTestDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">Add Test Specification</DialogTitle>
+            <DialogDescription className="text-[14px] text-slate-500">
+              Select a test type and configure the specification
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            {!selectedTestType ? (
+              <>
+                <div className="max-h-[350px] overflow-y-auto space-y-1">
+                  {labTestTypes?.items.map((labTest) => {
+                    const alreadyAdded = testSpecs?.some(s => s.lab_test_type_id === labTest.id)
+                    return (
+                      <button
+                        key={labTest.id}
+                        type="button"
+                        onClick={() => handleAddTestType(labTest)}
+                        disabled={alreadyAdded}
+                        className="w-full text-left p-3.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-900 text-[14px]">{labTest.test_name}</p>
+                            <p className="text-[12px] text-slate-500 mt-0.5">
+                              {labTest.test_category}
+                              {labTest.default_unit && ` - ${labTest.default_unit}`}
+                            </p>
+                          </div>
+                          {alreadyAdded && (
+                            <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-500 font-semibold">
+                              Added
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-blue-50/50 border border-blue-200/60 p-4">
+                    <p className="font-semibold text-slate-900 text-[14px]">{selectedTestType.test_name}</p>
+                    <p className="text-[12px] text-slate-500 mt-0.5">{selectedTestType.test_category}</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="specification" className="text-[13px] font-semibold text-slate-700">
+                      Specification *
+                    </Label>
+                    <Input
+                      id="specification"
+                      value={testSpecification}
+                      onChange={(e) => setTestSpecification(e.target.value)}
+                      placeholder="e.g., < 10,000 CFU/g, Negative"
+                      className="border-slate-200 h-10"
+                    />
+                    <p className="text-[11px] text-slate-500">
+                      Default: {selectedTestType.default_specification || "Not set"}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      id="is_required"
+                      type="checkbox"
+                      checked={isRequired}
+                      onChange={(e) => setIsRequired(e.target.checked)}
+                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                    />
+                    <Label htmlFor="is_required" className="font-normal text-[14px] text-slate-700">
+                      Mark as required test
+                    </Label>
+                  </div>
+                </div>
+
+                <DialogFooter className="flex gap-2 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSelectedTestType(null)}
+                    className="border-slate-200 h-10"
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleCreateTestSpec}
+                    disabled={!testSpecification || createTestSpecMutation.isPending}
+                    className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
+                  >
+                    {createTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Add Specification
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+
+            {!selectedTestType && (
+              <DialogFooter className="pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddTestDialogOpen(false)}
+                  className="border-slate-200 h-10"
+                >
+                  Cancel
+                </Button>
+              </DialogFooter>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Test Specification Dialog */}
+      <Dialog open={isEditTestDialogOpen} onOpenChange={setIsEditTestDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">Edit Test Specification</DialogTitle>
+            <DialogDescription className="text-[14px] text-slate-500">
+              Update the specification and requirements
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedTestSpec && (
+            <div className="space-y-4 mt-2">
+              <div className="rounded-xl bg-blue-50/50 border border-blue-200/60 p-4">
+                <p className="font-semibold text-slate-900 text-[14px]">{selectedTestSpec.test_name}</p>
+                <p className="text-[12px] text-slate-500 mt-0.5">{selectedTestSpec.test_category}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-specification" className="text-[13px] font-semibold text-slate-700">
+                  Specification *
+                </Label>
+                <Input
+                  id="edit-specification"
+                  value={testSpecification}
+                  onChange={(e) => setTestSpecification(e.target.value)}
+                  placeholder="e.g., < 10,000 CFU/g, Negative"
+                  className="border-slate-200 h-10"
+                />
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <input
+                  id="edit-is-required"
+                  type="checkbox"
+                  checked={isRequired}
+                  onChange={(e) => setIsRequired(e.target.checked)}
+                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                />
+                <Label htmlFor="edit-is-required" className="font-normal text-[14px] text-slate-700">
+                  Mark as required test
+                </Label>
+              </div>
+
+              <DialogFooter className="flex gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditTestDialogOpen(false)
+                    setSelectedTestSpec(null)
+                    setTestSpecification("")
+                  }}
+                  className="border-slate-200 h-10"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleUpdateTestSpec}
+                  disabled={!testSpecification || updateTestSpecMutation.isPending}
+                  className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
+                >
+                  {updateTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Changes
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

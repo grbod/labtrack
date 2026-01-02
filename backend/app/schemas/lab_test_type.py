@@ -70,3 +70,24 @@ class LabTestTypeCategoryCount(BaseModel):
 
     category: str
     count: int
+
+
+class LabTestTypeBulkImportRow(BaseModel):
+    """Schema for a single row in bulk import."""
+
+    test_name: str
+    test_category: str
+    default_unit: Optional[str] = None
+    description: Optional[str] = None
+    test_method: Optional[str] = None
+    abbreviations: Optional[str] = None
+    default_specification: Optional[str] = None
+
+
+class LabTestTypeBulkImportResult(BaseModel):
+    """Result of bulk import operation."""
+
+    total_rows: int
+    imported: int
+    skipped: int
+    errors: List[str]

@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical, ArrowRight, ChevronDown } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,7 +23,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { LabTestTypeBulkImport } from "@/components/bulk-import/LabTestTypeBulkImport"
 
 import {
   useLabTestTypes,
@@ -35,7 +40,6 @@ import {
 import type { LabTestType } from "@/types"
 import type { CreateLabTestTypeData } from "@/api/labTestTypes"
 
-// Common lab test categories
 const CATEGORIES = [
   "Microbiological",
   "Heavy Metals",
@@ -65,6 +69,7 @@ export function LabTestTypesPage() {
   const [categoryFilter, setCategoryFilter] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingType, setEditingType] = useState<LabTestType | null>(null)
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false)
 
   const { data, isLoading } = useLabTestTypes({
     page,
@@ -82,8 +87,7 @@ export function LabTestTypesPage() {
     defaultValues: {},
   })
 
-  const { register, handleSubmit, reset, formState: { errors }, setValue, watch } = form
-  const watchedCategory = watch("test_category")
+  const { register, handleSubmit, reset, formState: { errors } } = form
 
   const openCreateDialog = () => {
     setEditingType(null)
@@ -148,36 +152,38 @@ export function LabTestTypesPage() {
 
   const isMutating = createMutation.isPending || updateMutation.isPending
 
-  // Get category badge color based on category
   const getCategoryColor = (category: string) => {
     const colors: Record<string, string> = {
-      "Microbiological": "bg-green-100 text-green-800",
-      "Heavy Metals": "bg-red-100 text-red-800",
-      "Pesticides": "bg-orange-100 text-orange-800",
-      "Nutritional": "bg-blue-100 text-blue-800",
-      "Physical": "bg-purple-100 text-purple-800",
-      "Chemical": "bg-yellow-100 text-yellow-800",
-      "Allergens": "bg-pink-100 text-pink-800",
-      "Organoleptic": "bg-teal-100 text-teal-800",
+      "Microbiological": "bg-emerald-100 text-emerald-700",
+      "Heavy Metals": "bg-red-100 text-red-700",
+      "Pesticides": "bg-orange-100 text-orange-700",
+      "Nutritional": "bg-blue-100 text-blue-700",
+      "Physical": "bg-violet-100 text-violet-700",
+      "Chemical": "bg-amber-100 text-amber-700",
+      "Allergens": "bg-pink-100 text-pink-700",
+      "Organoleptic": "bg-teal-100 text-teal-700",
     }
-    return colors[category] || "bg-gray-100 text-gray-800"
+    return colors[category] || "bg-slate-100 text-slate-600"
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Lab Test Types</h1>
-          <p className="text-muted-foreground text-sm">Manage the catalog of available lab tests</p>
+          <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Lab Test Types</h1>
+          <p className="mt-1.5 text-[15px] text-slate-500">Manage the catalog of available lab tests</p>
         </div>
-        <Button onClick={openCreateDialog}>
+        <Button
+          onClick={openCreateDialog}
+          className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10 px-4"
+        >
           <Plus className="mr-2 h-4 w-4" />
           Add Test Type
         </Button>
       </div>
 
-      {/* Category Summary */}
+      {/* Category Filter */}
       {categories && categories.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <Button
@@ -187,6 +193,7 @@ export function LabTestTypesPage() {
               setCategoryFilter("")
               setPage(1)
             }}
+            className={categoryFilter === "" ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
           >
             All
           </Button>
@@ -199,6 +206,7 @@ export function LabTestTypesPage() {
                 setCategoryFilter(cat.category)
                 setPage(1)
               }}
+              className={categoryFilter === cat.category ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
             >
               {cat.category} ({cat.count})
             </Button>
@@ -206,251 +214,210 @@ export function LabTestTypesPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="flex gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search test types..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value)
-                  setPage(1)
-                }}
-                className="pl-8"
-              />
-            </div>
+      {/* Search */}
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Input
+            placeholder="Search test types..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
+            className="pl-10 h-11 bg-white border-slate-200 rounded-lg shadow-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-shadow"
+          />
+        </div>
+        <span className="text-[14px] font-medium text-slate-500">{data?.total ?? 0} test types</span>
+      </div>
+
+      {/* Bulk Import */}
+      <Collapsible open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full justify-between h-11 bg-white hover:bg-slate-50"
+          >
+            <span className="font-semibold text-slate-700">📊 Bulk Import Lab Test Types</span>
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${
+                isBulkImportOpen ? "rotate-180" : ""
+              }`}
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-4">
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
+            <LabTestTypeBulkImport />
           </div>
-        </CardContent>
-      </Card>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <FlaskConical className="h-4 w-4" />
-            {data?.total ?? 0} Test Types
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
+          </div>
+        ) : data?.items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <FlaskConical className="h-8 w-8 text-slate-400" />
             </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Test Name</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Default Spec</TableHead>
-                  <TableHead className="w-[80px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((testType) => (
-                  <TableRow key={testType.id}>
-                    <TableCell className="font-medium">
-                      <div>
-                        {testType.test_name}
-                        {testType.abbreviations && (
-                          <span className="text-xs text-muted-foreground ml-2">
-                            ({testType.abbreviations})
-                          </span>
-                        )}
-                      </div>
-                      {testType.description && (
-                        <p className="text-xs text-muted-foreground truncate max-w-xs">
-                          {testType.description}
-                        </p>
+            <p className="mt-5 text-[15px] font-medium text-slate-600">No lab test types found</p>
+            <p className="mt-1 text-[14px] text-slate-500">Get started by adding your first test type</p>
+            <button
+              onClick={openCreateDialog}
+              className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+            >
+              Add your first test type
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Test Name</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Category</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Method</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Unit</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Default Spec</TableHead>
+                <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.items.map((testType) => (
+                <TableRow key={testType.id} className="hover:bg-slate-50/50 transition-colors">
+                  <TableCell>
+                    <div>
+                      <span className="font-semibold text-slate-900 text-[14px]">{testType.test_name}</span>
+                      {testType.abbreviations && (
+                        <span className="text-[12px] text-slate-400 ml-2">({testType.abbreviations})</span>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getCategoryColor(testType.test_category)}`}>
-                        {testType.test_category}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {testType.test_method || "-"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {testType.default_unit || "-"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {testType.default_specification || "-"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => openEditDialog(testType)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleDelete(testType.id)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {data?.items.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                      No lab test types found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
+                    </div>
+                    {testType.description && (
+                      <p className="text-[12px] text-slate-500 truncate max-w-xs mt-0.5">{testType.description}</p>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${getCategoryColor(testType.test_category)}`}>
+                      {testType.test_category}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">{testType.test_method || "-"}</TableCell>
+                  <TableCell className="text-slate-500 text-[14px]">{testType.default_unit || "-"}</TableCell>
+                  <TableCell className="text-slate-500 text-[13px]">{testType.default_specification || "-"}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(testType)}
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(testType.id)}
+                        disabled={deleteMutation.isPending}
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
-          {/* Pagination */}
-          {data && data.total_pages > 1 && (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-sm text-muted-foreground">
-                Page {data.page} of {data.total_pages}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
-                  disabled={page === data.total_pages}
-                >
-                  Next
-                </Button>
-              </div>
+        {/* Pagination */}
+        {data && data.total_pages > 1 && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+            <p className="text-[14px] text-slate-500">
+              Page {data.page} of {data.total_pages}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="border-slate-200 hover:bg-slate-50 h-9"
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
+                disabled={page === data.total_pages}
+                className="border-slate-200 hover:bg-slate-50 h-9"
+              >
+                Next
+              </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">
               {editingType ? "Edit Lab Test Type" : "Add Lab Test Type"}
             </DialogTitle>
-            <DialogDescription>
-              {editingType
-                ? "Update lab test type information"
-                : "Add a new lab test type to the catalog"}
+            <DialogDescription className="text-[14px] text-slate-500">
+              {editingType ? "Update lab test type information" : "Add a new lab test type to the catalog"}
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="test_name">Test Name *</Label>
-                <Input
-                  id="test_name"
-                  {...register("test_name")}
-                  placeholder="e.g., Total Plate Count"
-                  aria-invalid={!!errors.test_name}
-                />
-                {errors.test_name && (
-                  <p className="text-sm text-destructive">{errors.test_name.message}</p>
-                )}
+              <div className="space-y-1.5">
+                <Label htmlFor="test_name" className="text-[13px] font-semibold text-slate-700">Test Name *</Label>
+                <Input id="test_name" {...register("test_name")} placeholder="e.g., Total Plate Count" aria-invalid={!!errors.test_name} className="border-slate-200 h-10" />
+                {errors.test_name && <p className="text-[13px] text-red-600">{errors.test_name.message}</p>}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="test_category">Category *</Label>
-                <div className="relative">
-                  <Input
-                    id="test_category"
-                    {...register("test_category")}
-                    placeholder="Select or type..."
-                    list="categories-list"
-                    aria-invalid={!!errors.test_category}
-                  />
-                  <datalist id="categories-list">
-                    {CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat} />
-                    ))}
-                  </datalist>
-                </div>
-                {errors.test_category && (
-                  <p className="text-sm text-destructive">{errors.test_category.message}</p>
-                )}
+              <div className="space-y-1.5">
+                <Label htmlFor="test_category" className="text-[13px] font-semibold text-slate-700">Category *</Label>
+                <Input id="test_category" {...register("test_category")} placeholder="Select or type..." list="categories-list" aria-invalid={!!errors.test_category} className="border-slate-200 h-10" />
+                <datalist id="categories-list">{CATEGORIES.map((cat) => <option key={cat} value={cat} />)}</datalist>
+                {errors.test_category && <p className="text-[13px] text-red-600">{errors.test_category.message}</p>}
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="test_method">Test Method</Label>
-                <Input
-                  id="test_method"
-                  {...register("test_method")}
-                  placeholder="e.g., USP <2021>"
-                />
+              <div className="space-y-1.5">
+                <Label htmlFor="test_method" className="text-[13px] font-semibold text-slate-700">Test Method</Label>
+                <Input id="test_method" {...register("test_method")} placeholder="e.g., USP <2021>" className="border-slate-200 h-10" />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="default_unit">Default Unit</Label>
-                <Input
-                  id="default_unit"
-                  {...register("default_unit")}
-                  placeholder="e.g., CFU/g, ppm"
-                />
+              <div className="space-y-1.5">
+                <Label htmlFor="default_unit" className="text-[13px] font-semibold text-slate-700">Default Unit</Label>
+                <Input id="default_unit" {...register("default_unit")} placeholder="e.g., CFU/g, ppm" className="border-slate-200 h-10" />
               </div>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="default_specification">Default Specification</Label>
-              <Input
-                id="default_specification"
-                {...register("default_specification")}
-                placeholder="e.g., < 10,000 CFU/g"
-              />
+            <div className="space-y-1.5">
+              <Label htmlFor="default_specification" className="text-[13px] font-semibold text-slate-700">Default Specification</Label>
+              <Input id="default_specification" {...register("default_specification")} placeholder="e.g., < 10,000 CFU/g" className="border-slate-200 h-10" />
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="abbreviations">Abbreviations / Aliases</Label>
-              <Input
-                id="abbreviations"
-                {...register("abbreviations")}
-                placeholder="e.g., TPC, APC"
-              />
+            <div className="space-y-1.5">
+              <Label htmlFor="abbreviations" className="text-[13px] font-semibold text-slate-700">Abbreviations / Aliases</Label>
+              <Input id="abbreviations" {...register("abbreviations")} placeholder="e.g., TPC, APC" className="border-slate-200 h-10" />
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Input
-                id="description"
-                {...register("description")}
-                placeholder="Brief description of what this test measures"
-              />
+            <div className="space-y-1.5">
+              <Label htmlFor="description" className="text-[13px] font-semibold text-slate-700">Description</Label>
+              <Input id="description" {...register("description")} placeholder="Brief description" className="border-slate-200 h-10" />
             </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDialogOpen(false)}
-              >
+            <DialogFooter className="pt-4">
+              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="border-slate-200 h-10">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isMutating}>
+              <Button type="submit" disabled={isMutating} className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10">
                 {isMutating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {editingType ? "Save Changes" : "Add Test Type"}
               </Button>

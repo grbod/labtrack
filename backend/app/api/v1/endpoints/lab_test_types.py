@@ -1,6 +1,6 @@
 """Lab Test Type management endpoints."""
 
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func
@@ -13,6 +13,8 @@ from app.schemas.lab_test_type import (
     LabTestTypeResponse,
     LabTestTypeListResponse,
     LabTestTypeCategoryCount,
+    LabTestTypeBulkImportRow,
+    LabTestTypeBulkImportResult,
 )
 
 router = APIRouter()
@@ -207,3 +209,64 @@ async def delete_lab_test_type(
     # Soft delete
     test_type.is_active = False
     db.commit()
+
+
+@router.post("/bulk-import", response_model=LabTestTypeBulkImportResult)
+async def bulk_import_lab_test_types(
+    rows: List[LabTestTypeBulkImportRow],
+    db: DbSession,
+    current_user: AdminUser,
+) -> LabTestTypeBulkImportResult:
+    """Bulk import lab test types (admin only)."""
+    total_rows = len(rows)
+    imported = 0
+    skipped = 0
+    errors = []
+
+    # Get existing test names for duplicate detection
+    existing_names = {
+        t.test_name.lower() for t in db.query(LabTestType.test_name).all()
+    }
+
+    for idx, row in enumerate(rows, start=1):
+        try:
+            # Validate required fields
+            if not row.test_name or not row.test_category:
+                errors.append(f"Row {idx}: Missing required fields")
+                skipped += 1
+                continue
+
+            # Check duplicates
+            if row.test_name.lower() in existing_names:
+                errors.append(f"Row {idx}: Test '{row.test_name}' already exists")
+                skipped += 1
+                continue
+
+            # Create lab test type
+            test_type = LabTestType(
+                test_name=row.test_name,
+                test_category=row.test_category,
+                default_unit=row.default_unit,
+                description=row.description,
+                test_method=row.test_method,
+                abbreviations=row.abbreviations,
+                default_specification=row.default_specification,
+                is_active=True,
+            )
+            db.add(test_type)
+            existing_names.add(row.test_name.lower())
+            imported += 1
+
+        except Exception as e:
+            errors.append(f"Row {idx}: {str(e)}")
+            skipped += 1
+
+    if imported > 0:
+        db.commit()
+
+    return LabTestTypeBulkImportResult(
+        total_rows=total_rows,
+        imported=imported,
+        skipped=skipped,
+        errors=errors,
+    )

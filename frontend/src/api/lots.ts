@@ -32,6 +32,21 @@ export interface UpdateLotData {
   status?: LotStatus
 }
 
+export interface SublotData {
+  sublot_number: string
+  production_date?: string
+  quantity_lbs?: number
+}
+
+export interface Sublot {
+  id: number
+  parent_lot_id: number
+  sublot_number: string
+  production_date?: string
+  quantity_lbs?: number
+  created_at: string
+}
+
 export const lotsApi = {
   list: async (filters: LotFilters = {}): Promise<PaginatedResponse<Lot>> => {
     const params = new URLSearchParams()
@@ -72,5 +87,21 @@ export const lotsApi = {
 
   delete: async (id: number): Promise<void> => {
     await api.delete(`/lots/${id}`)
+  },
+
+  // Sublot operations
+  listSublots: async (lotId: number): Promise<Sublot[]> => {
+    const response = await api.get<Sublot[]>(`/lots/${lotId}/sublots`)
+    return response.data
+  },
+
+  createSublot: async (lotId: number, data: SublotData): Promise<Sublot> => {
+    const response = await api.post<Sublot>(`/lots/${lotId}/sublots`, data)
+    return response.data
+  },
+
+  createSublotsBulk: async (lotId: number, sublots: SublotData[]): Promise<Sublot[]> => {
+    const response = await api.post<Sublot[]>(`/lots/${lotId}/sublots/bulk`, { sublots })
+    return response.data
   },
 }

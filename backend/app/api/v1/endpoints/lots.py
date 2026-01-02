@@ -17,6 +17,7 @@ from app.schemas.lot import (
     LotListResponse,
     ProductInLot,
     SublotCreate,
+    SublotBulkCreate,
     SublotResponse,
     LotStatusUpdate,
 )
@@ -366,3 +367,55 @@ async def create_sublot(
     db.refresh(sublot)
 
     return SublotResponse.model_validate(sublot)
+
+
+@router.post("/{lot_id}/sublots/bulk", response_model=list[SublotResponse], status_code=status.HTTP_201_CREATED)
+async def create_sublots_bulk(
+    lot_id: int,
+    sublots_in: SublotBulkCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[SublotResponse]:
+    """Create multiple sublots for a parent lot in bulk."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    if lot.lot_type != LotType.PARENT_LOT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only parent lots can have sublots",
+        )
+
+    # Check for duplicate sublot numbers
+    sublot_numbers = [s.sublot_number.upper() for s in sublots_in.sublots]
+    existing = db.query(Sublot).filter(Sublot.sublot_number.in_(sublot_numbers)).all()
+    if existing:
+        existing_numbers = [s.sublot_number for s in existing]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Sublot numbers already exist: {', '.join(existing_numbers)}",
+        )
+
+    # Create all sublots
+    created_sublots = []
+    for sublot_in in sublots_in.sublots:
+        sublot = Sublot(
+            parent_lot_id=lot_id,
+            sublot_number=sublot_in.sublot_number.upper(),
+            production_date=sublot_in.production_date,
+            quantity_lbs=sublot_in.quantity_lbs,
+        )
+        db.add(sublot)
+        created_sublots.append(sublot)
+
+    db.commit()
+
+    # Refresh all sublots to get IDs
+    for sublot in created_sublots:
+        db.refresh(sublot)
+
+    return [SublotResponse.model_validate(s) for s in created_sublots]

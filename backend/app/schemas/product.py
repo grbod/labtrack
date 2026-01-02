@@ -44,13 +44,28 @@ class TestSpecificationResponse(BaseModel):
     id: int
     lab_test_type_id: int
     test_name: str
+    test_category: Optional[str] = None
     test_method: Optional[str] = None
-    specification_min: Optional[Decimal] = None
-    specification_max: Optional[Decimal] = None
-    unit: Optional[str] = None
+    test_unit: Optional[str] = None
+    specification: str
     is_required: bool
 
     model_config = {"from_attributes": True}
+
+
+class TestSpecificationCreate(BaseModel):
+    """Schema for creating a test specification."""
+
+    lab_test_type_id: int
+    specification: str = Field(..., min_length=1, max_length=100)
+    is_required: bool = True
+
+
+class TestSpecificationUpdate(BaseModel):
+    """Schema for updating a test specification."""
+
+    specification: Optional[str] = Field(None, min_length=1, max_length=100)
+    is_required: Optional[bool] = None
 
 
 class ProductResponse(BaseModel):
@@ -64,7 +79,6 @@ class ProductResponse(BaseModel):
     display_name: str
     serving_size: Optional[Decimal] = None
     expiry_duration_months: int
-    is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
 

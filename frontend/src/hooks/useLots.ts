@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { lotsApi, type LotFilters, type CreateLotData, type UpdateLotData } from "@/api/lots"
+import { lotsApi, type LotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
 import type { LotStatus } from "@/types"
 
 export const lotKeys = {
@@ -9,6 +9,7 @@ export const lotKeys = {
   details: () => [...lotKeys.all, "detail"] as const,
   detail: (id: number) => [...lotKeys.details(), id] as const,
   statusCounts: () => [...lotKeys.all, "statusCounts"] as const,
+  sublots: (lotId: number) => [...lotKeys.all, "sublots", lotId] as const,
 }
 
 export function useLots(filters: LotFilters = {}) {
@@ -80,6 +81,28 @@ export function useDeleteLot() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}
+
+// Sublot hooks
+export function useSublots(lotId: number) {
+  return useQuery({
+    queryKey: lotKeys.sublots(lotId),
+    queryFn: () => lotsApi.listSublots(lotId),
+    enabled: !!lotId,
+  })
+}
+
+export function useCreateSublotsBulk() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ lotId, sublots }: { lotId: number; sublots: SublotData[] }) =>
+      lotsApi.createSublotsBulk(lotId, sublots),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.sublots(variables.lotId) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
     },
   })
 }

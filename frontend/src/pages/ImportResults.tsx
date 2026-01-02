@@ -10,6 +10,7 @@ import {
   Upload,
   ClipboardList,
   Search,
+  ArrowRight,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
@@ -24,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 import { useLots } from "@/hooks/useLots"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
@@ -69,13 +69,11 @@ export function ImportResultsPage() {
     },
   })
 
-  const { register, handleSubmit, control, setValue, watch, formState: { errors } } = form
+  const { register, handleSubmit, control, setValue, formState: { errors } } = form
   const { fields, append, remove } = useFieldArray({
     control,
     name: "results",
   })
-
-  const watchedResults = watch("results")
 
   const selectLot = (lot: Lot) => {
     setSelectedLot(lot)
@@ -156,178 +154,170 @@ export function ImportResultsPage() {
   )
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-8 max-w-4xl">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Import Results</h1>
-        <p className="text-muted-foreground text-sm">
+        <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Import Results</h1>
+        <p className="mt-1.5 text-[15px] text-slate-500">
           Add lab test results manually or import from PDF
         </p>
       </div>
 
       {/* Import Options */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="border-2 border-dashed cursor-not-allowed opacity-60">
-          <CardContent className="flex flex-col items-center justify-center py-8">
-            <Upload className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="font-medium">Upload PDF</p>
-            <p className="text-xs text-muted-foreground mt-1">Coming soon</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-5">
+        <div className="rounded-xl border-2 border-dashed border-slate-200/80 bg-white p-8 flex flex-col items-center justify-center opacity-50 cursor-not-allowed shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+            <Upload className="h-7 w-7 text-slate-400" />
+          </div>
+          <p className="font-semibold text-slate-700 text-[15px]">Upload PDF</p>
+          <p className="text-[13px] text-slate-400 mt-1">Coming soon</p>
+        </div>
 
-        <Card
-          className={`border-2 cursor-pointer transition-colors ${
-            selectedLot ? "border-primary" : "border-dashed hover:border-primary/50"
+        <div
+          className={`rounded-xl border-2 bg-white p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] ${
+            selectedLot
+              ? "border-slate-900 shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]"
+              : "border-dashed border-slate-200/80 hover:border-slate-400 hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.05)]"
           }`}
           onClick={() => !selectedLot && setIsLotDialogOpen(true)}
         >
-          <CardContent className="flex flex-col items-center justify-center py-8">
-            <ClipboardList className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="font-medium">Manual Entry</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {selectedLot ? `Lot: ${selectedLot.reference_number}` : "Enter results manually"}
-            </p>
-          </CardContent>
-        </Card>
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 transition-colors ${
+            selectedLot ? "bg-slate-900" : "bg-slate-100"
+          }`}>
+            <ClipboardList className={`h-7 w-7 ${selectedLot ? "text-white" : "text-slate-500"}`} />
+          </div>
+          <p className="font-semibold text-slate-700 text-[15px]">Manual Entry</p>
+          <p className="text-[13px] text-slate-500 mt-1">
+            {selectedLot ? `Lot: ${selectedLot.reference_number}` : "Enter results manually"}
+          </p>
+        </div>
       </div>
 
       {/* Manual Entry Form */}
       {selectedLot && (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {/* Selected Lot */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">Selected Lot</CardTitle>
-                  <CardDescription>
-                    {selectedLot.lot_number} ({selectedLot.reference_number})
-                  </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedLot(null)
-                    setValue("lot_id", 0)
-                    setValue("results", [])
-                  }}
-                >
-                  Change Lot
-                </Button>
+          <div className="rounded-xl border border-slate-200/60 bg-white px-6 py-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-slate-900 text-[15px]">Selected Lot</p>
+                <p className="text-[14px] text-slate-500 mt-0.5">
+                  {selectedLot.lot_number} ({selectedLot.reference_number})
+                </p>
               </div>
-            </CardHeader>
-          </Card>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSelectedLot(null)
+                  setValue("lot_id", 0)
+                  setValue("results", [])
+                }}
+                className="border-slate-200 h-9"
+              >
+                Change Lot
+              </Button>
+            </div>
+          </div>
 
           {/* Test Results */}
-          <Card>
-            <CardHeader>
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5" />
-                    Test Results
-                  </CardTitle>
-                  <CardDescription>
-                    Add test results for this lot
-                  </CardDescription>
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-slate-600" />
+                    <h2 className="font-semibold text-slate-900 text-[15px]">Test Results</h2>
+                  </div>
+                  <p className="mt-1 text-[13px] text-slate-500">Add test results for this lot</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={addBlankResult}
-                  >
+                  <Button type="button" variant="outline" size="sm" onClick={addBlankResult} className="border-slate-200 h-9">
                     <Plus className="mr-2 h-4 w-4" />
                     Add Blank
                   </Button>
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    onClick={() => openTestTypeSelector()}
-                  >
+                  <Button type="button" size="sm" onClick={() => openTestTypeSelector()} className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-9">
                     <Plus className="mr-2 h-4 w-4" />
                     From Catalog
                   </Button>
                 </div>
               </div>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div className="p-6">
               {fields.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No test results added yet</p>
-                  <div className="flex gap-2 justify-center mt-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openTestTypeSelector()}
-                    >
-                      Add from catalog
-                    </Button>
+                <div className="text-center py-10">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center">
+                    <FileText className="h-7 w-7 text-slate-400" />
                   </div>
+                  <p className="mt-4 text-[14px] font-medium text-slate-600">No test results added yet</p>
+                  <p className="mt-1 text-[13px] text-slate-500">Add results from the catalog or create blank entries</p>
+                  <button
+                    type="button"
+                    onClick={() => openTestTypeSelector()}
+                    className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    Add from catalog
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {fields.map((field, index) => (
-                    <div
-                      key={field.id}
-                      className="p-4 border rounded-lg space-y-3"
-                    >
+                    <div key={field.id} className="p-4 border border-slate-200/80 rounded-xl bg-slate-50/30 space-y-3 hover:bg-slate-50/50 transition-colors">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Test Type *</Label>
+                          <div className="space-y-1.5">
+                            <Label className="text-[12px] font-semibold text-slate-600">Test Type *</Label>
                             <div className="flex gap-2">
                               <Input
                                 {...register(`results.${index}.test_type`)}
                                 placeholder="e.g., Total Plate Count"
-                                className="flex-1"
+                                className="flex-1 border-slate-200 h-10 bg-white"
                               />
                               <Button
                                 type="button"
                                 variant="ghost"
-                                size="icon-sm"
+                                size="sm"
                                 onClick={() => openTestTypeSelector(index)}
+                                className="h-10 w-10 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"
                               >
                                 <Search className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
 
-                          <div className="space-y-1">
-                            <Label className="text-xs">Result Value</Label>
+                          <div className="space-y-1.5">
+                            <Label className="text-[12px] font-semibold text-slate-600">Result Value</Label>
                             <div className="flex gap-2">
                               <Input
                                 {...register(`results.${index}.result_value`)}
                                 placeholder="e.g., < 10"
-                                className="flex-1"
+                                className="flex-1 border-slate-200 h-10 bg-white"
                               />
                               <Input
                                 {...register(`results.${index}.unit`)}
                                 placeholder="Unit"
-                                className="w-24"
+                                className="w-24 border-slate-200 h-10 bg-white"
                               />
                             </div>
                           </div>
 
-                          <div className="space-y-1">
-                            <Label className="text-xs">Specification</Label>
+                          <div className="space-y-1.5">
+                            <Label className="text-[12px] font-semibold text-slate-600">Specification</Label>
                             <Input
                               {...register(`results.${index}.specification`)}
                               placeholder="e.g., < 10,000 CFU/g"
+                              className="border-slate-200 h-10 bg-white"
                             />
                           </div>
 
-                          <div className="space-y-1">
-                            <Label className="text-xs">Method</Label>
+                          <div className="space-y-1.5">
+                            <Label className="text-[12px] font-semibold text-slate-600">Method</Label>
                             <Input
                               {...register(`results.${index}.method`)}
                               placeholder="e.g., USP <2021>"
+                              className="border-slate-200 h-10 bg-white"
                             />
                           </div>
                         </div>
@@ -335,11 +325,11 @@ export function ImportResultsPage() {
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-sm"
-                          className="ml-2"
+                          size="sm"
+                          className="ml-3 h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           onClick={() => remove(index)}
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
@@ -348,29 +338,24 @@ export function ImportResultsPage() {
               )}
 
               {errors.results && (
-                <p className="text-sm text-destructive mt-2">
+                <p className="text-[13px] text-red-600 mt-3">
                   {errors.results.message || errors.results.root?.message}
                 </p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Submit */}
           <div className="flex gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate("/")}
-            >
+            <Button type="button" variant="outline" onClick={() => navigate("/")} className="border-slate-200 h-10">
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={bulkCreateMutation.isPending || fields.length === 0}
+              className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
             >
-              {bulkCreateMutation.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
+              {bulkCreateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Import {fields.length} Result{fields.length !== 1 ? "s" : ""}
             </Button>
           </div>
@@ -381,59 +366,49 @@ export function ImportResultsPage() {
       <Dialog open={isLotDialogOpen} onOpenChange={setIsLotDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Select Lot</DialogTitle>
-            <DialogDescription>
-              Choose a lot to add test results to
-            </DialogDescription>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">Select Lot</DialogTitle>
+            <DialogDescription className="text-[14px] text-slate-500">Choose a lot to add test results to</DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-4">
+          <div className="space-y-4 mt-2">
             <Input
               placeholder="Search lots..."
               value={lotSearch}
               onChange={(e) => setLotSearch(e.target.value)}
               autoFocus
+              className="border-slate-200 h-11"
             />
-
             <div className="max-h-[300px] overflow-y-auto space-y-1">
               {filteredLots?.map((lot) => (
                 <button
                   key={lot.id}
                   type="button"
                   onClick={() => selectLot(lot)}
-                  className="w-full text-left p-3 rounded hover:bg-muted"
+                  className="w-full text-left p-3.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200"
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium font-mono">{lot.reference_number}</p>
-                      <p className="text-xs text-muted-foreground">{lot.lot_number}</p>
+                      <p className="font-semibold font-mono text-slate-900 text-[14px] tracking-wide">{lot.reference_number}</p>
+                      <p className="text-[12px] text-slate-500 mt-0.5">{lot.lot_number}</p>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
+                    <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold tracking-wide ${
                       lot.status === "PENDING"
-                        ? "bg-yellow-100 text-yellow-800"
+                        ? "bg-amber-100 text-amber-700"
                         : lot.status === "APPROVED"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-800"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-600"
                     }`}>
-                      {lot.status.toLowerCase()}
+                      {lot.status.charAt(0) + lot.status.slice(1).toLowerCase()}
                     </span>
                   </div>
                 </button>
               ))}
               {filteredLots?.length === 0 && (
-                <p className="text-center text-muted-foreground py-4">
-                  No lots found
-                </p>
+                <p className="text-center text-[14px] text-slate-500 py-6">No lots found</p>
               )}
             </div>
           </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsLotDialogOpen(false)}
-            >
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsLotDialogOpen(false)} className="border-slate-200 h-10">
               Cancel
             </Button>
           </DialogFooter>
@@ -444,48 +419,42 @@ export function ImportResultsPage() {
       <Dialog open={isTestTypeDialogOpen} onOpenChange={setIsTestTypeDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Select Test Type</DialogTitle>
-            <DialogDescription>
-              Choose a test type from the catalog
-            </DialogDescription>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">Select Test Type</DialogTitle>
+            <DialogDescription className="text-[14px] text-slate-500">Choose a test type from the catalog</DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-4">
+          <div className="space-y-4 mt-2">
             <Input
               placeholder="Search test types..."
               value={testTypeSearch}
               onChange={(e) => setTestTypeSearch(e.target.value)}
               autoFocus
+              className="border-slate-200 h-11"
             />
-
             <div className="max-h-[300px] overflow-y-auto space-y-1">
               {filteredTestTypes?.map((tt) => (
                 <button
                   key={tt.id}
                   type="button"
                   onClick={() => addTestType(tt)}
-                  className="w-full text-left p-3 rounded hover:bg-muted"
+                  className="w-full text-left p-3.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200"
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">{tt.test_name}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="font-semibold text-slate-900 text-[14px]">{tt.test_name}</p>
+                      <p className="text-[12px] text-slate-500 mt-0.5">
                         {tt.test_category}
-                        {tt.default_unit && ` • ${tt.default_unit}`}
+                        {tt.default_unit && ` - ${tt.default_unit}`}
                       </p>
                     </div>
                   </div>
                 </button>
               ))}
               {filteredTestTypes?.length === 0 && (
-                <p className="text-center text-muted-foreground py-4">
-                  No test types found
-                </p>
+                <p className="text-center text-[14px] text-slate-500 py-6">No test types found</p>
               )}
             </div>
           </div>
-
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             <Button
               type="button"
               variant="outline"
@@ -493,6 +462,7 @@ export function ImportResultsPage() {
                 setIsTestTypeDialogOpen(false)
                 setActiveResultIndex(null)
               }}
+              className="border-slate-200 h-10"
             >
               Cancel
             </Button>

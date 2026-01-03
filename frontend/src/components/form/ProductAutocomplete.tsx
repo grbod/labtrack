@@ -80,7 +80,7 @@ export function ProductAutocomplete({
         onSelect(selectedItem)
       }
     },
-    stateReducer: (state, actionAndChanges) => {
+    stateReducer: (_state, actionAndChanges) => {
       const { changes, type } = actionAndChanges
 
       switch (type) {
@@ -95,7 +95,7 @@ export function ProductAutocomplete({
     },
   })
 
-  const showDropdown = isOpen && localInput && localInput.length >= 2
+  const showDropdown = isOpen && !!localInput && localInput.length >= 2
 
   // Floating UI for dropdown positioning (escapes overflow containers)
   const { refs, floatingStyles } = useFloating({
@@ -168,6 +168,12 @@ export function ProductAutocomplete({
       } else if (e.key === 'Tab' && onNextCell) {
         e.preventDefault()
         onNextCell()
+      } else if (e.key === 'Enter') {
+        // Prevent form submission even when dropdown is closed
+        e.preventDefault()
+        if (onNextCell) {
+          onNextCell()
+        }
       }
     } else if (e.key === 'Escape') {
       closeMenu()

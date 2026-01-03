@@ -2,12 +2,11 @@ import { useState, useCallback, useMemo, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Loader2, Package, Beaker, X, CalendarDays, ArrowRight, Trash2 } from "lucide-react"
+import { Plus, Loader2, Package, Beaker, X, CalendarDays, Trash2, ChevronUp, ChevronDown } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { AgGridReact } from "ag-grid-react"
-import type { ColDef, ICellRendererParams, ValueFormatterParams } from "ag-grid-community"
+import type { ColDef, ICellRendererParams } from "ag-grid-community"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
-import type { ColumnDef } from "@tanstack/react-table"
 import "ag-grid-community/styles/ag-grid.css"
 import "ag-grid-community/styles/ag-theme-alpine.css"
 
@@ -99,6 +98,9 @@ export function CreateSamplePage() {
   const [nextCompositeId, setNextCompositeId] = useState(2)
   const [editingCompositeCell, setEditingCompositeCell] = useState<{ rowId: number; columnId: string } | null>(null)
 
+  // Expiration date nudge factor (in days)
+  const [expiryNudgeDays, setExpiryNudgeDays] = useState(0)
+
   const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
   const { data: lotsData } = useLots({ page: 1, page_size: 10 })
   const createMutation = useCreateLot()
@@ -116,14 +118,17 @@ export function CreateSamplePage() {
   const watchedLotType = watch("lot_type")
   const watchedMfgDate = watch("mfg_date")
 
-  // Helper to calculate expiry date from mfg_date and expiry_duration_months
-  const calculateExpiryDate = useCallback((mfgDate: string, expiryMonths: number): string => {
+  // Helper to calculate expiry date from mfg_date, expiry_duration_months, and optional days nudge
+  const calculateExpiryDate = useCallback((mfgDate: string, expiryMonths: number, nudgeDays: number = 0): string => {
     const date = new Date(mfgDate)
     date.setMonth(date.getMonth() + expiryMonths)
+    if (nudgeDays !== 0) {
+      date.setDate(date.getDate() + nudgeDays)
+    }
     return date.toISOString().split('T')[0]
   }, [])
 
-  // Auto-calculate exp_date when mfg_date or product changes
+  // Auto-calculate exp_date when mfg_date, product, or nudge changes
   useEffect(() => {
     if (!watchedMfgDate) {
       setValue("exp_date", "")
@@ -141,17 +146,17 @@ export function CreateSamplePage() {
           return product ? Math.min(min, product.expiry_duration_months) : min
         }, Infinity)
         if (minExpiry !== Infinity) {
-          setValue("exp_date", calculateExpiryDate(watchedMfgDate, minExpiry))
+          setValue("exp_date", calculateExpiryDate(watchedMfgDate, minExpiry, expiryNudgeDays))
         }
       }
     } else {
       // STANDARD or parent_lot
       if (selectedProducts.length > 0) {
         const expiryMonths = selectedProducts[0].product.expiry_duration_months
-        setValue("exp_date", calculateExpiryDate(watchedMfgDate, expiryMonths))
+        setValue("exp_date", calculateExpiryDate(watchedMfgDate, expiryMonths, expiryNudgeDays))
       }
     }
-  }, [watchedMfgDate, selectedProducts, compositeProducts, watchedLotType, productsData, setValue, calculateExpiryDate])
+  }, [watchedMfgDate, selectedProducts, compositeProducts, watchedLotType, productsData, setValue, calculateExpiryDate, expiryNudgeDays])
 
   const onSubmit = async (formData: SampleForm) => {
     console.log('=== onSubmit called ===', formData)
@@ -194,7 +199,7 @@ export function CreateSamplePage() {
           })),
         })
 
-        navigate("/")
+        navigate("/tracker")
       } else if (formData.lot_type === "multi_sku_composite") {
         // For multi_sku_composite: Use composite products grid data
 
@@ -252,7 +257,7 @@ export function CreateSamplePage() {
           })),
         })
 
-        navigate("/")
+        navigate("/tracker")
       } else {
         // STANDARD lot - use original logic
         const payload = {
@@ -270,7 +275,7 @@ export function CreateSamplePage() {
         console.log('=== STANDARD lot payload ===', JSON.stringify(payload, null, 2))
         await createMutation.mutateAsync(payload)
         console.log('=== Mutation succeeded, navigating ===')
-        navigate("/")
+        navigate("/tracker")
       }
     } catch (error: any) {
       console.error('=== Submit error ===', error)
@@ -358,16 +363,12 @@ export function CreateSamplePage() {
     setCompositeProducts(prev => prev.filter(cp => cp.id !== id))
   }, [])
 
-  const productOptions = useMemo(() =>
-    productsData?.items.map(p => p.display_name) || [],
-    [productsData]
-  )
-
   // TanStack Table columns for Composite Products
   const compositeColumnHelper = createColumnHelper<CompositeProductRow>()
-  const compositeColumns = useMemo<ColumnDef<CompositeProductRow>[]>(() => [
+  const compositeColumns = useMemo(() => [
     compositeColumnHelper.accessor('product_name', {
       header: 'Product',
+      size: 350,
       cell: (info) => {
         const rowId = info.row.original.id
         const currentProduct = info.row.original
@@ -405,6 +406,7 @@ export function CreateSamplePage() {
     }),
     compositeColumnHelper.accessor('mfg_date', {
       header: 'Mfg Date',
+      size: 160,
       cell: (info) => {
         const rowId = info.row.original.id
         const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'mfg_date'
@@ -426,12 +428,12 @@ export function CreateSamplePage() {
                   setEditingCompositeCell(null)
                 } else if (e.key === 'Tab') {
                   e.preventDefault()
-                  // Move to batch_number column
                   setEditingCompositeCell({ rowId, columnId: 'batch_number' })
                 }
               }}
               autoFocus
-              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500
+                [&::-webkit-calendar-picker-indicator]:h-3 [&::-webkit-calendar-picker-indicator]:w-3 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
             />
           )
         }
@@ -439,15 +441,19 @@ export function CreateSamplePage() {
         return (
           <div
             onClick={() => setEditingCompositeCell({ rowId, columnId: 'mfg_date' })}
-            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm flex items-center gap-2"
           >
-            {info.getValue()}
+            <span>{info.getValue()}</span>
+            <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
           </div>
         )
       },
     }),
     compositeColumnHelper.accessor('batch_number', {
       header: 'Batch #',
+      size: 150,
       cell: (info) => {
         const rowId = info.row.original.id
         const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'batch_number'
@@ -517,7 +523,7 @@ export function CreateSamplePage() {
           <Trash2 className="h-4 w-4" />
         </button>
       ),
-      size: 40,
+      size: 35,
     }),
   ], [editingCompositeCell, productsData, removeCompositeProduct])
 
@@ -724,13 +730,36 @@ export function CreateSamplePage() {
                   <CalendarDays className="h-4 w-4" />
                   Expiration Date
                 </Label>
-                <Input
-                  id="exp_date"
-                  type="date"
-                  {...register("exp_date")}
-                  className="border-slate-200 h-10 bg-slate-50"
-                  readOnly
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="exp_date"
+                    type="date"
+                    {...register("exp_date")}
+                    className="border-slate-200 h-10 bg-slate-50 flex-1"
+                    readOnly
+                  />
+                  <div className="flex items-center border border-slate-200 rounded-lg bg-white h-10">
+                    <button
+                      type="button"
+                      onClick={() => setExpiryNudgeDays(prev => prev - 1)}
+                      className="px-2 h-full hover:bg-slate-100 rounded-l-lg transition-colors text-slate-400 hover:text-slate-600"
+                      title="-1 day"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    <span className="px-1 text-[11px] text-slate-500 min-w-[28px] text-center">
+                      {expiryNudgeDays === 0 ? '0d' : `${expiryNudgeDays > 0 ? '+' : ''}${expiryNudgeDays}d`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExpiryNudgeDays(prev => prev + 1)}
+                      className="px-2 h-full hover:bg-slate-100 rounded-r-lg transition-colors text-slate-400 hover:text-slate-600"
+                      title="+1 day"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
                 <p className="text-[11px] text-slate-500">
                   Auto-calculated from product expiry
                 </p>
@@ -868,13 +897,14 @@ export function CreateSamplePage() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
                     {compositeTable.getHeaderGroups().map((headerGroup) =>
                       headerGroup.headers.map((header) => (
                         <th
                           key={header.id}
+                          style={{ width: header.getSize() }}
                           className="text-left font-semibold text-slate-700 text-xs tracking-wide px-3 py-2 uppercase"
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
@@ -887,7 +917,7 @@ export function CreateSamplePage() {
                   {compositeTable.getRowModel().rows.map((row) => (
                     <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-3 py-1.5">
+                        <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}

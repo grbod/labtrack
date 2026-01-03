@@ -51,6 +51,7 @@ export interface BulkImportGridProps<T extends BulkImportRow> {
   onSubmit: (validRows: Omit<T, "id" | "_errors" | "_rowError">[]) => Promise<void>
   onExportTemplate: () => void
   onImportFile: (file: File) => Promise<void>
+  onPaste?: (e: React.ClipboardEvent) => void
 
   // UI Configuration
   title: string

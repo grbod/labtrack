@@ -292,6 +292,38 @@ export function ProductBulkImport() {
     )
   }, [])
 
+  // Handle paste from Excel
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    if (!text.trim()) return
+
+    // Template column order: Brand, Product Name, Display Name, Flavor, Size, Serving Size, Expiry
+    const columnOrder = ['brand', 'product_name', 'display_name', 'flavor', 'size', 'serving_size', 'expiry_duration_months'] as const
+
+    const lines = text.trim().split('\n')
+    const newRows = lines.map(line => {
+      const cells = line.split('\t')
+      const row = createEmptyRow()
+      columnOrder.forEach((col, idx) => {
+        if (cells[idx] !== undefined && cells[idx].trim() !== '') {
+          if (col === 'expiry_duration_months') {
+            (row as any)[col] = parseInt(cells[idx]) || 36
+          } else {
+            (row as any)[col] = cells[idx].trim()
+          }
+        }
+      })
+      return row
+    })
+
+    // Replace empty rows with pasted data
+    setData(prev => {
+      const nonEmpty = prev.filter(r => r.brand || r.product_name)
+      return [...nonEmpty, ...newRows]
+    })
+  }, [setData])
+
   // Import file handler
   const handleImportFile = useCallback(async (file: File) => {
     try {
@@ -338,6 +370,7 @@ export function ProductBulkImport() {
       onSubmit={handleSubmit}
       onExportTemplate={handleExportTemplate}
       onImportFile={handleImportFile}
+      onPaste={handlePaste}
       title="Bulk Import Products"
       submitButtonText="Import Products"
       templateFilename="products-template"

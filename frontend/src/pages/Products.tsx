@@ -558,7 +558,7 @@ export function ProductsPage() {
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Category</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Specification</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Required</TableHead>
-                      <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -578,10 +578,22 @@ export function ProductsPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <code className="text-[13px] text-slate-700 font-mono">
-                            {spec.specification}
-                            {spec.test_unit && <span className="text-slate-500 ml-1">{spec.test_unit}</span>}
-                          </code>
+                          <div className="flex items-center gap-2">
+                            <code className="text-[13px] text-slate-700 font-mono flex-1">
+                              {spec.specification}
+                              {spec.test_unit && <span className="text-slate-500 ml-1">{spec.test_unit}</span>}
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditTestDialog(spec)}
+                              disabled={updateTestSpecMutation.isPending}
+                              className="h-7 w-7 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
+                              title="Edit specification"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <button
@@ -602,28 +614,16 @@ export function ProductsPage() {
                           </button>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditTestDialog(spec)}
-                              disabled={updateTestSpecMutation.isPending}
-                              className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Edit specification"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteTestSpec(spec.id)}
-                              disabled={deleteTestSpecMutation.isPending}
-                              className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete specification"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteTestSpec(spec.id)}
+                            disabled={deleteTestSpecMutation.isPending}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete specification"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

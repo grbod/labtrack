@@ -391,9 +391,9 @@ export function ImportResultsPage() {
                       <p className="text-[12px] text-slate-500 mt-0.5">{lot.lot_number}</p>
                     </div>
                     <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold tracking-wide ${
-                      lot.status === "PENDING"
+                      lot.status === "pending"
                         ? "bg-amber-100 text-amber-700"
-                        : lot.status === "APPROVED"
+                        : lot.status === "approved"
                         ? "bg-emerald-100 text-emerald-700"
                         : "bg-slate-100 text-slate-600"
                     }`}>

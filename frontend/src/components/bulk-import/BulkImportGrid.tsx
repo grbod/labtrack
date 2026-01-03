@@ -25,6 +25,7 @@ export function BulkImportGrid<T extends BulkImportRow>({
   onSubmit,
   onExportTemplate,
   onImportFile,
+  onPaste,
   title,
   submitButtonText = "Import",
   isSubmitting = false,
@@ -88,12 +89,13 @@ export function BulkImportGrid<T extends BulkImportRow>({
     [onImportFile]
   )
 
-  // Handle paste from Excel (placeholder - implemented in specific components)
+  // Handle paste from Excel - delegate to component-specific handler
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault()
-    // Paste handling is component-specific
+    if (onPaste) {
+      onPaste(e)
+    }
     setPasteReady(false)
-  }, [])
+  }, [onPaste])
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
@@ -324,9 +326,16 @@ export function createEditableCell<T extends BulkImportRow>(
       )
     }
 
-    const hasError = info.row.original._errors?.some((err: string) =>
-      err.toLowerCase().includes(String(columnId).toLowerCase())
-    )
+    const hasError = info.row.original._errors?.some((err: string) => {
+      const errLower = err.toLowerCase()
+      const colLower = String(columnId).toLowerCase().replace(/_/g, '')
+      const colWithUnderscores = String(columnId).toLowerCase()
+      // Check Zod format "fieldName: message" or if error contains field name
+      return errLower.startsWith(colWithUnderscores + ':') ||
+             errLower.startsWith(colLower + ':') ||
+             errLower.includes(colWithUnderscores) ||
+             errLower.includes(colLower)
+    })
 
     return (
       <div

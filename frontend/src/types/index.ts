@@ -1,10 +1,10 @@
 // User roles
 export type UserRole = "ADMIN" | "QC_MANAGER" | "LAB_TECH" | "READ_ONLY"
 
-// Lot types and statuses
-export type LotType = "STANDARD" | "PARENT_LOT" | "SUBLOT" | "MULTI_SKU_COMPOSITE"
-export type LotStatus = "PENDING" | "TESTED" | "APPROVED" | "RELEASED" | "REJECTED"
-export type TestResultStatus = "DRAFT" | "REVIEWED" | "APPROVED"
+// Lot types and statuses (lowercase to match backend enum values)
+export type LotType = "standard" | "parent_lot" | "sublot" | "multi_sku_composite"
+export type LotStatus = "pending" | "partial_results" | "under_review" | "approved" | "released" | "rejected"
+export type TestResultStatus = "draft" | "reviewed" | "approved"
 
 // User type
 export interface User {

@@ -119,6 +119,21 @@ excel_data = buffer.getvalue()
 ### Issue: Authentication not working
 **Solution**: Ensure UserService is used for authentication, not hardcoded values
 
+## UI Terminology
+
+### Sample Tracker Page
+The "Sample Tracker" page displays all submitted samples/lots with their workflow status.
+
+**Status Labels (display text → backend enum):**
+| Display Label | Backend Value | Description |
+|---------------|---------------|-------------|
+| Awaiting Results | `pending` | Sample submitted, no test results yet |
+| Partial Results | `partial_results` | Some results received, more expected |
+| Under QC Review | `under_review` | All results in, awaiting QC approval |
+| Approved | `approved` | QC approved, ready for COA generation |
+| Released | `released` | COA generated and published |
+| Rejected | `rejected` | QC rejected, can be retried |
+
 ## Database Models
 
 ### Core Models

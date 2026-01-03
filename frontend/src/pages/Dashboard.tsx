@@ -202,13 +202,13 @@ export function DashboardPage() {
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
-                        lot.status === "PENDING"
+                        lot.status === "pending"
                           ? "bg-amber-100 text-amber-700"
-                          : lot.status === "APPROVED"
+                          : lot.status === "approved"
                           ? "bg-emerald-100 text-emerald-700"
-                          : lot.status === "RELEASED"
+                          : lot.status === "released"
                           ? "bg-blue-100 text-blue-700"
-                          : lot.status === "REJECTED"
+                          : lot.status === "rejected"
                           ? "bg-red-100 text-red-700"
                           : "bg-slate-100 text-slate-600"
                       }`}

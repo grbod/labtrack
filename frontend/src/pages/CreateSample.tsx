@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -28,22 +28,22 @@ import { useProducts } from "@/hooks/useProducts"
 import { useCreateLot, useLots, useCreateSublotsBulk } from "@/hooks/useLots"
 import type { Product, LotType } from "@/types"
 
-// User-selectable lot types (excludes SUBLOT which is created automatically)
-type SelectableLotType = "STANDARD" | "PARENT_LOT" | "MULTI_SKU_COMPOSITE"
+// User-selectable lot types (excludes sublot which is created automatically)
+type SelectableLotType = "standard" | "parent_lot" | "multi_sku_composite"
 
 const LOT_TYPES: { value: SelectableLotType; label: string; description: string }[] = [
   {
-    value: "STANDARD",
+    value: "standard",
     label: "Standard Lot",
     description: "Single product, single lot",
   },
   {
-    value: "PARENT_LOT",
+    value: "parent_lot",
     label: "Parent Lot",
     description: "Master lot with sublots",
   },
   {
-    value: "MULTI_SKU_COMPOSITE",
+    value: "multi_sku_composite",
     label: "Multi-SKU Composite",
     description: "Multiple products combined",
   },
@@ -51,7 +51,7 @@ const LOT_TYPES: { value: SelectableLotType; label: string; description: string 
 
 const sampleSchema = z.object({
   lot_number: z.string().min(1, "Lot number is required"),
-  lot_type: z.enum(["STANDARD", "PARENT_LOT", "MULTI_SKU_COMPOSITE"]),
+  lot_type: z.enum(["standard", "parent_lot", "multi_sku_composite"]),
   mfg_date: z.string().optional(),
   exp_date: z.string().optional(),
   reference_number: z.string().optional(),
@@ -86,13 +86,13 @@ export function CreateSamplePage() {
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>([])
   const [productSearch, setProductSearch] = useState("")
 
-  // Sub-batch state for PARENT_LOT
+  // Sub-batch state for parent_lot
   const [subBatches, setSubBatches] = useState<SubBatchRow[]>([
     { id: 1, mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }
   ])
   const [nextSubBatchId, setNextSubBatchId] = useState(2)
 
-  // Composite products state for MULTI_SKU_COMPOSITE
+  // Composite products state for multi_sku_composite
   const [compositeProducts, setCompositeProducts] = useState<CompositeProductRow[]>([
     { id: 1, product_id: null, product_name: '', mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }
   ])
@@ -107,18 +107,57 @@ export function CreateSamplePage() {
   const form = useForm<SampleForm>({
     resolver: zodResolver(sampleSchema),
     defaultValues: {
-      lot_type: "STANDARD",
+      lot_type: "standard",
       generate_coa: true,
     },
   })
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = form
   const watchedLotType = watch("lot_type")
+  const watchedMfgDate = watch("mfg_date")
+
+  // Helper to calculate expiry date from mfg_date and expiry_duration_months
+  const calculateExpiryDate = useCallback((mfgDate: string, expiryMonths: number): string => {
+    const date = new Date(mfgDate)
+    date.setMonth(date.getMonth() + expiryMonths)
+    return date.toISOString().split('T')[0]
+  }, [])
+
+  // Auto-calculate exp_date when mfg_date or product changes
+  useEffect(() => {
+    if (!watchedMfgDate) {
+      setValue("exp_date", "")
+      return
+    }
+
+    // For STANDARD and parent_lot, use selectedProducts[0]
+    // For multi_sku_composite, use shortest expiry from compositeProducts
+    if (watchedLotType === "multi_sku_composite") {
+      const validProducts = compositeProducts.filter(cp => cp.product_id !== null)
+      if (validProducts.length > 0 && productsData?.items) {
+        // Find shortest expiry duration among selected products
+        const minExpiry = validProducts.reduce((min, cp) => {
+          const product = productsData.items.find(p => p.id === cp.product_id)
+          return product ? Math.min(min, product.expiry_duration_months) : min
+        }, Infinity)
+        if (minExpiry !== Infinity) {
+          setValue("exp_date", calculateExpiryDate(watchedMfgDate, minExpiry))
+        }
+      }
+    } else {
+      // STANDARD or parent_lot
+      if (selectedProducts.length > 0) {
+        const expiryMonths = selectedProducts[0].product.expiry_duration_months
+        setValue("exp_date", calculateExpiryDate(watchedMfgDate, expiryMonths))
+      }
+    }
+  }, [watchedMfgDate, selectedProducts, compositeProducts, watchedLotType, productsData, setValue, calculateExpiryDate])
 
   const onSubmit = async (formData: SampleForm) => {
+    console.log('=== onSubmit called ===', formData)
     try {
-      if (formData.lot_type === "PARENT_LOT") {
-        // For PARENT_LOT: Create lot then create sublots
+      if (formData.lot_type === "parent_lot") {
+        // For parent_lot: Create lot then create sublots
         const validSubBatches = subBatches.filter(sb => sb.batch_number.trim() !== '')
         if (validSubBatches.length === 0) {
           alert("Please add at least one sub-batch")
@@ -129,11 +168,15 @@ export function CreateSamplePage() {
         const earliestMfgDate = validSubBatches.reduce((min, sb) =>
           sb.mfg_date < min ? sb.mfg_date : min, validSubBatches[0].mfg_date)
 
+        // Calculate exp_date from earliest mfg_date + product expiry
+        const productExpiry = selectedProducts[0]?.product.expiry_duration_months || 36
+        const calculatedExpDate = calculateExpiryDate(earliestMfgDate, productExpiry)
+
         const lot = await createMutation.mutateAsync({
           lot_number: formData.lot_number,
-          lot_type: "PARENT_LOT" as LotType,
+          lot_type: "parent_lot" as LotType,
           mfg_date: earliestMfgDate,
-          exp_date: formData.exp_date || undefined,
+          exp_date: calculatedExpDate,
           reference_number: formData.reference_number || undefined,
           generate_coa: formData.generate_coa,
           products: selectedProducts.map((sp) => ({
@@ -152,8 +195,8 @@ export function CreateSamplePage() {
         })
 
         navigate("/")
-      } else if (formData.lot_type === "MULTI_SKU_COMPOSITE") {
-        // For MULTI_SKU_COMPOSITE: Use composite products grid data
+      } else if (formData.lot_type === "multi_sku_composite") {
+        // For multi_sku_composite: Use composite products grid data
 
         // Check if there are any rows
         if (compositeProducts.length === 0) {
@@ -187,11 +230,20 @@ export function CreateSamplePage() {
         const earliestMfgDate = validProducts.reduce((min, cp) =>
           cp.mfg_date < min ? cp.mfg_date : min, validProducts[0].mfg_date)
 
+        // Calculate exp_date using shortest expiry among products
+        const minExpiry = validProducts.reduce((min, cp) => {
+          const product = productsData?.items.find(p => p.id === cp.product_id)
+          return product ? Math.min(min, product.expiry_duration_months) : min
+        }, Infinity)
+        const calculatedExpDate = minExpiry !== Infinity
+          ? calculateExpiryDate(earliestMfgDate, minExpiry)
+          : undefined
+
         await createMutation.mutateAsync({
           lot_number: compositeLotNumber,
-          lot_type: "MULTI_SKU_COMPOSITE" as LotType,
+          lot_type: "multi_sku_composite" as LotType,
           mfg_date: earliestMfgDate,
-          exp_date: formData.exp_date || undefined,
+          exp_date: calculatedExpDate,
           reference_number: formData.reference_number || undefined,
           generate_coa: formData.generate_coa,
           products: validProducts.map((cp) => ({
@@ -203,7 +255,7 @@ export function CreateSamplePage() {
         navigate("/")
       } else {
         // STANDARD lot - use original logic
-        await createMutation.mutateAsync({
+        const payload = {
           lot_number: formData.lot_number,
           lot_type: formData.lot_type as LotType,
           mfg_date: formData.mfg_date || undefined,
@@ -214,11 +266,22 @@ export function CreateSamplePage() {
             product_id: sp.product.id,
             percentage: sp.percentage,
           })),
-        })
+        }
+        console.log('=== STANDARD lot payload ===', JSON.stringify(payload, null, 2))
+        await createMutation.mutateAsync(payload)
+        console.log('=== Mutation succeeded, navigating ===')
         navigate("/")
       }
-    } catch {
-      // Error handled by mutation
+    } catch (error: any) {
+      console.error('=== Submit error ===', error)
+      // Log the actual validation error from the backend
+      if (error?.response?.data) {
+        console.error('=== Backend validation error ===', JSON.stringify(error.response.data, null, 2))
+      }
+      if (error?.response?.data?.detail) {
+        // FastAPI validation errors
+        alert(`Validation error: ${JSON.stringify(error.response.data.detail)}`)
+      }
     }
   }
 
@@ -533,6 +596,68 @@ export function CreateSamplePage() {
           </div>
         </div>
 
+        {/* STANDARD: Product Selection - BEFORE Lot Details */}
+        {watchedLotType === "standard" && (
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold text-slate-900 text-[15px]">Product</h2>
+                  <p className="mt-1 text-[13px] text-slate-500">
+                    Select the product for this lot
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsProductDialogOpen(true)}
+                  className="border-slate-200 h-9"
+                  disabled={selectedProducts.length > 0}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Select Product
+                </Button>
+              </div>
+            </div>
+            <div className="p-6">
+              {selectedProducts.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 mx-auto rounded-xl bg-slate-100 flex items-center justify-center">
+                    <Package className="h-6 w-6 text-slate-400" />
+                  </div>
+                  <p className="mt-3 text-[14px] text-slate-500">No product selected</p>
+                  <button
+                    type="button"
+                    onClick={() => setIsProductDialogOpen(true)}
+                    className="mt-2 text-[13px] font-semibold text-blue-600 hover:text-blue-700"
+                  >
+                    Select a product
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 p-4 border border-slate-200/80 rounded-xl bg-slate-50/30">
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-900 text-[14px]">{selectedProducts[0].product.display_name}</p>
+                    <p className="text-[12px] text-slate-500 mt-0.5">
+                      {selectedProducts[0].product.brand} • Expires {selectedProducts[0].product.expiry_duration_months} months from mfg
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeProduct(selectedProducts[0].product.id)}
+                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Lot Details */}
         <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
           <div className="border-b border-slate-100 px-6 py-4">
@@ -582,7 +707,16 @@ export function CreateSamplePage() {
                   type="date"
                   {...register("mfg_date")}
                   className="border-slate-200 h-10"
+                  onKeyDown={(e) => {
+                    if (e.key === 't' || e.key === 'T') {
+                      e.preventDefault()
+                      setValue("mfg_date", new Date().toISOString().split('T')[0])
+                    }
+                  }}
                 />
+                <p className="text-[11px] text-slate-500">
+                  Press "T" for today's date
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -594,8 +728,12 @@ export function CreateSamplePage() {
                   id="exp_date"
                   type="date"
                   {...register("exp_date")}
-                  className="border-slate-200 h-10"
+                  className="border-slate-200 h-10 bg-slate-50"
+                  readOnly
                 />
+                <p className="text-[11px] text-slate-500">
+                  Auto-calculated from product expiry
+                </p>
               </div>
             </div>
 
@@ -613,8 +751,8 @@ export function CreateSamplePage() {
           </div>
         </div>
 
-        {/* PARENT_LOT: Sub-Batches Grid */}
-        {watchedLotType === "PARENT_LOT" && (
+        {/* parent_lot: Sub-Batches Grid */}
+        {watchedLotType === "parent_lot" && (
           <>
             {/* Single Product Selection for Parent Lot */}
             <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
@@ -706,8 +844,8 @@ export function CreateSamplePage() {
           </>
         )}
 
-        {/* MULTI_SKU_COMPOSITE: Composite Products Grid */}
-        {watchedLotType === "MULTI_SKU_COMPOSITE" && (
+        {/* multi_sku_composite: Composite Products Grid */}
+        {watchedLotType === "multi_sku_composite" && (
           <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
             <div className="border-b border-slate-100 px-6 py-4">
               <div className="flex items-center justify-between">
@@ -757,76 +895,6 @@ export function CreateSamplePage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </div>
-        )}
-
-        {/* STANDARD: Product Association */}
-        {watchedLotType === "STANDARD" && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="border-b border-slate-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-slate-900 text-[15px]">Products</h2>
-                  <p className="mt-1 text-[13px] text-slate-500">
-                    Associate a product with this lot
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsProductDialogOpen(true)}
-                  className="border-slate-200 h-9"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Product
-                </Button>
-              </div>
-            </div>
-            <div className="p-6">
-              {selectedProducts.length === 0 ? (
-                <div className="text-center py-10">
-                  <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center">
-                    <Package className="h-7 w-7 text-slate-400" />
-                  </div>
-                  <p className="mt-4 text-[14px] font-medium text-slate-600">No products added yet</p>
-                  <p className="mt-1 text-[13px] text-slate-500">Add a product to associate with this lot</p>
-                  <button
-                    type="button"
-                    onClick={() => setIsProductDialogOpen(true)}
-                    className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-                  >
-                    Add a product
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {selectedProducts.map((sp) => (
-                    <div
-                      key={sp.product.id}
-                      className="flex items-center gap-3 p-4 border border-slate-200/80 rounded-xl bg-slate-50/30 hover:bg-slate-50/50 transition-colors"
-                    >
-                      <div className="flex-1">
-                        <p className="font-semibold text-slate-900 text-[14px]">{sp.product.display_name}</p>
-                        <p className="text-[12px] text-slate-500 mt-0.5">
-                          {sp.product.brand}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeProduct(sp.product.id)}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         )}

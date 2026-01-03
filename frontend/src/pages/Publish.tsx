@@ -29,7 +29,7 @@ export function PublishPage() {
   const { data: lotsData, isLoading } = useLots({
     page,
     page_size: 50,
-    status: "APPROVED",
+    status: "approved",
   })
   const { data: statusCounts } = useLotStatusCounts()
 
@@ -42,11 +42,11 @@ export function PublishPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "APPROVED":
+      case "approved":
         return <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-      case "RELEASED":
+      case "released":
         return <Download className="h-4 w-4 text-blue-600" />
-      case "PENDING":
+      case "pending":
         return <Clock className="h-4 w-4 text-amber-600" />
       default:
         return <AlertCircle className="h-4 w-4 text-slate-500" />

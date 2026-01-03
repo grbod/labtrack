@@ -37,25 +37,25 @@ export function ApprovalsPage() {
   const { data, isLoading } = useTestResults({
     page,
     page_size: 50,
-    status: showDraftOnly ? "DRAFT" : undefined,
+    status: showDraftOnly ? "draft" : undefined,
   })
   const { data: pendingCount } = usePendingReviewCount()
   const approveMutation = useApproveTestResult()
   const bulkApproveMutation = useBulkApproveTestResults()
 
   const handleApprove = async (id: number) => {
-    await approveMutation.mutateAsync({ id, status: "APPROVED" })
+    await approveMutation.mutateAsync({ id, status: "approved" })
   }
 
   const handleReject = async (id: number) => {
-    await approveMutation.mutateAsync({ id, status: "DRAFT", notes: "Rejected for review" })
+    await approveMutation.mutateAsync({ id, status: "draft", notes: "Rejected for review" })
   }
 
   const handleBulkApprove = async () => {
     if (selectedIds.length === 0) return
     await bulkApproveMutation.mutateAsync({
       resultIds: selectedIds,
-      status: "APPROVED",
+      status: "approved",
     })
     setSelectedIds([])
   }
@@ -68,7 +68,7 @@ export function ApprovalsPage() {
 
   const toggleSelectAll = () => {
     if (!data) return
-    const draftIds = data.items.filter((r) => r.status === "DRAFT").map((r) => r.id)
+    const draftIds = data.items.filter((r) => r.status === "draft").map((r) => r.id)
     if (selectedIds.length === draftIds.length) {
       setSelectedIds([])
     } else {
@@ -77,7 +77,7 @@ export function ApprovalsPage() {
   }
 
   const getStatusBadge = (result: TestResult) => {
-    if (result.status === "APPROVED") {
+    if (result.status === "approved") {
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide bg-emerald-100 text-emerald-700">
           <CheckCircle2 className="h-3 w-3" />
@@ -100,7 +100,7 @@ export function ApprovalsPage() {
     )
   }
 
-  const draftItems = data?.items.filter((r) => r.status === "DRAFT") || []
+  const draftItems = data?.items.filter((r) => r.status === "draft") || []
   const lowConfidenceCount = data?.items.filter((r) => r.confidence_score !== null && r.confidence_score < 0.7).length ?? 0
 
   return (
@@ -151,7 +151,7 @@ export function ApprovalsPage() {
             </div>
             <div>
               <p className="text-[28px] font-bold text-slate-900 leading-none">
-                {data?.items.filter((r) => r.status === "APPROVED").length ?? 0}
+                {data?.items.filter((r) => r.status === "approved").length ?? 0}
               </p>
               <p className="mt-1 text-[13px] text-slate-500">Approved</p>
             </div>
@@ -230,7 +230,7 @@ export function ApprovalsPage() {
               {data?.items.map((result) => (
                 <TableRow key={result.id} className="hover:bg-slate-50/50 transition-colors">
                   <TableCell>
-                    {result.status === "DRAFT" && (
+                    {result.status === "draft" && (
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(result.id)}
@@ -254,7 +254,7 @@ export function ApprovalsPage() {
                   </TableCell>
                   <TableCell>{getStatusBadge(result)}</TableCell>
                   <TableCell>
-                    {result.status === "DRAFT" ? (
+                    {result.status === "draft" ? (
                       <div className="flex items-center gap-0.5">
                         <Button
                           variant="ghost"

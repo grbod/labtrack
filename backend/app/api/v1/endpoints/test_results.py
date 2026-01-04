@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.models import TestResult, Lot, User
 from app.models.enums import TestResultStatus
+from app.services.lot_service import LotService
 from app.schemas.test_result import (
     TestResultCreate,
     TestResultUpdate,
@@ -143,6 +144,10 @@ async def create_test_result(
     db.commit()
     db.refresh(result)
 
+    # Auto-recalculate lot status
+    lot_service = LotService()
+    lot_service.recalculate_lot_status(db, result_in.lot_id, user_id=current_user.id)
+
     return TestResultResponse.model_validate(result)
 
 
@@ -182,6 +187,10 @@ async def bulk_create_test_results(
     for result in created_results:
         db.refresh(result)
 
+    # Auto-recalculate lot status
+    lot_service = LotService()
+    lot_service.recalculate_lot_status(db, bulk_in.lot_id, user_id=current_user.id)
+
     return [TestResultResponse.model_validate(r) for r in created_results]
 
 
@@ -213,6 +222,11 @@ async def update_test_result(
 
     db.commit()
     db.refresh(result)
+
+    # Auto-recalculate lot status based on test results completion
+    if result.lot_id:
+        lot_service = LotService()
+        lot_service.recalculate_lot_status(db, result.lot_id, user_id=current_user.id)
 
     return TestResultResponse.model_validate(result)
 

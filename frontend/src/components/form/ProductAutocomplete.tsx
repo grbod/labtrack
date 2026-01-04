@@ -21,6 +21,7 @@ interface ProductAutocompleteProps {
   isLoading?: boolean
   onSelect: (product: Product) => void
   onChange?: (text: string) => void
+  onBlur?: () => void
   error?: boolean
   onNextCell?: () => void
 }
@@ -31,6 +32,7 @@ export function ProductAutocomplete({
   isLoading = false,
   onSelect,
   onChange,
+  onBlur,
   error = false,
   onNextCell,
 }: ProductAutocompleteProps) {
@@ -203,12 +205,12 @@ export function ProductAutocomplete({
     <div className="w-full">
       <div
         ref={refs.setReference}
-        className={`w-full ${error ? 'ring-2 ring-red-500 rounded bg-red-50' : ''}`}
+        className={`w-full flex items-center ${error ? 'ring-2 ring-red-500 rounded bg-red-50' : ''}`}
       >
         <input
-          {...getInputProps({ onKeyDown: handleKeyDown })}
+          {...getInputProps({ onKeyDown: handleKeyDown, onBlur })}
           placeholder="Type to search products..."
-          className="w-full px-2 py-0.5 text-sm border-0 focus:outline-none focus:ring-0 bg-transparent"
+          className="w-full h-full border-0 focus:outline-none focus:ring-0 bg-transparent placeholder:text-slate-400"
         />
       </div>
 

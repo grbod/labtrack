@@ -20,7 +20,7 @@ export function BulkImportGrid<T extends BulkImportRow>({
   data,
   setData,
   columns,
-  editableColumns,
+  editableColumns: _editableColumns,
   validateRow,
   onSubmit,
   onExportTemplate,
@@ -34,9 +34,25 @@ export function BulkImportGrid<T extends BulkImportRow>({
   const [pasteReady, setPasteReady] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Validate all rows and count errors
+  // Mark a row as touched (for deferred validation) - reserved for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const markRowTouched = useCallback((rowId: string) => {
+    setData((prev) =>
+      prev.map((row) =>
+        row.id === rowId ? { ...row, _touched: true } : row
+      )
+    )
+  }, [setData])
+  // Suppress unused warning - will be used for deferred validation
+  void markRowTouched
+
+  // Validate only touched rows - untouched rows don't show errors
   const validatedData = useMemo(() => {
     return data.map((row) => {
+      // Only validate if row has been touched
+      if (!row._touched) {
+        return { ...row, _errors: undefined }
+      }
       const { valid, errors } = validateRow(row)
       return {
         ...row,
@@ -45,8 +61,10 @@ export function BulkImportGrid<T extends BulkImportRow>({
     })
   }, [data, validateRow])
 
-  const validRowCount = validatedData.filter((r) => !r._errors?.length).length
-  const errorRowCount = validatedData.filter((r) => r._errors?.length).length
+  // Count valid rows among touched rows only, untouched rows don't count as valid or error
+  const touchedRows = validatedData.filter((r) => r._touched)
+  const validRowCount = touchedRows.filter((r) => !r._errors?.length).length
+  const errorRowCount = touchedRows.filter((r) => r._errors?.length).length
 
   // TanStack Table instance
   const table = useReactTable({
@@ -272,8 +290,8 @@ export function BulkImportGrid<T extends BulkImportRow>({
  * Factory function to create editable cell renderer
  * Pattern from GridShowcase - makes TanStack Table work like Excel
  */
-export function createEditableCell<T extends BulkImportRow>(
-  columnId: keyof T,
+export function createEditableCell<_T extends BulkImportRow>(
+  columnId: string,
   editableColumns: string[],
   editingCell: EditingCell | null,
   editValue: string,

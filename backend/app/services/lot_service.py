@@ -5,7 +5,8 @@ from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models.lot import Lot, Sublot, LotProduct
-from app.models.enums import LotType, LotStatus
+from app.models.test_result import TestResult
+from app.models.enums import LotType, LotStatus, TestResultStatus
 from app.services.base import BaseService
 from app.utils.logger import logger
 
@@ -220,12 +221,12 @@ class LotService(BaseService[Lot]):
 
         # Validate status transition
         valid_transitions = {
-            LotStatus.PENDING: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
+            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
             LotStatus.PARTIAL_RESULTS: [LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.UNDER_REVIEW: [LotStatus.APPROVED, LotStatus.REJECTED, LotStatus.PENDING],
+            LotStatus.UNDER_REVIEW: [LotStatus.APPROVED, LotStatus.REJECTED, LotStatus.AWAITING_RESULTS],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.UNDER_REVIEW],
             LotStatus.RELEASED: [],  # Released is final
-            LotStatus.REJECTED: [LotStatus.PENDING],  # Can retry
+            LotStatus.REJECTED: [LotStatus.AWAITING_RESULTS],  # Can retry
         }
 
         if new_status not in valid_transitions.get(lot.status, []):
@@ -360,7 +361,7 @@ class LotService(BaseService[Lot]):
         validated_data = {
             "lot_number": lot_data["lot_number"].strip().upper(),
             "lot_type": lot_data.get("lot_type", LotType.STANDARD),
-            "status": lot_data.get("status", LotStatus.PENDING),
+            "status": lot_data.get("status", LotStatus.AWAITING_RESULTS),
             "generate_coa": lot_data.get("generate_coa", True),
         }
 
@@ -442,6 +443,117 @@ class LotService(BaseService[Lot]):
                     missing_specs.append(spec)
         
         return missing_specs
+
+
+    def recalculate_lot_status(
+        self,
+        db: Session,
+        lot_id: int,
+        user_id: Optional[int] = None,
+    ) -> Lot:
+        """
+        Auto-calculate lot status based on test results completion.
+
+        Called after each test result save to update lot status automatically.
+
+        Status transitions:
+        - awaiting_results: No test results entered yet
+        - partial_results: Some results entered, not all required tests complete
+        - under_review: All required test results entered, ready for QC
+
+        Note: approved/rejected are set manually by QC manager.
+
+        Args:
+            db: Database session
+            lot_id: ID of the lot to recalculate
+            user_id: ID of user making the change
+
+        Returns:
+            Updated lot
+        """
+        from app.models import ProductTestSpecification
+
+        lot = self.get(db, lot_id)
+        if not lot:
+            raise ValueError(f"Lot with ID {lot_id} not found")
+
+        # Don't auto-update status if already approved, released, or rejected
+        if lot.status in [LotStatus.APPROVED, LotStatus.RELEASED, LotStatus.REJECTED]:
+            return lot
+
+        # Get all required test types from all products in this lot
+        required_test_type_ids = set()
+        for lot_product in lot.lot_products:
+            if not lot_product.product:
+                continue
+            for spec in lot_product.product.test_specifications:
+                if spec.is_required:
+                    required_test_type_ids.add(spec.lab_test_type_id)
+
+        # If no required tests, status depends on whether any tests exist
+        if not required_test_type_ids:
+            # No required tests defined - just check if there are any test results
+            test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
+            if test_results:
+                # Has some test results, consider ready for review
+                new_status = LotStatus.UNDER_REVIEW
+            else:
+                new_status = LotStatus.AWAITING_RESULTS
+        else:
+            # Get test results for this lot
+            test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
+
+            # Count results with values by test type
+            completed_test_type_ids = set()
+            for result in test_results:
+                if result.result_value is not None and result.result_value.strip() != "":
+                    # Need to match test_type name to lab_test_type_id
+                    # For simplicity, we'll check by test_type name
+                    completed_test_type_ids.add(result.test_type)
+
+            # Match completed test types to required specs
+            # We need to check if the test_type name matches any required test
+            completed_required = 0
+            for lot_product in lot.lot_products:
+                if not lot_product.product:
+                    continue
+                for spec in lot_product.product.test_specifications:
+                    if spec.is_required and spec.test_name in completed_test_type_ids:
+                        completed_required += 1
+
+            total_required = len(required_test_type_ids)
+
+            if completed_required == 0:
+                new_status = LotStatus.AWAITING_RESULTS
+            elif completed_required < total_required:
+                new_status = LotStatus.PARTIAL_RESULTS
+            else:
+                # All required tests completed
+                new_status = LotStatus.UNDER_REVIEW
+
+        # Only update if status changed
+        if lot.status != new_status:
+            old_status = lot.status
+            lot.status = new_status
+
+            self._log_audit(
+                db=db,
+                action="update",
+                record_id=lot.id,
+                old_values={"status": old_status.value},
+                new_values={"status": new_status.value},
+                user_id=user_id,
+                reason="Auto-calculated based on test results",
+            )
+
+            db.commit()
+            db.refresh(lot)
+
+            logger.info(
+                f"Auto-updated lot {lot.lot_number} status from {old_status.value} to {new_status.value}"
+            )
+
+        return lot
 
 
 # Add missing import

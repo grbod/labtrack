@@ -57,7 +57,6 @@ const labTestTypeSchema = z.object({
   default_unit: z.string().optional(),
   description: z.string().optional(),
   test_method: z.string().optional(),
-  abbreviations: z.string().optional(),
   default_specification: z.string().optional(),
 })
 
@@ -87,17 +86,30 @@ export function LabTestTypesPage() {
     defaultValues: {},
   })
 
-  const { register, handleSubmit, reset, formState: { errors } } = form
+  const { register, handleSubmit, reset, formState: { errors }, watch, setValue } = form
+  const [isAddingCategory, setIsAddingCategory] = useState(false)
+
+  // Watch form values for display name computation
+  const watchedTestName = watch("test_name")
+  const watchedSpec = watch("default_specification")
+  const watchedUnit = watch("default_unit")
+
+  const computeDisplayName = () => {
+    let result = watchedTestName || ''
+    if (watchedSpec) result += ` (${watchedSpec} [default])`
+    if (watchedUnit) result += ` ${watchedUnit}`
+    return result || '-'
+  }
 
   const openCreateDialog = () => {
     setEditingType(null)
+    setIsAddingCategory(false)
     reset({
       test_name: "",
       test_category: "",
       default_unit: "",
       description: "",
       test_method: "",
-      abbreviations: "",
       default_specification: "",
     })
     setIsDialogOpen(true)
@@ -105,13 +117,13 @@ export function LabTestTypesPage() {
 
   const openEditDialog = (testType: LabTestType) => {
     setEditingType(testType)
+    setIsAddingCategory(false)
     reset({
       test_name: testType.test_name,
       test_category: testType.test_category,
       default_unit: testType.default_unit || "",
       description: testType.description || "",
       test_method: testType.test_method || "",
-      abbreviations: testType.abbreviations || "",
       default_specification: testType.default_specification || "",
     })
     setIsDialogOpen(true)
@@ -124,7 +136,6 @@ export function LabTestTypesPage() {
       default_unit: formData.default_unit || undefined,
       description: formData.description || undefined,
       test_method: formData.test_method || undefined,
-      abbreviations: formData.abbreviations || undefined,
       default_specification: formData.default_specification || undefined,
     }
 
@@ -292,9 +303,6 @@ export function LabTestTypesPage() {
                   <TableCell>
                     <div>
                       <span className="font-semibold text-slate-900 text-[14px]">{testType.test_name}</span>
-                      {testType.abbreviations && (
-                        <span className="text-[12px] text-slate-400 ml-2">({testType.abbreviations})</span>
-                      )}
                     </div>
                     {testType.description && (
                       <p className="text-[12px] text-slate-500 truncate max-w-xs mt-0.5">{testType.description}</p>
@@ -386,8 +394,44 @@ export function LabTestTypesPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="test_category" className="text-[13px] font-semibold text-slate-700">Category *</Label>
-                <Input id="test_category" {...register("test_category")} placeholder="Select or type..." list="categories-list" aria-invalid={!!errors.test_category} className="border-slate-200 h-10" />
-                <datalist id="categories-list">{CATEGORIES.map((cat) => <option key={cat} value={cat} />)}</datalist>
+                {isAddingCategory ? (
+                  <Input
+                    id="test_category"
+                    {...register("test_category")}
+                    placeholder="Enter new category name..."
+                    autoFocus
+                    className="border-slate-200 h-10"
+                    onBlur={(e) => {
+                      if (!e.target.value) {
+                        setIsAddingCategory(false)
+                      }
+                    }}
+                  />
+                ) : (
+                  <select
+                    id="test_category"
+                    value={watch("test_category") || ""}
+                    onChange={(e) => {
+                      if (e.target.value === "__add_new__") {
+                        setValue("test_category", "")
+                        setIsAddingCategory(true)
+                      } else {
+                        setValue("test_category", e.target.value)
+                      }
+                    }}
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2"
+                  >
+                    <option value="">Select category...</option>
+                    {CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    {/* Show current value if it's a custom category not in presets */}
+                    {watch("test_category") && !CATEGORIES.includes(watch("test_category")) && (
+                      <option value={watch("test_category")}>{watch("test_category")} (custom)</option>
+                    )}
+                    <option value="__add_new__">+ Add new category...</option>
+                  </select>
+                )}
                 {errors.test_category && <p className="text-[13px] text-red-600">{errors.test_category.message}</p>}
               </div>
             </div>
@@ -406,11 +450,13 @@ export function LabTestTypesPage() {
               <Input id="default_specification" {...register("default_specification")} placeholder="e.g., < 10,000 CFU/g" className="border-slate-200 h-10" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="abbreviations" className="text-[13px] font-semibold text-slate-700">Abbreviations / Aliases</Label>
-              <Input id="abbreviations" {...register("abbreviations")} placeholder="e.g., TPC, APC" className="border-slate-200 h-10" />
+              <Label className="text-[13px] font-semibold text-slate-700">Display Name</Label>
+              <div className="flex h-10 w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {computeDisplayName()}
+              </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="description" className="text-[13px] font-semibold text-slate-700">Description</Label>
+              <Label htmlFor="description" className="text-[13px] font-semibold text-slate-700">Description <span className="font-normal text-slate-400">(optional)</span></Label>
               <Input id="description" {...register("description")} placeholder="Brief description" className="border-slate-200 h-10" />
             </div>
             <DialogFooter className="pt-4">

@@ -396,11 +396,11 @@ class ApprovalService(BaseService[TestResult]):
         
         # Get the lot
         lot = db.query(Lot).filter(Lot.id == lot_id).first()
-        if not lot or lot.status not in [LotStatus.PENDING, LotStatus.UNDER_REVIEW, LotStatus.PARTIAL_RESULTS]:
+        if not lot or lot.status not in [LotStatus.AWAITING_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.PARTIAL_RESULTS]:
             if lot:
                 logger.info(
                     f"Lot {lot.lot_number} not updated - current status {lot.status.value} "
-                    f"not in [PENDING, UNDER_REVIEW, PARTIAL_RESULTS]"
+                    f"not in [AWAITING_RESULTS, UNDER_REVIEW, PARTIAL_RESULTS]"
                 )
             return
         
@@ -626,7 +626,7 @@ class ApprovalService(BaseService[TestResult]):
             return
             
         # Only update lots in PENDING status
-        if lot.status != LotStatus.PENDING:
+        if lot.status != LotStatus.AWAITING_RESULTS:
             return
             
         # Check test completeness
@@ -676,7 +676,7 @@ class ApprovalService(BaseService[TestResult]):
                 "is_complete": False,
                 "missing_required": [],
                 "present_optional": [],
-                "status_recommendation": LotStatus.PENDING
+                "status_recommendation": LotStatus.AWAITING_RESULTS
             }
         
         # Get primary product (for now, use first product)
@@ -706,7 +706,7 @@ class ApprovalService(BaseService[TestResult]):
         
         # Determine status recommendation
         if not lot.test_results:
-            status_recommendation = LotStatus.PENDING
+            status_recommendation = LotStatus.AWAITING_RESULTS
         elif missing_required:
             status_recommendation = LotStatus.PARTIAL_RESULTS
         else:
@@ -735,7 +735,7 @@ class ApprovalService(BaseService[TestResult]):
         check = self.check_test_completeness(db, lot_id)
         
         lot = db.query(Lot).filter(Lot.id == lot_id).first()
-        if lot and lot.status == LotStatus.PENDING:
+        if lot and lot.status == LotStatus.AWAITING_RESULTS:
             old_status = lot.status
             lot.status = check["status_recommendation"]
             

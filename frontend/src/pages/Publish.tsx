@@ -46,7 +46,7 @@ export function PublishPage() {
         return <CheckCircle2 className="h-4 w-4 text-emerald-600" />
       case "released":
         return <Download className="h-4 w-4 text-blue-600" />
-      case "pending":
+      case "awaiting_results":
         return <Clock className="h-4 w-4 text-amber-600" />
       default:
         return <AlertCircle className="h-4 w-4 text-slate-500" />
@@ -93,8 +93,8 @@ export function PublishPage() {
               <Clock className="h-5 w-5 text-amber-600" />
             </div>
             <div>
-              <p className="text-[28px] font-bold text-slate-900 leading-none">{statusCounts?.pending ?? 0}</p>
-              <p className="mt-1 text-[13px] text-slate-500">Pending</p>
+              <p className="text-[28px] font-bold text-slate-900 leading-none">{statusCounts?.awaiting_results ?? 0}</p>
+              <p className="mt-1 text-[13px] text-slate-500">Awaiting Results</p>
             </div>
           </div>
         </div>

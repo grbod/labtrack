@@ -8,6 +8,7 @@ export const lotKeys = {
   list: (filters: LotFilters) => [...lotKeys.lists(), filters] as const,
   details: () => [...lotKeys.all, "detail"] as const,
   detail: (id: number) => [...lotKeys.details(), id] as const,
+  detailWithSpecs: (id: number) => [...lotKeys.details(), id, "with-specs"] as const,
   statusCounts: () => [...lotKeys.all, "statusCounts"] as const,
   sublots: (lotId: number) => [...lotKeys.all, "sublots", lotId] as const,
 }
@@ -24,6 +25,15 @@ export function useLot(id: number) {
     queryKey: lotKeys.detail(id),
     queryFn: () => lotsApi.get(id),
     enabled: !!id,
+  })
+}
+
+/** Fetch lot with products and their test specifications (for Sample Modal) */
+export function useLotWithSpecs(id: number) {
+  return useQuery({
+    queryKey: lotKeys.detailWithSpecs(id),
+    queryFn: () => lotsApi.getWithSpecs(id),
+    enabled: id > 0,
   })
 }
 
@@ -63,11 +73,37 @@ export function useUpdateLotStatus() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, status }: { id: number; status: LotStatus }) =>
-      lotsApi.updateStatus(id, status),
+    mutationFn: ({ id, status, rejectionReason }: { id: number; status: LotStatus; rejectionReason?: string }) =>
+      lotsApi.updateStatus(id, status, rejectionReason),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}
+
+export function useSubmitForReview() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => lotsApi.submitForReview(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+    },
+  })
+}
+
+export function useResubmitLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => lotsApi.resubmit(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
     },
   })

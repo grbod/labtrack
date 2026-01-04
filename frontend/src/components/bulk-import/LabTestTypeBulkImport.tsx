@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react"
-import { createColumnHelper, type ColumnDef } from "@tanstack/react-table"
+import { createColumnHelper } from "@tanstack/react-table"
 import { nanoid } from "nanoid"
 import { BulkImportGrid, createEditableCell } from "./BulkImportGrid"
 import { useBulkImportLabTestTypes } from "@/hooks/useLabTestTypes"
@@ -13,7 +13,6 @@ import {
   parseExcelFile,
 } from "@/lib/bulk-import/excel-utils"
 import type { EditingCell } from "./types"
-import { Input } from "@/components/ui/input"
 
 // Test categories from your domain
 const TEST_CATEGORIES = [
@@ -53,11 +52,11 @@ export function LabTestTypeBulkImport() {
     "description",
   ]
 
-  // Handle cell value updates
+  // Handle cell value updates - also marks row as touched for validation
   const updateCellValue = useCallback(
     (rowId: string, columnId: string, value: any) => {
       setData((prev) =>
-        prev.map((row) => (row.id === rowId ? { ...row, [columnId]: value } : row))
+        prev.map((row) => (row.id === rowId ? { ...row, [columnId]: value, _touched: true } : row))
       )
     },
     []
@@ -127,7 +126,7 @@ export function LabTestTypeBulkImport() {
   // Column definitions
   const columnHelper = createColumnHelper<LabTestTypeGridRow>()
 
-  const columns = useMemo<ColumnDef<LabTestTypeGridRow>[]>(
+  const columns = useMemo(
     () => [
       // Checkbox column
       columnHelper.display({
@@ -381,7 +380,8 @@ export function LabTestTypeBulkImport() {
           description: "",
         }
       )
-      setData(rows)
+      // Mark imported rows as touched so they get validated
+      setData(rows.map(row => ({ ...row, _touched: true })))
     } catch (error) {
       console.error("Import failed:", error)
     }

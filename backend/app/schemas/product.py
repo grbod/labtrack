@@ -1,7 +1,6 @@
 """Product schemas for request/response validation."""
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional, List
 
 from pydantic import BaseModel, Field, field_validator
@@ -15,7 +14,7 @@ class ProductBase(BaseModel):
     flavor: Optional[str] = Field(None, max_length=100)
     size: Optional[str] = Field(None, max_length=50)
     display_name: str = Field(..., min_length=1)
-    serving_size: Optional[Decimal] = Field(None, gt=0)
+    serving_size: Optional[str] = Field(None, max_length=50)  # e.g., "30g", "2 capsules"
     expiry_duration_months: int = Field(default=36, gt=0)
 
 
@@ -33,7 +32,7 @@ class ProductUpdate(BaseModel):
     flavor: Optional[str] = Field(None, max_length=100)
     size: Optional[str] = Field(None, max_length=50)
     display_name: Optional[str] = Field(None, min_length=1)
-    serving_size: Optional[Decimal] = Field(None, gt=0)
+    serving_size: Optional[str] = Field(None, max_length=50)
     expiry_duration_months: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
 
@@ -77,7 +76,7 @@ class ProductResponse(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     display_name: str
-    serving_size: Optional[Decimal] = None
+    serving_size: Optional[str] = None
     expiry_duration_months: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -109,7 +108,7 @@ class ProductBulkImportRow(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     display_name: str
-    serving_size: Optional[Decimal] = None
+    serving_size: Optional[str] = None
     expiry_duration_months: int = 36
 
     @field_validator("brand", "product_name", "display_name", mode="before")

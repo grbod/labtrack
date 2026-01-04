@@ -43,8 +43,9 @@ class Lot(BaseModel):
     reference_number = Column(String(50), unique=True, nullable=False)
     mfg_date = Column(Date, nullable=True)
     exp_date = Column(Date, nullable=True)
-    status = Column(Enum(LotStatus), nullable=False, default=LotStatus.PENDING)
+    status = Column(Enum(LotStatus), nullable=False, default=LotStatus.AWAITING_RESULTS)
     generate_coa = Column(Boolean, default=True, nullable=False)
+    rejection_reason = Column(Text, nullable=True)  # Required when status is REJECTED
 
     # Relationships
     sublots = relationship(
@@ -104,26 +105,36 @@ class Lot(BaseModel):
         return (
             self.generate_coa
             and self.status
-            in [LotStatus.UNDER_REVIEW, LotStatus.APPROVED, LotStatus.RELEASED]
+            in [LotStatus.AWAITING_RELEASE, LotStatus.APPROVED, LotStatus.RELEASED]
             and all(tr.status == TestResultStatus.APPROVED for tr in self.test_results)
         )
 
-    def update_status(self, new_status):
+    def update_status(self, new_status, rejection_reason: str = None):
         """Update lot status with validation."""
         # Valid transitions
         valid_transitions = {
-            LotStatus.PENDING: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
+            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
             LotStatus.PARTIAL_RESULTS: [LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.UNDER_REVIEW: [LotStatus.APPROVED, LotStatus.REJECTED],
+            LotStatus.UNDER_REVIEW: [LotStatus.AWAITING_RELEASE, LotStatus.REJECTED],
+            LotStatus.AWAITING_RELEASE: [LotStatus.APPROVED, LotStatus.REJECTED],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.REJECTED],
             LotStatus.RELEASED: [],  # Terminal state
-            LotStatus.REJECTED: [LotStatus.PENDING],  # Can retry
+            LotStatus.REJECTED: [LotStatus.AWAITING_RELEASE],  # Can resubmit for QC review
         }
 
         if new_status not in valid_transitions.get(self.status, []):
             raise ValueError(
                 f"Invalid status transition from {self.status.value} to {new_status.value}"
             )
+
+        # Rejection reason is required when transitioning to REJECTED
+        if new_status == LotStatus.REJECTED:
+            if not rejection_reason or not rejection_reason.strip():
+                raise ValueError("Rejection reason is required when rejecting a lot")
+            self.rejection_reason = rejection_reason.strip()
+        elif new_status == LotStatus.AWAITING_RELEASE and self.status == LotStatus.REJECTED:
+            # Clear rejection reason when resubmitting
+            self.rejection_reason = None
 
         self.status = new_status
 

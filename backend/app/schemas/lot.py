@@ -54,6 +54,19 @@ class ProductInLot(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProductSummary(BaseModel):
+    """Minimal product info for lot list responses (used in Kanban cards)."""
+
+    id: int
+    brand: str
+    product_name: str
+    flavor: Optional[str] = None
+    size: Optional[str] = None
+    percentage: Optional[Decimal] = None
+
+    model_config = {"from_attributes": True}
+
+
 class LotResponse(BaseModel):
     """Lot response schema."""
 
@@ -65,6 +78,7 @@ class LotResponse(BaseModel):
     exp_date: Optional[date] = None
     status: LotStatus
     generate_coa: bool
+    rejection_reason: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -72,15 +86,21 @@ class LotResponse(BaseModel):
 
 
 class LotWithProductsResponse(LotResponse):
-    """Lot response with associated products."""
+    """Lot response with associated products (full detail)."""
 
     products: List[ProductInLot] = []
+
+
+class LotWithProductSummaryResponse(LotResponse):
+    """Lot response with minimal product info for list views."""
+
+    products: List[ProductSummary] = []
 
 
 class LotListResponse(BaseModel):
     """Paginated lot list response."""
 
-    items: List[LotResponse]
+    items: List[LotWithProductSummaryResponse]
     total: int
     page: int
     page_size: int
@@ -121,3 +141,41 @@ class LotStatusUpdate(BaseModel):
     """Schema for updating lot status."""
 
     status: LotStatus
+    rejection_reason: Optional[str] = None  # Required when status is 'rejected'
+
+
+# Extended schemas for modal with test specifications
+class TestSpecInProduct(BaseModel):
+    """Test specification details for modal display."""
+
+    id: int
+    lab_test_type_id: int
+    test_name: str
+    test_category: Optional[str] = None
+    test_method: Optional[str] = None
+    test_unit: Optional[str] = None
+    specification: str
+    is_required: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ProductInLotWithSpecs(BaseModel):
+    """Product with test specifications for modal display."""
+
+    id: int
+    brand: str
+    product_name: str
+    flavor: Optional[str] = None
+    size: Optional[str] = None
+    display_name: str
+    percentage: Optional[Decimal] = None
+    test_specifications: List[TestSpecInProduct] = []
+
+    model_config = {"from_attributes": True}
+
+
+class LotWithProductSpecsResponse(LotResponse):
+    """Lot response with full product details and test specifications."""
+
+    products: List[ProductInLotWithSpecs] = []

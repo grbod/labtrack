@@ -31,6 +31,7 @@ export interface UpdateTestResultData {
   specification?: string
   method?: string
   notes?: string
+  pdf_source?: string
 }
 
 export interface BulkCreateData {

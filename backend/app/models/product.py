@@ -1,6 +1,6 @@
 """Product model for standardized product catalog."""
 
-from sqlalchemy import Column, String, Text, Index, Numeric, Integer
+from sqlalchemy import Column, String, Text, Index, Integer
 from sqlalchemy.orm import relationship, validates
 from app.models.base import BaseModel
 
@@ -15,7 +15,7 @@ class Product(BaseModel):
         flavor: Product flavor variant (e.g., "Vanilla", "Chocolate")
         size: Product size/weight (e.g., "2.5 lbs", "500g")
         display_name: Standardized display name for COAs
-        serving_size: Serving size in grams (e.g., 28.50)
+        serving_size: Serving size (e.g., "30g", "2 capsules", "1 tsp")
     """
 
     __tablename__ = "products"
@@ -26,7 +26,7 @@ class Product(BaseModel):
     flavor = Column(String(100), nullable=True)
     size = Column(String(50), nullable=True)
     display_name = Column(Text, nullable=False)
-    serving_size = Column(Numeric(5, 2), nullable=True)  # In grams, e.g., 28.50
+    serving_size = Column(String(50), nullable=True)  # e.g., "30g", "2 capsules", "1 tsp"
     expiry_duration_months = Column(Integer, nullable=False, default=36)  # Default 3 years
 
     # Relationships
@@ -61,11 +61,9 @@ class Product(BaseModel):
 
     @validates("serving_size")
     def validate_serving_size(self, key, value):
-        """Validate serving size is positive if provided."""
-        if value is not None and value <= 0:
-            raise ValueError("Serving size must be positive")
-        return value
-    
+        """Clean serving size string if provided."""
+        return value.strip() if value else None
+
     @validates("expiry_duration_months")
     def validate_expiry_duration(self, key, value):
         """Validate expiry duration is positive."""

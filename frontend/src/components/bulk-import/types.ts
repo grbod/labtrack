@@ -6,11 +6,13 @@ import type { ColumnDef } from "@tanstack/react-table"
  * - id: Unique identifier (nanoid)
  * - _errors: Array of validation error messages for this row
  * - _rowError: Single error message for row-level failures
+ * - _touched: Whether the row has been interacted with (for deferred validation)
  */
 export interface BulkImportRow {
   id: string
   _errors?: string[]
   _rowError?: string
+  _touched?: boolean
 }
 
 /**
@@ -40,7 +42,8 @@ export interface BulkImportGridProps<T extends BulkImportRow> {
   setData: React.Dispatch<React.SetStateAction<T[]>>
 
   // Column configuration
-  columns: ColumnDef<T>[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  columns: ColumnDef<T, any>[]
   editableColumns: string[] // IDs of columns that support Tab navigation
 
   // Validation

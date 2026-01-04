@@ -1,12 +1,20 @@
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Plus, Pencil, Trash2, Search, Loader2, Package, ArrowRight, FlaskConical, Check, X, ChevronDown } from "lucide-react"
+import { TestSpecsTooltip } from "@/components/domain/TestSpecsTooltip"
+import { LabTestTypeAutocomplete } from "@/components/form/LabTestTypeAutocomplete"
+import { generateDisplayName } from "@/lib/product-utils"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Table,
   TableBody,
@@ -41,15 +49,167 @@ import {
   useDeleteTestSpec,
 } from "@/hooks/useProducts"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
-import type { Product, ProductTestSpecification, LabTestType } from "@/types"
+import type { Product, ProductSize, ProductTestSpecification, LabTestType } from "@/types"
 import type { CreateProductData } from "@/api/products"
+
+// SizeChips component for inline size management
+interface SizeChipsProps {
+  sizes: ProductSize[]
+  productId: number
+  onAddSize: (productId: number, size: string) => void
+  onEditSize: (productId: number, sizeId: number, newSize: string) => void
+  onDeleteSize: (productId: number, sizeId: number) => void
+}
+
+function SizeChips({ sizes, productId, onAddSize, onEditSize, onDeleteSize }: SizeChipsProps) {
+  const [isAdding, setIsAdding] = useState(false)
+  const [newSize, setNewSize] = useState("")
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isAdding && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isAdding])
+
+  const handleAddSubmit = () => {
+    if (newSize.trim()) {
+      onAddSize(productId, newSize.trim())
+      setNewSize("")
+      setIsAdding(false)
+    }
+  }
+
+  const handleEditSubmit = (sizeId: number) => {
+    if (editValue.trim()) {
+      onEditSize(productId, sizeId, editValue.trim())
+      setEditingId(null)
+      setEditValue("")
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent, action: () => void) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      action()
+    } else if (e.key === "Escape") {
+      setIsAdding(false)
+      setEditingId(null)
+      setNewSize("")
+      setEditValue("")
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {sizes.map((size) => (
+        <Popover key={size.id} open={editingId === size.id} onOpenChange={(open) => {
+          if (open) {
+            setEditingId(size.id)
+            setEditValue(size.size)
+          } else {
+            setEditingId(null)
+            setEditValue("")
+          }
+        }}>
+          <PopoverTrigger asChild>
+            <button
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors group"
+            >
+              {size.size}
+              <X className="h-3 w-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-48 p-2" align="start">
+            <div className="space-y-2">
+              <Input
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, () => handleEditSubmit(size.id))}
+                placeholder="Edit size..."
+                className="h-8 text-sm"
+                autoFocus
+              />
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  onClick={() => handleEditSubmit(size.id)}
+                  disabled={!editValue.trim()}
+                  className="flex-1 h-7 text-xs bg-slate-900 hover:bg-slate-800"
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onDeleteSize(productId, size.id)
+                    setEditingId(null)
+                  }}
+                  className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      ))}
+
+      {isAdding ? (
+        <div className="inline-flex items-center gap-1">
+          <Input
+            ref={inputRef}
+            value={newSize}
+            onChange={(e) => setNewSize(e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, handleAddSubmit)}
+            onBlur={() => {
+              if (!newSize.trim()) setIsAdding(false)
+            }}
+            placeholder="e.g., 2lb"
+            className="h-6 w-16 text-[12px] px-1.5"
+          />
+          <button
+            onClick={handleAddSubmit}
+            disabled={!newSize.trim()}
+            className="p-0.5 rounded hover:bg-slate-100 text-slate-500 hover:text-emerald-600 disabled:opacity-50"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              setIsAdding(false)
+              setNewSize("")
+            }}
+            className="p-0.5 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setIsAdding(true)}
+          className="inline-flex items-center justify-center w-5 h-5 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+          title="Add size"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {sizes.length === 0 && !isAdding && (
+        <span className="text-[12px] text-slate-400">No sizes</span>
+      )}
+    </div>
+  )
+}
 
 const productSchema = z.object({
   brand: z.string().min(1, "Brand is required"),
   product_name: z.string().min(1, "Product name is required"),
   flavor: z.string().optional(),
-  size: z.string().optional(),
-  display_name: z.string().min(1, "Display name is required"),
+  version: z.string().optional(),
   serving_size: z.string().optional(),
   expiry_duration_months: z.number().int().positive(),
 })
@@ -66,7 +226,6 @@ export function ProductsPage() {
   // Test specs dialog state
   const [isTestSpecsDialogOpen, setIsTestSpecsDialogOpen] = useState(false)
   const [selectedProductForSpecs, setSelectedProductForSpecs] = useState<Product | null>(null)
-  const [isAddTestDialogOpen, setIsAddTestDialogOpen] = useState(false)
   const [selectedTestType, setSelectedTestType] = useState<LabTestType | null>(null)
   const [testSpecification, setTestSpecification] = useState("")
   const [isRequired, setIsRequired] = useState(true)
@@ -92,7 +251,21 @@ export function ProductsPage() {
     },
   })
 
-  const { register, handleSubmit, reset, formState: { errors } } = form
+  const { register, handleSubmit, reset, formState: { errors }, watch } = form
+
+  // Watch fields for live display name preview
+  const watchedBrand = watch("brand", "")
+  const watchedProductName = watch("product_name", "")
+  const watchedFlavor = watch("flavor", "")
+  const watchedVersion = watch("version", "")
+
+  const previewDisplayName = generateDisplayName(
+    watchedBrand,
+    watchedProductName,
+    watchedFlavor,
+    undefined, // Size is now managed separately via chips
+    watchedVersion
+  )
 
   const openCreateDialog = () => {
     setEditingProduct(null)
@@ -100,12 +273,17 @@ export function ProductsPage() {
       brand: "",
       product_name: "",
       flavor: "",
-      size: "",
-      display_name: "",
+      version: "",
       serving_size: "",
       expiry_duration_months: 36,
     })
     setIsDialogOpen(true)
+  }
+
+  // Extract version from existing display name (if it ends with (VX))
+  const extractVersion = (displayName: string): string => {
+    const match = displayName.match(/\(V(\d+)\)$/)
+    return match ? match[1] : ""
   }
 
   const openEditDialog = (product: Product) => {
@@ -114,23 +292,30 @@ export function ProductsPage() {
       brand: product.brand,
       product_name: product.product_name,
       flavor: product.flavor || "",
-      size: product.size || "",
-      display_name: product.display_name,
-      serving_size: product.serving_size?.toString() || "",
+      version: extractVersion(product.display_name),
+      serving_size: product.serving_size || "",
       expiry_duration_months: product.expiry_duration_months,
     })
     setIsDialogOpen(true)
   }
 
   const onSubmit = async (formData: ProductForm) => {
-    const servingSizeNum = formData.serving_size ? parseFloat(formData.serving_size) : undefined
+    // Auto-generate display name from fields (size is managed separately via chips)
+    const displayName = generateDisplayName(
+      formData.brand,
+      formData.product_name,
+      formData.flavor,
+      undefined, // Size is managed separately
+      formData.version
+    )
+
     const data: CreateProductData = {
       brand: formData.brand,
       product_name: formData.product_name,
-      display_name: formData.display_name,
+      display_name: displayName,
       flavor: formData.flavor || undefined,
-      size: formData.size || undefined,
-      serving_size: servingSizeNum && !isNaN(servingSizeNum) ? servingSizeNum : undefined,
+      // Note: size is now managed via inline chips, not in the edit dialog
+      serving_size: formData.serving_size || undefined,
       expiry_duration_months: formData.expiry_duration_months,
     }
 
@@ -152,21 +337,42 @@ export function ProductsPage() {
     }
   }
 
-  const openTestSpecsDialog = (product: Product) => {
-    setSelectedProductForSpecs(product)
-    setIsTestSpecsDialogOpen(true)
+  // Size management handlers (placeholder until backend supports multi-size)
+  const handleAddSize = (productId: number, size: string) => {
+    // TODO: Implement when backend supports multi-size
+    console.log(`Add size "${size}" to product ${productId}`)
+    alert(`Size "${size}" will be saved when backend is ready. For now, edit the product to change the size.`)
   }
 
-  const openAddTestDialog = () => {
+  const handleEditSize = (productId: number, sizeId: number, newSize: string) => {
+    // TODO: Implement when backend supports multi-size
+    console.log(`Edit size ${sizeId} to "${newSize}" for product ${productId}`)
+    alert(`Size edit will be saved when backend is ready. For now, edit the product to change the size.`)
+  }
+
+  const handleDeleteSize = (productId: number, sizeId: number) => {
+    // TODO: Implement when backend supports multi-size
+    console.log(`Delete size ${sizeId} from product ${productId}`)
+    alert(`Size delete will be saved when backend is ready. For now, edit the product to change the size.`)
+  }
+
+  const openTestSpecsDialog = (product: Product) => {
+    setSelectedProductForSpecs(product)
     setSelectedTestType(null)
     setTestSpecification("")
     setIsRequired(true)
-    setIsAddTestDialogOpen(true)
+    setIsTestSpecsDialogOpen(true)
   }
 
-  const handleAddTestType = (labTest: LabTestType) => {
+  const handleSelectTestType = (labTest: LabTestType) => {
     setSelectedTestType(labTest)
     setTestSpecification(labTest.default_specification || "")
+  }
+
+  const handleClearTestType = () => {
+    setSelectedTestType(null)
+    setTestSpecification("")
+    setIsRequired(true)
   }
 
   const handleCreateTestSpec = async () => {
@@ -181,9 +387,10 @@ export function ProductsPage() {
           is_required: isRequired,
         },
       })
-      setIsAddTestDialogOpen(false)
+      // Clear fields for next entry
       setSelectedTestType(null)
       setTestSpecification("")
+      setIsRequired(true)
     } catch {
       // Error handled by mutation
     }
@@ -323,7 +530,7 @@ export function ProductsPage() {
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Brand</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Product Name</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Flavor</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Size</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Sizes</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Serving</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Expiry</TableHead>
                 <TableHead className="w-[120px] font-semibold text-slate-600 text-[13px] tracking-wide text-center">Specifications</TableHead>
@@ -336,23 +543,26 @@ export function ProductsPage() {
                   <TableCell className="font-semibold text-slate-900 text-[14px]">{product.brand}</TableCell>
                   <TableCell className="text-slate-700 text-[14px]">{product.product_name}</TableCell>
                   <TableCell className="text-slate-500 text-[14px]">{product.flavor || "-"}</TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">{product.size || "-"}</TableCell>
+                  <TableCell>
+                    <SizeChips
+                      sizes={product.sizes}
+                      productId={product.id}
+                      onAddSize={handleAddSize}
+                      onEditSize={handleEditSize}
+                      onDeleteSize={handleDeleteSize}
+                    />
+                  </TableCell>
                   <TableCell className="text-slate-500 text-[14px]">
-                    {product.serving_size ? `${product.serving_size}g` : "-"}
+                    {product.serving_size || "-"}
                   </TableCell>
                   <TableCell className="text-slate-500 text-[14px]">
                     {product.expiry_duration_months} mo
                   </TableCell>
                   <TableCell className="text-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
+                    <TestSpecsTooltip
+                      productId={product.id}
                       onClick={() => openTestSpecsDialog(product)}
-                      className="h-8 w-8 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Test Specifications"
-                    >
-                      <FlaskConical className="h-4 w-4" />
-                    </Button>
+                    />
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-0.5">
@@ -454,39 +664,45 @@ export function ProductsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-[1fr_80px] gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="flavor" className="text-[13px] font-semibold text-slate-700">Flavor</Label>
                 <Input id="flavor" {...register("flavor")} className="border-slate-200 h-10" />
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="size" className="text-[13px] font-semibold text-slate-700">Size</Label>
-                <Input id="size" {...register("size")} placeholder="e.g., 2.5 lbs" className="border-slate-200 h-10" />
+                <Label htmlFor="version" className="text-[13px] font-semibold text-slate-700">Version</Label>
+                <Input
+                  id="version"
+                  {...register("version")}
+                  placeholder="1, 2..."
+                  className="border-slate-200 h-10"
+                />
               </div>
             </div>
 
+            <p className="text-[11px] text-slate-400">
+              Sizes are managed in the product table using the inline chips
+            </p>
+
+            {/* Display Name Preview */}
             <div className="space-y-1.5">
-              <Label htmlFor="display_name" className="text-[13px] font-semibold text-slate-700">Display Name *</Label>
-              <Input
-                id="display_name"
-                {...register("display_name")}
-                aria-invalid={!!errors.display_name}
-                className="border-slate-200 h-10"
-              />
-              {errors.display_name && (
-                <p className="text-[13px] text-red-600">{errors.display_name.message}</p>
-              )}
+              <Label className="text-[13px] font-semibold text-slate-500">Display Name (auto-generated)</Label>
+              <div className="h-10 px-3 flex items-center rounded-lg border border-slate-300 bg-slate-100 text-[14px] text-slate-500 cursor-not-allowed">
+                {previewDisplayName || <span className="text-slate-400 italic">Enter brand and product name...</span>}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Generated from Brand - Product Name - Flavor (Version)
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor="serving_size" className="text-[13px] font-semibold text-slate-700">Serving Size (g)</Label>
+                <Label htmlFor="serving_size" className="text-[13px] font-semibold text-slate-700">Serving Size</Label>
                 <Input
                   id="serving_size"
-                  type="number"
-                  step="0.01"
                   {...register("serving_size")}
+                  placeholder="e.g., 30g, 2 capsules, 1 tsp"
                   className="border-slate-200 h-10"
                 />
               </div>
@@ -496,7 +712,7 @@ export function ProductsPage() {
                 <Input
                   id="expiry_duration_months"
                   type="number"
-                  {...register("expiry_duration_months")}
+                  {...register("expiry_duration_months", { valueAsNumber: true })}
                   className="border-slate-200 h-10"
                 />
               </div>
@@ -535,19 +751,58 @@ export function ProductsPage() {
           </DialogHeader>
 
           <div className="space-y-4 mt-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[13px] text-slate-600">
-                {testSpecs?.length ?? 0} test{(testSpecs?.length ?? 0) !== 1 ? "s" : ""} configured
-              </p>
+            {/* Inline add test row - all 4 elements always visible */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 max-w-[240px]">
+                <LabTestTypeAutocomplete
+                  labTestTypes={labTestTypes?.items || []}
+                  excludeIds={testSpecs?.map(s => s.lab_test_type_id) || []}
+                  value={selectedTestType}
+                  onSelect={handleSelectTestType}
+                  onClear={handleClearTestType}
+                  placeholder="Search tests..."
+                />
+              </div>
+
+              <Input
+                value={testSpecification}
+                onChange={(e) => setTestSpecification(e.target.value)}
+                placeholder="Specification..."
+                className="w-44 h-9"
+                disabled={!selectedTestType}
+              />
+
+              <label className="flex items-center gap-1.5 text-sm whitespace-nowrap text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={isRequired}
+                  onChange={(e) => setIsRequired(e.target.checked)}
+                  disabled={!selectedTestType}
+                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                />
+                Required
+              </label>
+
               <Button
                 size="sm"
-                onClick={openAddTestDialog}
+                onClick={handleCreateTestSpec}
+                disabled={!selectedTestType || !testSpecification || createTestSpecMutation.isPending}
                 className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-9"
               >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Test
+                {createTestSpecMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add
+                  </>
+                )}
               </Button>
             </div>
+
+            <p className="text-[13px] text-slate-500 mt-2">
+              {testSpecs?.length ?? 0} test{(testSpecs?.length ?? 0) !== 1 ? "s" : ""} configured
+            </p>
 
             {testSpecs && testSpecs.length > 0 ? (
               <div className="rounded-xl border border-slate-200/60 overflow-hidden">
@@ -654,125 +909,6 @@ export function ProductsPage() {
               Close
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Test Type Dialog */}
-      <Dialog open={isAddTestDialogOpen} onOpenChange={setIsAddTestDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-[18px] font-bold text-slate-900">Add Test Specification</DialogTitle>
-            <DialogDescription className="text-[14px] text-slate-500">
-              Select a test type and configure the specification
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 mt-2">
-            {!selectedTestType ? (
-              <>
-                <div className="max-h-[350px] overflow-y-auto space-y-1">
-                  {labTestTypes?.items.map((labTest) => {
-                    const alreadyAdded = testSpecs?.some(s => s.lab_test_type_id === labTest.id)
-                    return (
-                      <button
-                        key={labTest.id}
-                        type="button"
-                        onClick={() => handleAddTestType(labTest)}
-                        disabled={alreadyAdded}
-                        className="w-full text-left p-3.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold text-slate-900 text-[14px]">{labTest.test_name}</p>
-                            <p className="text-[12px] text-slate-500 mt-0.5">
-                              {labTest.test_category}
-                              {labTest.default_unit && ` - ${labTest.default_unit}`}
-                            </p>
-                          </div>
-                          {alreadyAdded && (
-                            <span className="text-[11px] px-2 py-1 rounded-full bg-slate-100 text-slate-500 font-semibold">
-                              Added
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-3">
-                  <div className="rounded-xl bg-blue-50/50 border border-blue-200/60 p-4">
-                    <p className="font-semibold text-slate-900 text-[14px]">{selectedTestType.test_name}</p>
-                    <p className="text-[12px] text-slate-500 mt-0.5">{selectedTestType.test_category}</p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="specification" className="text-[13px] font-semibold text-slate-700">
-                      Specification *
-                    </Label>
-                    <Input
-                      id="specification"
-                      value={testSpecification}
-                      onChange={(e) => setTestSpecification(e.target.value)}
-                      placeholder="e.g., < 10,000 CFU/g, Negative"
-                      className="border-slate-200 h-10"
-                    />
-                    <p className="text-[11px] text-slate-500">
-                      Default: {selectedTestType.default_specification || "Not set"}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      id="is_required"
-                      type="checkbox"
-                      checked={isRequired}
-                      onChange={(e) => setIsRequired(e.target.checked)}
-                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
-                    />
-                    <Label htmlFor="is_required" className="font-normal text-[14px] text-slate-700">
-                      Mark as required test
-                    </Label>
-                  </div>
-                </div>
-
-                <DialogFooter className="flex gap-2 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setSelectedTestType(null)}
-                    className="border-slate-200 h-10"
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleCreateTestSpec}
-                    disabled={!testSpecification || createTestSpecMutation.isPending}
-                    className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
-                  >
-                    {createTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Add Specification
-                  </Button>
-                </DialogFooter>
-              </>
-            )}
-
-            {!selectedTestType && (
-              <DialogFooter className="pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsAddTestDialogOpen(false)}
-                  className="border-slate-200 h-10"
-                >
-                  Cancel
-                </Button>
-              </DialogFooter>
-            )}
-          </div>
         </DialogContent>
       </Dialog>
 

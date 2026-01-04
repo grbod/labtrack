@@ -4,11 +4,11 @@ import {
   Package,
   FlaskConical,
   TestTube,
-  FileInput,
   CheckSquare,
   FileText,
   ShieldCheck,
   Grid3x3,
+  ClipboardList,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -33,15 +33,15 @@ const navSections: NavSection[] = [
   {
     title: "Configuration",
     items: [
-      { label: "Products", href: "/products", icon: <Package className="h-[18px] w-[18px]" /> },
       { label: "Lab Test Types", href: "/lab-tests", icon: <FlaskConical className="h-[18px] w-[18px]" /> },
+      { label: "Products", href: "/products", icon: <Package className="h-[18px] w-[18px]" /> },
     ],
   },
   {
     title: "Sample Management",
     items: [
       { label: "Create Sample", href: "/samples", icon: <TestTube className="h-[18px] w-[18px]" /> },
-      { label: "Import Results", href: "/import", icon: <FileInput className="h-[18px] w-[18px]" /> },
+      { label: "Sample Tracker", href: "/tracker", icon: <ClipboardList className="h-[18px] w-[18px]" /> },
     ],
   },
   {

@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react"
-import { createColumnHelper, type ColumnDef } from "@tanstack/react-table"
+import { createColumnHelper } from "@tanstack/react-table"
 import { nanoid } from "nanoid"
 import { BulkImportGrid, createEditableCell } from "./BulkImportGrid"
 import { useBulkImportProducts } from "@/hooks/useProducts"
@@ -12,15 +12,16 @@ import {
   exportTemplate,
   parseExcelFile,
 } from "@/lib/bulk-import/excel-utils"
+import { generateDisplayName } from "@/lib/product-utils"
 import type { EditingCell } from "./types"
 
 const createEmptyRow = (): ProductGridRow => ({
   id: nanoid(),
   brand: "",
   product_name: "",
-  display_name: "",
   flavor: "",
   size: "",
+  version: "",
   serving_size: "",
   expiry_duration_months: 36,
 })
@@ -35,18 +36,18 @@ export function ProductBulkImport() {
   const editableColumns = [
     "brand",
     "product_name",
-    "display_name",
     "flavor",
     "size",
+    "version",
     "serving_size",
     "expiry_duration_months",
   ]
 
-  // Handle cell value updates
+  // Handle cell value updates - also marks row as touched for validation
   const updateCellValue = useCallback(
     (rowId: string, columnId: string, value: any) => {
       setData((prev) =>
-        prev.map((row) => (row.id === rowId ? { ...row, [columnId]: value } : row))
+        prev.map((row) => (row.id === rowId ? { ...row, [columnId]: value, _touched: true } : row))
       )
     },
     []
@@ -116,7 +117,7 @@ export function ProductBulkImport() {
   // Column definitions
   const columnHelper = createColumnHelper<ProductGridRow>()
 
-  const columns = useMemo<ColumnDef<ProductGridRow>[]>(
+  const columns = useMemo(
     () => [
       // Checkbox column
       columnHelper.display({
@@ -176,24 +177,6 @@ export function ProductBulkImport() {
         size: 200,
       }),
 
-      // Display Name
-      columnHelper.accessor("display_name", {
-        header: "Display Name *",
-        cell: createEditableCell(
-          "display_name",
-          editableColumns,
-          editingCell,
-          editValue,
-          setEditingCell,
-          setEditValue,
-          updateCellValue,
-          handleCellKeyDown,
-          "text",
-          "e.g., Truvani Organic Whey Protein"
-        ),
-        size: 250,
-      }),
-
       // Flavor
       columnHelper.accessor("flavor", {
         header: "Flavor",
@@ -228,6 +211,45 @@ export function ProductBulkImport() {
           "e.g., 2 lbs"
         ),
         size: 100,
+      }),
+
+      // Version
+      columnHelper.accessor("version", {
+        header: "Version",
+        cell: createEditableCell(
+          "version",
+          editableColumns,
+          editingCell,
+          editValue,
+          setEditingCell,
+          setEditValue,
+          updateCellValue,
+          handleCellKeyDown,
+          "text",
+          "e.g., 1, 2"
+        ),
+        size: 80,
+      }),
+
+      // Display Name Preview (computed, read-only)
+      columnHelper.display({
+        id: "display_name_preview",
+        header: "Display Name (Preview)",
+        cell: ({ row }) => {
+          const preview = generateDisplayName(
+            row.original.brand,
+            row.original.product_name,
+            row.original.flavor,
+            row.original.size,
+            row.original.version
+          )
+          return (
+            <span className="text-slate-600 text-[13px] italic truncate block" title={preview}>
+              {preview || <span className="text-slate-400">Enter brand & product...</span>}
+            </span>
+          )
+        },
+        size: 250,
       }),
 
       // Serving Size
@@ -282,9 +304,9 @@ export function ProductBulkImport() {
       [
         "Brand",
         "Product Name",
-        "Display Name",
         "Flavor",
         "Size",
+        "Version",
         "Serving Size",
         "Expiry Duration (months)",
       ],
@@ -298,8 +320,8 @@ export function ProductBulkImport() {
     const text = e.clipboardData.getData('text/plain')
     if (!text.trim()) return
 
-    // Template column order: Brand, Product Name, Display Name, Flavor, Size, Serving Size, Expiry
-    const columnOrder = ['brand', 'product_name', 'display_name', 'flavor', 'size', 'serving_size', 'expiry_duration_months'] as const
+    // Template column order: Brand, Product Name, Flavor, Size, Version, Serving Size, Expiry
+    const columnOrder = ['brand', 'product_name', 'flavor', 'size', 'version', 'serving_size', 'expiry_duration_months'] as const
 
     const lines = text.trim().split('\n')
     const newRows = lines.map(line => {
@@ -314,6 +336,8 @@ export function ProductBulkImport() {
           }
         }
       })
+      // Mark pasted rows as touched so they get validated
+      row._touched = true
       return row
     })
 
@@ -332,29 +356,48 @@ export function ProductBulkImport() {
         {
           Brand: "brand",
           "Product Name": "product_name",
-          "Display Name": "display_name",
           Flavor: "flavor",
           Size: "size",
+          Version: "version",
           "Serving Size": "serving_size",
           "Expiry Duration (months)": "expiry_duration_months",
         },
         {
           flavor: "",
           size: "",
+          version: "",
           serving_size: "",
           expiry_duration_months: 36,
         }
       )
-      setData(rows)
+      // Mark imported rows as touched so they get validated
+      setData(rows.map(row => ({ ...row, _touched: true })))
     } catch (error) {
       console.error("Import failed:", error)
     }
   }, [])
 
-  // Submit handler
+  // Submit handler - generates display_name before sending to API
   const handleSubmit = useCallback(
     async (validRows: Omit<ProductGridRow, "id" | "_errors" | "_rowError">[]) => {
-      await bulkImportMutation.mutateAsync(validRows)
+      // Transform rows to include generated display_name
+      const rowsWithDisplayName = validRows.map(row => ({
+        brand: row.brand,
+        product_name: row.product_name,
+        flavor: row.flavor || undefined,
+        size: row.size || undefined,
+        serving_size: row.serving_size || undefined,
+        expiry_duration_months: row.expiry_duration_months,
+        // Generate display_name from fields
+        display_name: generateDisplayName(
+          row.brand,
+          row.product_name,
+          row.flavor,
+          row.size,
+          row.version
+        ),
+      }))
+      await bulkImportMutation.mutateAsync(rowsWithDisplayName)
     },
     [bulkImportMutation]
   )

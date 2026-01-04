@@ -5,17 +5,23 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
-from app.models import Lot, LotProduct, Product, Sublot
+from app.models import Lot, LotProduct, Product, Sublot, ProductTestSpecification
 from app.models.enums import LotType, LotStatus
 from app.schemas.lot import (
     LotCreate,
     LotUpdate,
     LotResponse,
     LotWithProductsResponse,
+    LotWithProductSummaryResponse,
+    LotWithProductSpecsResponse,
     LotListResponse,
     ProductInLot,
+    ProductInLotWithSpecs,
+    ProductSummary,
+    TestSpecInProduct,
     SublotCreate,
     SublotBulkCreate,
     SublotResponse,
@@ -59,8 +65,11 @@ async def list_lots(
     status_filter: Optional[LotStatus] = Query(None, alias="status"),
     lot_type: Optional[LotType] = None,
 ) -> LotListResponse:
-    """List all lots with pagination and filtering."""
-    query = db.query(Lot)
+    """List all lots with pagination, filtering, and product info."""
+    # Eager load products to avoid N+1 queries
+    query = db.query(Lot).options(
+        joinedload(Lot.lot_products).joinedload(LotProduct.product)
+    )
 
     # Apply filters
     if search:
@@ -76,8 +85,19 @@ async def list_lots(
     if lot_type:
         query = query.filter(Lot.lot_type == lot_type)
 
-    # Get total count
-    total = query.count()
+    # Get total count (separate query without joins for accurate count)
+    count_query = db.query(func.count(Lot.id))
+    if search:
+        search_term = f"%{search}%"
+        count_query = count_query.filter(
+            (Lot.lot_number.ilike(search_term))
+            | (Lot.reference_number.ilike(search_term))
+        )
+    if status_filter:
+        count_query = count_query.filter(Lot.status == status_filter)
+    if lot_type:
+        count_query = count_query.filter(Lot.lot_type == lot_type)
+    total = count_query.scalar()
 
     # Apply pagination
     offset = (page - 1) * page_size
@@ -90,8 +110,26 @@ async def list_lots(
 
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
+    # Build response with product summaries
+    items = []
+    for lot in lots:
+        lot_response = LotWithProductSummaryResponse.model_validate(lot)
+        lot_response.products = [
+            ProductSummary(
+                id=lp.product.id,
+                brand=lp.product.brand,
+                product_name=lp.product.product_name,
+                flavor=lp.product.flavor,
+                size=lp.product.size,
+                percentage=lp.percentage,
+            )
+            for lp in lot.lot_products
+            if lp.product
+        ]
+        items.append(lot_response)
+
     return LotListResponse(
-        items=[LotResponse.model_validate(lot) for lot in lots],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -142,6 +180,79 @@ async def get_lot(
     return response
 
 
+@router.get("/{lot_id}/with-specs", response_model=LotWithProductSpecsResponse)
+async def get_lot_with_specs(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> LotWithProductSpecsResponse:
+    """
+    Get a lot by ID with products and their test specifications.
+    Used by the Sample Modal to display inherited tests.
+    """
+    # Eager load products with test specifications and lab test types
+    lot = (
+        db.query(Lot)
+        .options(
+            joinedload(Lot.lot_products)
+            .joinedload(LotProduct.product)
+            .joinedload(Product.test_specifications)
+            .joinedload(ProductTestSpecification.lab_test_type)
+        )
+        .filter(Lot.id == lot_id)
+        .first()
+    )
+
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Build response with products and their test specs
+    products_with_specs = []
+    for lp in lot.lot_products:
+        if not lp.product:
+            continue
+
+        product = lp.product
+        test_specs = []
+
+        for spec in product.test_specifications:
+            # Get lab test type info
+            lab_test = spec.lab_test_type
+            test_specs.append(
+                TestSpecInProduct(
+                    id=spec.id,
+                    lab_test_type_id=spec.lab_test_type_id,
+                    test_name=lab_test.test_name if lab_test else "Unknown",
+                    test_category=lab_test.test_category if lab_test else None,
+                    test_method=lab_test.test_method if lab_test else None,
+                    test_unit=lab_test.default_unit if lab_test else None,
+                    specification=spec.specification,
+                    is_required=spec.is_required,
+                )
+            )
+
+        products_with_specs.append(
+            ProductInLotWithSpecs(
+                id=product.id,
+                brand=product.brand,
+                product_name=product.product_name,
+                flavor=product.flavor,
+                size=product.size,
+                display_name=product.display_name,
+                percentage=lp.percentage,
+                test_specifications=test_specs,
+            )
+        )
+
+    response = LotWithProductSpecsResponse.model_validate(lot)
+    response.products = products_with_specs
+
+    return response
+
+
 @router.post("", response_model=LotResponse, status_code=status.HTTP_201_CREATED)
 async def create_lot(
     lot_in: LotCreate,
@@ -185,7 +296,7 @@ async def create_lot(
         reference_number=reference_number.upper(),
         mfg_date=lot_in.mfg_date,
         exp_date=lot_in.exp_date,
-        status=LotStatus.PENDING,
+        status=LotStatus.AWAITING_RESULTS,
         generate_coa=lot_in.generate_coa,
     )
     db.add(lot)
@@ -249,6 +360,64 @@ async def update_lot(
     return LotResponse.model_validate(lot)
 
 
+@router.post("/{lot_id}/submit-for-review", response_model=LotResponse)
+async def submit_for_review(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> LotResponse:
+    """Submit a lot for QC review (moves from under_review to awaiting_release)."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Must be in under_review status to submit
+    if lot.status != LotStatus.UNDER_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot submit for review from status '{lot.status.value}'. Must be 'under_review'.",
+        )
+
+    lot.status = LotStatus.AWAITING_RELEASE
+    db.commit()
+    db.refresh(lot)
+
+    return LotResponse.model_validate(lot)
+
+
+@router.post("/{lot_id}/resubmit", response_model=LotResponse)
+async def resubmit_lot(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> LotResponse:
+    """Resubmit a rejected lot for review."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Must be rejected to resubmit
+    if lot.status != LotStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot resubmit from status '{lot.status.value}'. Must be 'rejected'.",
+        )
+
+    # Clear rejection reason and move back to awaiting_release
+    lot.rejection_reason = None
+    lot.status = LotStatus.AWAITING_RELEASE
+    db.commit()
+    db.refresh(lot)
+
+    return LotResponse.model_validate(lot)
+
+
 @router.patch("/{lot_id}/status", response_model=LotResponse)
 async def update_lot_status(
     lot_id: int,
@@ -263,6 +432,18 @@ async def update_lot_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lot not found",
         )
+
+    # Handle rejection - require reason
+    if status_update.status == LotStatus.REJECTED:
+        if not status_update.rejection_reason or not status_update.rejection_reason.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Rejection reason is required when rejecting a lot",
+            )
+        lot.rejection_reason = status_update.rejection_reason.strip()
+    elif status_update.status == LotStatus.APPROVED:
+        # Clear any previous rejection reason when approving
+        lot.rejection_reason = None
 
     try:
         lot.update_status(status_update.status)
@@ -292,11 +473,11 @@ async def delete_lot(
             detail="Lot not found",
         )
 
-    # Only allow deletion of pending lots
-    if lot.status != LotStatus.PENDING:
+    # Only allow deletion of awaiting_results lots
+    if lot.status != LotStatus.AWAITING_RESULTS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only delete lots in pending status",
+            detail="Can only delete lots in awaiting_results status",
         )
 
     db.delete(lot)

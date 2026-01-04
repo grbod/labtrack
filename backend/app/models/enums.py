@@ -23,9 +23,10 @@ class LotType(str, enum.Enum):
 class LotStatus(str, enum.Enum):
     """Lot status enumeration."""
 
-    PENDING = "pending"
+    AWAITING_RESULTS = "awaiting_results"
     PARTIAL_RESULTS = "partial_results"  # Some results in, missing required tests
     UNDER_REVIEW = "under_review"
+    AWAITING_RELEASE = "awaiting_release"  # Lab Tech submitted, awaiting QC Manager approval
     APPROVED = "approved"
     RELEASED = "released"
     REJECTED = "rejected"

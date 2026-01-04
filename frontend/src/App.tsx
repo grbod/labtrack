@@ -9,10 +9,11 @@ import { DashboardPage } from "@/pages/Dashboard"
 import { ProductsPage } from "@/pages/Products"
 import { LabTestTypesPage } from "@/pages/LabTestTypes"
 import { CreateSamplePage } from "@/pages/CreateSample"
-import { ImportResultsPage } from "@/pages/ImportResults"
+import { SampleTrackerPage } from "@/pages/SampleTracker"
 import { ApprovalsPage } from "@/pages/Approvals"
 import { PublishPage } from "@/pages/Publish"
 import { GridShowcasePage } from "@/pages/GridShowcase"
+import { SettingsPage } from "@/pages/Settings"
 
 // Create a client
 const queryClient = new QueryClient({
@@ -47,10 +48,11 @@ function AppRoutes() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/lab-tests" element={<LabTestTypesPage />} />
         <Route path="/samples" element={<CreateSamplePage />} />
-        <Route path="/import" element={<ImportResultsPage />} />
+        <Route path="/tracker" element={<SampleTrackerPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/publish" element={<PublishPage />} />
         <Route path="/grid-showcase" element={<GridShowcasePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       {/* Catch all */}

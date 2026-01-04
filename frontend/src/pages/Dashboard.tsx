@@ -53,7 +53,7 @@ export function DashboardPage() {
   const { data: pendingCount, isLoading: pendingLoading } = usePendingReviewCount()
 
   const pendingApprovals = pendingCount?.pending_count ?? 0
-  const activeSamples = (statusCounts?.pending ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
+  const activeSamples = (statusCounts?.awaiting_results ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
 
   return (
     <div className="space-y-8">
@@ -202,7 +202,7 @@ export function DashboardPage() {
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
-                        lot.status === "pending"
+                        lot.status === "awaiting_results"
                           ? "bg-amber-100 text-amber-700"
                           : lot.status === "approved"
                           ? "bg-emerald-100 text-emerald-700"

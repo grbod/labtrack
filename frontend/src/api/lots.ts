@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { Lot, LotWithProducts, LotType, LotStatus, PaginatedResponse } from "@/types"
+import type { Lot, LotWithProducts, LotWithProductSpecs, LotType, LotStatus, PaginatedResponse } from "@/types"
 
 export interface LotFilters {
   page?: number
@@ -65,6 +65,12 @@ export const lotsApi = {
     return response.data
   },
 
+  /** Get lot with products and their test specifications (for Sample Modal) */
+  getWithSpecs: async (id: number): Promise<LotWithProductSpecs> => {
+    const response = await api.get<LotWithProductSpecs>(`/lots/${id}/with-specs`)
+    return response.data
+  },
+
   getStatusCounts: async (): Promise<Record<string, number>> => {
     const response = await api.get<Record<string, number>>("/lots/status-counts")
     return response.data
@@ -80,8 +86,21 @@ export const lotsApi = {
     return response.data
   },
 
-  updateStatus: async (id: number, status: LotStatus): Promise<Lot> => {
-    const response = await api.patch<Lot>(`/lots/${id}/status`, { status })
+  updateStatus: async (id: number, status: LotStatus, rejectionReason?: string): Promise<Lot> => {
+    const response = await api.patch<Lot>(`/lots/${id}/status`, {
+      status,
+      rejection_reason: rejectionReason,
+    })
+    return response.data
+  },
+
+  submitForReview: async (id: number): Promise<Lot> => {
+    const response = await api.post<Lot>(`/lots/${id}/submit-for-review`)
+    return response.data
+  },
+
+  resubmit: async (id: number): Promise<Lot> => {
+    const response = await api.post<Lot>(`/lots/${id}/resubmit`)
     return response.data
   },
 

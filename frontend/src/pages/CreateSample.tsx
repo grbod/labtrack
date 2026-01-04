@@ -2,13 +2,9 @@ import { useState, useCallback, useMemo, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Loader2, Package, Beaker, X, CalendarDays, Trash2, ChevronUp, ChevronDown } from "lucide-react"
+import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown } from "lucide-react"
 import { useNavigate } from "react-router-dom"
-import { AgGridReact } from "ag-grid-react"
-import type { ColDef, ICellRendererParams } from "ag-grid-community"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
-import "ag-grid-community/styles/ag-grid.css"
-import "ag-grid-community/styles/ag-theme-alpine.css"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,7 +20,7 @@ import {
 import { ProductAutocomplete } from "@/components/form/ProductAutocomplete"
 
 import { useProducts } from "@/hooks/useProducts"
-import { useCreateLot, useLots, useCreateSublotsBulk } from "@/hooks/useLots"
+import { useCreateLot, useCreateSublotsBulk } from "@/hooks/useLots"
 import type { Product, LotType } from "@/types"
 
 // User-selectable lot types (excludes sublot which is created automatically)
@@ -64,7 +60,7 @@ interface SelectedProduct {
   percentage?: number
 }
 
-// Types for AG-Grid rows
+// Types for table rows
 interface SubBatchRow {
   id: number
   mfg_date: string
@@ -85,11 +81,20 @@ export function CreateSamplePage() {
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>([])
   const [productSearch, setProductSearch] = useState("")
 
+  // Standard lot product autocomplete state
+  const [standardProductText, setStandardProductText] = useState("")
+  const [standardProductTouched, setStandardProductTouched] = useState(false)
+
+  // Parent lot product autocomplete state
+  const [parentProductText, setParentProductText] = useState("")
+  const [parentProductTouched, setParentProductTouched] = useState(false)
+
   // Sub-batch state for parent_lot
   const [subBatches, setSubBatches] = useState<SubBatchRow[]>([
     { id: 1, mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }
   ])
   const [nextSubBatchId, setNextSubBatchId] = useState(2)
+  const [editingSubBatchCell, setEditingSubBatchCell] = useState<{ rowId: number; columnId: string } | null>(null)
 
   // Composite products state for multi_sku_composite
   const [compositeProducts, setCompositeProducts] = useState<CompositeProductRow[]>([
@@ -102,7 +107,6 @@ export function CreateSamplePage() {
   const [expiryNudgeDays, setExpiryNudgeDays] = useState(0)
 
   const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
-  const { data: lotsData } = useLots({ page: 1, page_size: 10 })
   const createMutation = useCreateLot()
   const createSublotsMutation = useCreateSublotsBulk()
 
@@ -127,6 +131,16 @@ export function CreateSamplePage() {
     }
     return date.toISOString().split('T')[0]
   }, [])
+
+  // Computed exp date for parent_lot (from earliest sub-batch mfg date)
+  const parentLotExpDate = useMemo(() => {
+    if (watchedLotType !== "parent_lot") return ""
+    if (selectedProducts.length === 0 || subBatches.length === 0) return ""
+    const validDates = subBatches.filter(sb => sb.mfg_date).map(sb => sb.mfg_date)
+    if (validDates.length === 0) return ""
+    const earliestMfg = validDates.reduce((min, d) => d < min ? d : min)
+    return calculateExpiryDate(earliestMfg, selectedProducts[0].product.expiry_duration_months, expiryNudgeDays)
+  }, [watchedLotType, subBatches, selectedProducts, expiryNudgeDays, calculateExpiryDate])
 
   // Auto-calculate exp_date when mfg_date, product, or nudge changes
   useEffect(() => {
@@ -162,6 +176,12 @@ export function CreateSamplePage() {
     console.log('=== onSubmit called ===', formData)
     try {
       if (formData.lot_type === "parent_lot") {
+        // Validate product selection
+        if (selectedProducts.length === 0) {
+          setParentProductTouched(true)
+          return
+        }
+
         // For parent_lot: Create lot then create sublots
         const validSubBatches = subBatches.filter(sb => sb.batch_number.trim() !== '')
         if (validSubBatches.length === 0) {
@@ -173,9 +193,8 @@ export function CreateSamplePage() {
         const earliestMfgDate = validSubBatches.reduce((min, sb) =>
           sb.mfg_date < min ? sb.mfg_date : min, validSubBatches[0].mfg_date)
 
-        // Calculate exp_date from earliest mfg_date + product expiry
-        const productExpiry = selectedProducts[0]?.product.expiry_duration_months || 36
-        const calculatedExpDate = calculateExpiryDate(earliestMfgDate, productExpiry)
+        // Use the computed exp date (includes nudge days)
+        const calculatedExpDate = parentLotExpDate || calculateExpiryDate(earliestMfgDate, selectedProducts[0].product.expiry_duration_months, expiryNudgeDays)
 
         const lot = await createMutation.mutateAsync({
           lot_number: formData.lot_number,
@@ -260,6 +279,13 @@ export function CreateSamplePage() {
         navigate("/tracker")
       } else {
         // STANDARD lot - use original logic
+
+        // Validate product selection
+        if (selectedProducts.length === 0) {
+          setStandardProductTouched(true)
+          return
+        }
+
         const payload = {
           lot_number: formData.lot_number,
           lot_type: formData.lot_type as LotType,
@@ -298,9 +324,10 @@ export function CreateSamplePage() {
     setProductSearch("")
   }
 
-  const removeProduct = (productId: number) => {
+  // removeProduct reserved for future use (e.g., removing products from selected list)
+  void ((productId: number) => {
     setSelectedProducts(selectedProducts.filter((sp) => sp.product.id !== productId))
-  }
+  })
 
   const filteredProducts = productsData?.items.filter(
     (p) =>
@@ -312,43 +339,18 @@ export function CreateSamplePage() {
   const addSubBatch = useCallback(() => {
     setSubBatches(prev => [
       ...prev,
-      { id: nextSubBatchId, mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }
+      {
+        id: nextSubBatchId,
+        mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
+        batch_number: ''
+      }
     ])
     setNextSubBatchId(prev => prev + 1)
-  }, [nextSubBatchId])
+  }, [nextSubBatchId, watchedMfgDate])
 
   const removeSubBatch = useCallback((id: number) => {
     setSubBatches(prev => prev.filter(sb => sb.id !== id))
   }, [])
-
-  const subBatchColDefs = useMemo<ColDef<SubBatchRow>[]>(() => [
-    {
-      field: 'mfg_date',
-      headerName: 'Mfg Date',
-      editable: true,
-      cellEditor: 'agDateStringCellEditor',
-      flex: 1,
-    },
-    {
-      field: 'batch_number',
-      headerName: 'Batch #',
-      editable: true,
-      flex: 1,
-    },
-    {
-      headerName: '',
-      width: 60,
-      cellRenderer: (params: ICellRendererParams<SubBatchRow>) => (
-        <button
-          onClick={() => removeSubBatch(params.data?.id ?? 0)}
-          className="p-1 text-slate-400 hover:text-red-600 transition-colors"
-          type="button"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      ),
-    },
-  ], [removeSubBatch])
 
   // Composite products grid handlers
   const addCompositeProduct = useCallback(() => {
@@ -406,7 +408,7 @@ export function CreateSamplePage() {
     }),
     compositeColumnHelper.accessor('mfg_date', {
       header: 'Mfg Date',
-      size: 160,
+      size: 104,
       cell: (info) => {
         const rowId = info.row.original.id
         const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'mfg_date'
@@ -535,10 +537,149 @@ export function CreateSamplePage() {
     getRowId: (row) => row.id.toString(),
   })
 
-  const defaultColDef = useMemo<ColDef>(() => ({
-    resizable: true,
-    sortable: false,
-  }), [])
+  // TanStack Table columns for Sub-Batches (parent_lot)
+  const subBatchColumnHelper = createColumnHelper<SubBatchRow>()
+  const subBatchColumns = useMemo(() => [
+    subBatchColumnHelper.accessor('mfg_date', {
+      header: 'Mfg Date',
+      size: 104,
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const isEditing = editingSubBatchCell?.rowId === rowId && editingSubBatchCell?.columnId === 'mfg_date'
+
+        if (isEditing) {
+          return (
+            <input
+              type="date"
+              value={info.getValue()}
+              onChange={(e) => {
+                setSubBatches(prev =>
+                  prev.map(sb => sb.id === rowId ? { ...sb, mfg_date: e.target.value } : sb)
+                )
+              }}
+              onBlur={() => setEditingSubBatchCell(null)}
+              onKeyDown={(e) => {
+                const currentDate = new Date(info.getValue())
+
+                if (e.key === 't' || e.key === 'T') {
+                  e.preventDefault()
+                  const today = new Date().toISOString().split('T')[0]
+                  setSubBatches(prev => prev.map(sb => sb.id === rowId ? { ...sb, mfg_date: today } : sb))
+                } else if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                  e.preventDefault()
+                  currentDate.setDate(currentDate.getDate() + 1)
+                  setSubBatches(prev => prev.map(sb => sb.id === rowId ? { ...sb, mfg_date: currentDate.toISOString().split('T')[0] } : sb))
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                  e.preventDefault()
+                  currentDate.setDate(currentDate.getDate() - 1)
+                  setSubBatches(prev => prev.map(sb => sb.id === rowId ? { ...sb, mfg_date: currentDate.toISOString().split('T')[0] } : sb))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setEditingSubBatchCell(null)
+                } else if (e.key === 'Tab') {
+                  e.preventDefault()
+                  setEditingSubBatchCell({ rowId, columnId: 'batch_number' })
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500
+                [&::-webkit-calendar-picker-indicator]:h-3 [&::-webkit-calendar-picker-indicator]:w-3 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+            />
+          )
+        }
+
+        return (
+          <div
+            onClick={() => setEditingSubBatchCell({ rowId, columnId: 'mfg_date' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm flex items-center gap-2"
+          >
+            <span>{info.getValue()}</span>
+            <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+        )
+      },
+    }),
+    subBatchColumnHelper.accessor('batch_number', {
+      header: 'Batch #',
+      size: 200,
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const isEditing = editingSubBatchCell?.rowId === rowId && editingSubBatchCell?.columnId === 'batch_number'
+
+        if (isEditing) {
+          return (
+            <input
+              type="text"
+              value={info.getValue()}
+              onChange={(e) => {
+                setSubBatches(prev =>
+                  prev.map(sb => sb.id === rowId ? { ...sb, batch_number: e.target.value } : sb)
+                )
+              }}
+              onBlur={() => setEditingSubBatchCell(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setEditingSubBatchCell(null)
+                } else if (e.key === 'Tab') {
+                  setEditingSubBatchCell(null)
+
+                  const currentRowIndex = subBatches.findIndex(sb => sb.id === rowId)
+                  if (currentRowIndex === subBatches.length - 1) {
+                    // Last row - add new row
+                    const newRow = {
+                      id: nextSubBatchId,
+                      mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
+                      batch_number: ''
+                    }
+                    setSubBatches(prev => [...prev, newRow])
+                    setNextSubBatchId(prev => prev + 1)
+                  }
+                  // Don't preventDefault - let Tab naturally move to next row's mfg_date
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )
+        }
+
+        return (
+          <div
+            onClick={() => setEditingSubBatchCell({ rowId, columnId: 'batch_number' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
+          >
+            {info.getValue() || <span className="text-slate-400 italic text-xs">Click to edit...</span>}
+          </div>
+        )
+      },
+    }),
+    subBatchColumnHelper.display({
+      id: 'actions',
+      header: '',
+      size: 35,
+      cell: (info) => (
+        <button
+          onClick={() => removeSubBatch(info.row.original.id)}
+          className="text-slate-400 hover:text-red-600 transition-colors p-1"
+          type="button"
+          tabIndex={-1}
+          title="Delete row"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      ),
+    }),
+  ], [editingSubBatchCell, subBatches, nextSubBatchId, watchedMfgDate])
+
+  const subBatchTable = useReactTable({
+    data: subBatches,
+    columns: subBatchColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id.toString(),
+  })
 
   return (
     <div className="space-y-8 max-w-3xl">
@@ -549,23 +690,6 @@ export function CreateSamplePage() {
           Submit a new lot for lab testing
         </p>
       </div>
-
-      {/* Recent Lots Summary */}
-      {lotsData && lotsData.items.length > 0 && (
-        <div className="rounded-xl border border-slate-200/60 bg-white px-6 py-5 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
-          <p className="text-[13px] font-semibold text-slate-500 mb-3">Recent Submissions</p>
-          <div className="flex gap-2 flex-wrap">
-            {lotsData.items.slice(0, 5).map((lot) => (
-              <span
-                key={lot.id}
-                className="px-3 py-1.5 bg-slate-100 rounded-lg text-[12px] font-mono font-semibold text-slate-700 tracking-wide"
-              >
-                {lot.reference_number}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Lot Type Selection */}
@@ -602,232 +726,357 @@ export function CreateSamplePage() {
           </div>
         </div>
 
-        {/* STANDARD: Product Selection - BEFORE Lot Details */}
+        {/* STANDARD: Combined Product + Lot Details */}
         {watchedLotType === "standard" && (
           <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
             <div className="border-b border-slate-100 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-slate-900 text-[15px]">Product</h2>
-                  <p className="mt-1 text-[13px] text-slate-500">
-                    Select the product for this lot
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsProductDialogOpen(true)}
-                  className="border-slate-200 h-9"
-                  disabled={selectedProducts.length > 0}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Select Product
-                </Button>
+              <div className="flex items-center gap-2">
+                <Beaker className="h-5 w-5 text-slate-600" />
+                <h2 className="font-semibold text-slate-900 text-[15px]">Lot Details</h2>
               </div>
             </div>
-            <div className="p-6">
-              {selectedProducts.length === 0 ? (
-                <div className="text-center py-6">
-                  <div className="w-12 h-12 mx-auto rounded-xl bg-slate-100 flex items-center justify-center">
-                    <Package className="h-6 w-6 text-slate-400" />
+            <div className="p-6 space-y-4">
+              {/* Product Autocomplete */}
+              {(() => {
+                const hasValidProduct = selectedProducts.length > 0
+                const hasText = standardProductText.trim().length > 0
+                const showError = standardProductTouched && !hasValidProduct && hasText
+                // isInvalid reserved for future accessibility use
+                void (standardProductTouched && !hasValidProduct)
+
+                return (
+                  <div className="space-y-1.5">
+                    <Label className="text-[13px] font-semibold text-slate-700">Product *</Label>
+                    <div className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm ring-offset-white focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 ${
+                      hasValidProduct ? 'bg-white' : 'bg-slate-50'
+                    } ${
+                      showError
+                        ? 'border-red-500 ring-2 ring-red-500/20 focus-within:ring-red-500'
+                        : 'border-slate-200 focus-within:ring-slate-950'
+                    }`}>
+                      <ProductAutocomplete
+                        value={{
+                          product_id: selectedProducts[0]?.product.id ?? null,
+                          product_name: selectedProducts[0]?.product.display_name ?? standardProductText
+                        }}
+                        products={productsData?.items || []}
+                        isLoading={isProductsLoading}
+                        onSelect={(product) => {
+                          setSelectedProducts([{ product }])
+                          setStandardProductText(product.display_name)
+                        }}
+                        onChange={(text) => {
+                          setStandardProductText(text)
+                          // Only clear selection if text no longer matches current product
+                          if (selectedProducts.length > 0 && text !== selectedProducts[0].product.display_name) {
+                            setSelectedProducts([])
+                          }
+                        }}
+                        onBlur={() => setStandardProductTouched(true)}
+                      />
+                    </div>
+                    {showError ? (
+                      <p className="text-[11px] text-red-600">
+                        Select a valid product from the list
+                      </p>
+                    ) : selectedProducts.length > 0 ? (
+                      <p className="text-[11px] text-slate-500">
+                        {selectedProducts[0].product.brand} • Expires {selectedProducts[0].product.expiry_duration_months} months from mfg
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="mt-3 text-[14px] text-slate-500">No product selected</p>
-                  <button
-                    type="button"
-                    onClick={() => setIsProductDialogOpen(true)}
-                    className="mt-2 text-[13px] font-semibold text-blue-600 hover:text-blue-700"
-                  >
-                    Select a product
-                  </button>
+                )
+              })()}
+
+              {/* Lot Number + Dates */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="lot_number" className="text-[13px] font-semibold text-slate-700">Lot Number *</Label>
+                  <Input
+                    id="lot_number"
+                    {...register("lot_number")}
+                    placeholder="e.g., ABC123"
+                    aria-invalid={!!errors.lot_number}
+                    className="border-slate-200 h-10"
+                  />
+                  {errors.lot_number && (
+                    <p className="text-[13px] text-red-600">{errors.lot_number.message}</p>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-center gap-3 p-4 border border-slate-200/80 rounded-xl bg-slate-50/30">
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900 text-[14px]">{selectedProducts[0].product.display_name}</p>
-                    <p className="text-[12px] text-slate-500 mt-0.5">
-                      {selectedProducts[0].product.brand} • Expires {selectedProducts[0].product.expiry_duration_months} months from mfg
-                    </p>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="mfg_date" className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
+                    <CalendarDays className="h-4 w-4" />
+                    Mfg Date
+                  </Label>
+                  <Input
+                    id="mfg_date"
+                    type="date"
+                    {...register("mfg_date")}
+                    className="border-slate-200 h-10"
+                    onKeyDown={(e) => {
+                      if (e.key === 't' || e.key === 'T') {
+                        e.preventDefault()
+                        setValue("mfg_date", new Date().toISOString().split('T')[0])
+                      }
+                    }}
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Press "T" for today
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="exp_date" className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
+                    <CalendarDays className="h-4 w-4" />
+                    Exp Date
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="exp_date"
+                      type="date"
+                      {...register("exp_date")}
+                      className="border-slate-200 h-10 bg-slate-50 flex-1"
+                      readOnly
+                    />
+                    <div
+                      className="flex items-center border border-slate-200 rounded-lg bg-white h-10"
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                          e.preventDefault()
+                          setExpiryNudgeDays(prev => prev - 1)
+                        } else if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                          e.preventDefault()
+                          setExpiryNudgeDays(prev => prev + 1)
+                        }
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpiryNudgeDays(prev => prev - 1)}
+                        className="px-2 h-full hover:bg-slate-100 rounded-l-lg transition-colors text-slate-400 hover:text-slate-600"
+                        title="-1 day (↓/←)"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      <span className="px-1 text-[11px] text-slate-500 min-w-[28px] text-center">
+                        {expiryNudgeDays === 0 ? '0d' : `${expiryNudgeDays > 0 ? '+' : ''}${expiryNudgeDays}d`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExpiryNudgeDays(prev => prev + 1)}
+                        className="px-2 h-full hover:bg-slate-100 rounded-r-lg transition-colors text-slate-400 hover:text-slate-600"
+                        title="+1 day (↑/→)"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeProduct(selectedProducts[0].product.id)}
-                    className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <p className="text-[11px] text-slate-500">
+                    Auto-calculated
+                  </p>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Lot Details */}
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-          <div className="border-b border-slate-100 px-6 py-4">
-            <div className="flex items-center gap-2">
-              <Beaker className="h-5 w-5 text-slate-600" />
-              <h2 className="font-semibold text-slate-900 text-[15px]">Lot Details</h2>
+        {/* Lab Reference # Autogeneration - separate block */}
+        {watchedLotType === "standard" && (
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-slate-600" />
+                <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference #</h2>
+              </div>
+              <p className="mt-1 text-[13px] text-slate-500">
+                Auto-generated as YYMMDD-XXX unless specified
+              </p>
             </div>
-          </div>
-          <div className="p-6 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="lot_number" className="text-[13px] font-semibold text-slate-700">Lot Number *</Label>
-                <Input
-                  id="lot_number"
-                  {...register("lot_number")}
-                  placeholder="e.g., ABC123"
-                  aria-invalid={!!errors.lot_number}
-                  className="border-slate-200 h-10"
-                />
-                {errors.lot_number && (
-                  <p className="text-[13px] text-red-600">{errors.lot_number.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="reference_number" className="text-[13px] font-semibold text-slate-700">Reference Number</Label>
-                <Input
-                  id="reference_number"
-                  {...register("reference_number")}
-                  placeholder="Auto-generated if empty"
-                  className="border-slate-200 h-10"
-                />
-                <p className="text-[11px] text-slate-500">
-                  Leave blank to auto-generate (YYMMDD-XXX)
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="mfg_date" className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
-                  <CalendarDays className="h-4 w-4" />
-                  Manufacturing Date
-                </Label>
-                <Input
-                  id="mfg_date"
-                  type="date"
-                  {...register("mfg_date")}
-                  className="border-slate-200 h-10"
-                  onKeyDown={(e) => {
-                    if (e.key === 't' || e.key === 'T') {
-                      e.preventDefault()
-                      setValue("mfg_date", new Date().toISOString().split('T')[0])
-                    }
-                  }}
-                />
-                <p className="text-[11px] text-slate-500">
-                  Press "T" for today's date
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="exp_date" className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
-                  <CalendarDays className="h-4 w-4" />
-                  Expiration Date
-                </Label>
-                <div className="flex items-center gap-2">
+            <div className="p-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="reference_number" className="text-[13px] font-semibold text-slate-700">Lab Reference #</Label>
                   <Input
-                    id="exp_date"
-                    type="date"
-                    {...register("exp_date")}
-                    className="border-slate-200 h-10 bg-slate-50 flex-1"
-                    readOnly
+                    id="reference_number"
+                    {...register("reference_number")}
+                    placeholder="Auto-generated if empty"
+                    className="border-slate-200 h-10 !bg-slate-200"
                   />
-                  <div className="flex items-center border border-slate-200 rounded-lg bg-white h-10">
-                    <button
-                      type="button"
-                      onClick={() => setExpiryNudgeDays(prev => prev - 1)}
-                      className="px-2 h-full hover:bg-slate-100 rounded-l-lg transition-colors text-slate-400 hover:text-slate-600"
-                      title="-1 day"
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
-                    <span className="px-1 text-[11px] text-slate-500 min-w-[28px] text-center">
-                      {expiryNudgeDays === 0 ? '0d' : `${expiryNudgeDays > 0 ? '+' : ''}${expiryNudgeDays}d`}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setExpiryNudgeDays(prev => prev + 1)}
-                      className="px-2 h-full hover:bg-slate-100 rounded-r-lg transition-colors text-slate-400 hover:text-slate-600"
-                      title="+1 day"
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </button>
+                </div>
+                <div className="flex items-end pb-1">
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      id="generate_coa"
+                      type="checkbox"
+                      {...register("generate_coa")}
+                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                    />
+                    <Label htmlFor="generate_coa" className="font-normal text-[14px] text-slate-700">
+                      Generate COA when approved
+                    </Label>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Auto-calculated from product expiry
-                </p>
               </div>
             </div>
-
-            <div className="flex items-center gap-2.5 pt-2">
-              <input
-                id="generate_coa"
-                type="checkbox"
-                {...register("generate_coa")}
-                className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
-              />
-              <Label htmlFor="generate_coa" className="font-normal text-[14px] text-slate-700">
-                Generate COA when approved
-              </Label>
-            </div>
           </div>
-        </div>
+        )}
 
-        {/* parent_lot: Sub-Batches Grid */}
+        {/* parent_lot: Parent Lot Details + Sub-Batches */}
         {watchedLotType === "parent_lot" && (
           <>
-            {/* Single Product Selection for Parent Lot */}
+            {/* Parent Lot Details */}
             <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
               <div className="border-b border-slate-100 px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold text-slate-900 text-[15px]">Product</h2>
-                    <p className="mt-1 text-[13px] text-slate-500">
-                      Select the product for this master lot (all sub-batches will use this product)
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsProductDialogOpen(true)}
-                    className="border-slate-200 h-9"
-                    disabled={selectedProducts.length > 0}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Select Product
-                  </Button>
+                <div className="flex items-center gap-2">
+                  <Beaker className="h-5 w-5 text-slate-600" />
+                  <h2 className="font-semibold text-slate-900 text-[15px]">Parent Lot Details</h2>
                 </div>
               </div>
-              <div className="p-6">
-                {selectedProducts.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-[14px] text-slate-500">No product selected</p>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 p-4 border border-slate-200/80 rounded-xl bg-slate-50/30">
-                    <div className="flex-1">
-                      <p className="font-semibold text-slate-900 text-[14px]">{selectedProducts[0].product.display_name}</p>
-                      <p className="text-[12px] text-slate-500 mt-0.5">{selectedProducts[0].product.brand}</p>
+              <div className="p-6 space-y-4">
+                {/* Product Autocomplete */}
+                {(() => {
+                  const hasValidProduct = selectedProducts.length > 0
+                  const hasText = parentProductText.trim().length > 0
+                  const showError = parentProductTouched && !hasValidProduct && hasText
+
+                  return (
+                    <div className="space-y-1.5">
+                      <Label className="text-[13px] font-semibold text-slate-700">Product *</Label>
+                      <div className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm ring-offset-white focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 ${
+                        hasValidProduct ? 'bg-white' : 'bg-slate-50'
+                      } ${
+                        showError
+                          ? 'border-red-500 ring-2 ring-red-500/20 focus-within:ring-red-500'
+                          : 'border-slate-200 focus-within:ring-slate-950'
+                      }`}>
+                        <ProductAutocomplete
+                          value={{
+                            product_id: selectedProducts[0]?.product.id ?? null,
+                            product_name: selectedProducts[0]?.product.display_name ?? parentProductText
+                          }}
+                          products={productsData?.items || []}
+                          isLoading={isProductsLoading}
+                          onSelect={(product) => {
+                            setSelectedProducts([{ product }])
+                            setParentProductText(product.display_name)
+                          }}
+                          onChange={(text) => {
+                            setParentProductText(text)
+                            if (selectedProducts.length > 0 && text !== selectedProducts[0].product.display_name) {
+                              setSelectedProducts([])
+                            }
+                          }}
+                          onBlur={() => setParentProductTouched(true)}
+                        />
+                      </div>
+                      {showError ? (
+                        <p className="text-[11px] text-red-600">
+                          Select a valid product from the list
+                        </p>
+                      ) : selectedProducts.length > 0 ? (
+                        <p className="text-[11px] text-slate-500">
+                          {selectedProducts[0].product.brand} • Expires {selectedProducts[0].product.expiry_duration_months} months from mfg
+                        </p>
+                      ) : null}
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeProduct(selectedProducts[0].product.id)}
-                      className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                  )
+                })()}
+
+                {/* Master Lot # + Exp Date */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lot_number" className="text-[13px] font-semibold text-slate-700">Master Lot # *</Label>
+                    <Input
+                      id="lot_number"
+                      {...register("lot_number")}
+                      placeholder="e.g., BATCH-2024-001"
+                      aria-invalid={!!errors.lot_number}
+                      className="border-slate-200 h-10"
+                    />
+                    {errors.lot_number && (
+                      <p className="text-[13px] text-red-600">{errors.lot_number.message}</p>
+                    )}
                   </div>
-                )}
+
+                  <div className="space-y-1.5">
+                    <Label className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
+                      <CalendarDays className="h-4 w-4" />
+                      Exp Date
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="date"
+                        value={parentLotExpDate}
+                        className="border-slate-200 h-10 bg-slate-50 flex-1"
+                        readOnly
+                      />
+                      <div
+                        className="flex items-center border border-slate-200 rounded-lg bg-white h-10"
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                            e.preventDefault()
+                            setExpiryNudgeDays(prev => prev - 1)
+                          } else if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                            e.preventDefault()
+                            setExpiryNudgeDays(prev => prev + 1)
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpiryNudgeDays(prev => prev - 1)}
+                          className="px-2 h-full hover:bg-slate-100 rounded-l-lg transition-colors text-slate-400 hover:text-slate-600"
+                          title="-1 day (↓/←)"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                        <span className="px-1 text-[11px] text-slate-500 min-w-[28px] text-center">
+                          {expiryNudgeDays === 0 ? '0d' : `${expiryNudgeDays > 0 ? '+' : ''}${expiryNudgeDays}d`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setExpiryNudgeDays(prev => prev + 1)}
+                          className="px-2 h-full hover:bg-slate-100 rounded-r-lg transition-colors text-slate-400 hover:text-slate-600"
+                          title="+1 day (↑/→)"
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Auto-calculated from earliest sub-batch mfg date
+                    </p>
+                  </div>
+                </div>
+
+                {/* Lab Reference # + Generate COA */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="reference_number" className="text-[13px] font-semibold text-slate-700">
+                      Lab Reference # <span className="font-normal text-slate-400">(auto-generated)</span>
+                    </Label>
+                    <Input
+                      id="reference_number"
+                      {...register("reference_number")}
+                      placeholder="Leave blank to auto-generate"
+                      className="border-slate-200 h-10 !bg-slate-200"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        id="generate_coa_parent"
+                        type="checkbox"
+                        {...register("generate_coa")}
+                        className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                      />
+                      <Label htmlFor="generate_coa_parent" className="font-normal text-[14px] text-slate-700">
+                        Generate COA when approved
+                      </Label>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -853,21 +1102,35 @@ export function CreateSamplePage() {
                   </Button>
                 </div>
               </div>
-              <div className="ag-theme-alpine" style={{ height: Math.min(300, 56 + subBatches.length * 42) }}>
-                <AgGridReact<SubBatchRow>
-                  rowData={subBatches}
-                  columnDefs={subBatchColDefs}
-                  defaultColDef={defaultColDef}
-                  getRowId={(params) => params.data.id.toString()}
-                  onCellValueChanged={(event) => {
-                    setSubBatches(prev =>
-                      prev.map(sb => sb.id === event.data.id ? event.data : sb)
-                    )
-                  }}
-                  domLayout="autoHeight"
-                  suppressRowClickSelection
-                  stopEditingWhenCellsLoseFocus
-                />
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      {subBatchTable.getHeaderGroups().map((headerGroup) =>
+                        headerGroup.headers.map((header) => (
+                          <th
+                            key={header.id}
+                            style={{ width: header.getSize() }}
+                            className="text-left font-semibold text-slate-700 text-xs tracking-wide px-3 py-2 uppercase"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                          </th>
+                        ))
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subBatchTable.getRowModel().rows.map((row) => (
+                      <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </>
@@ -925,6 +1188,94 @@ export function CreateSamplePage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* multi_sku_composite: Lab Reference & Exp Date */}
+        {watchedLotType === "multi_sku_composite" && (
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-slate-600" />
+                <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference & Expiration</h2>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
+                    <CalendarDays className="h-4 w-4" />
+                    Exp Date
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      {...register("exp_date")}
+                      className="border-slate-200 h-10 bg-slate-50 flex-1"
+                      readOnly
+                    />
+                    <div
+                      className="flex items-center border border-slate-200 rounded-lg bg-white h-10"
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                          e.preventDefault()
+                          setExpiryNudgeDays(prev => prev - 1)
+                        } else if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                          e.preventDefault()
+                          setExpiryNudgeDays(prev => prev + 1)
+                        }
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpiryNudgeDays(prev => prev - 1)}
+                        className="px-2 h-full hover:bg-slate-100 rounded-l-lg transition-colors text-slate-400 hover:text-slate-600"
+                        title="-1 day (↓/←)"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      <span className="px-1 text-[11px] text-slate-500 min-w-[28px] text-center">
+                        {expiryNudgeDays === 0 ? '0d' : `${expiryNudgeDays > 0 ? '+' : ''}${expiryNudgeDays}d`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExpiryNudgeDays(prev => prev + 1)}
+                        className="px-2 h-full hover:bg-slate-100 rounded-r-lg transition-colors text-slate-400 hover:text-slate-600"
+                        title="+1 day (↑/→)"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Auto-calculated from shortest product expiry
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="reference_number" className="text-[13px] font-semibold text-slate-700">
+                    Lab Reference # <span className="font-normal text-slate-400">(auto-generated)</span>
+                  </Label>
+                  <Input
+                    id="reference_number"
+                    {...register("reference_number")}
+                    placeholder="Leave blank to auto-generate"
+                    className="border-slate-200 h-10 !bg-slate-200"
+                  />
+                  <div className="flex items-center gap-2.5 pt-0.5">
+                    <input
+                      id="generate_coa_composite"
+                      type="checkbox"
+                      {...register("generate_coa")}
+                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                    />
+                    <Label htmlFor="generate_coa_composite" className="font-normal text-[14px] text-slate-700">
+                      Generate COA when approved
+                    </Label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

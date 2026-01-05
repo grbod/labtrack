@@ -20,12 +20,6 @@ interface EditingCell {
 const EDITABLE_COLUMNS = ["result_value", "method", "notes"] as const
 type EditableColumn = typeof EDITABLE_COLUMNS[number]
 
-// Track pending changes for a row
-interface PendingRowChanges {
-  rowId: number
-  changes: Record<string, string>
-}
-
 interface TestResultsTableProps {
   /** Test result rows with validation state */
   testResults: TestResultRow[]
@@ -74,43 +68,15 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     ref
   ) {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
-  const [pendingChanges, setPendingChanges] = useState<PendingRowChanges | null>(null)
 
   // Refs for cell navigation
   const cellRefs = useRef<Map<string, HTMLElement>>(new Map())
 
   // Expose methods to parent
   useImperativeHandle(ref, () => ({
-    hasUnsavedChanges: () => pendingChanges !== null && Object.keys(pendingChanges.changes).length > 0,
+    hasUnsavedChanges: () => false, // With immediate save, no pending changes
     isEditing: () => editingCell !== null,
   }))
-
-  // Save pending changes for a row
-  const savePendingChanges = useCallback(async () => {
-    if (!pendingChanges || Object.keys(pendingChanges.changes).length === 0) return
-
-    const { rowId, changes } = pendingChanges
-    setPendingChanges(null)
-
-    // Save all pending changes for this row
-    for (const [field, value] of Object.entries(changes)) {
-      await onUpdateResult(rowId, field, value)
-    }
-  }, [pendingChanges, onUpdateResult])
-
-  // Track a change without saving immediately
-  const trackChange = useCallback((rowId: number, field: string, value: string) => {
-    setPendingChanges(prev => {
-      // If changing to a different row, we'll save the old one first via navigation logic
-      if (prev && prev.rowId !== rowId) {
-        return { rowId, changes: { [field]: value } }
-      }
-      return {
-        rowId,
-        changes: { ...(prev?.changes || {}), [field]: value }
-      }
-    })
-  }, [])
 
   // Navigate to a specific cell
   const navigateToCell = useCallback((rowIndex: number, columnId: EditableColumn) => {
@@ -131,7 +97,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
   }, [testResults])
 
   // Handle Tab navigation
-  const handleTabNavigation = useCallback(async (
+  const handleTabNavigation = useCallback((
     currentRowId: number,
     currentColumn: EditableColumn,
     isShiftTab: boolean
@@ -160,11 +126,6 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
       }
     }
 
-    // Check if we're leaving the current row
-    if (nextRowIndex !== currentRowIndex && pendingChanges) {
-      await savePendingChanges()
-    }
-
     // Check bounds
     if (nextRowIndex < 0) {
       // At beginning, stay on first cell
@@ -179,10 +140,10 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     }
 
     navigateToCell(nextRowIndex, EDITABLE_COLUMNS[nextColIndex])
-  }, [testResults, pendingChanges, savePendingChanges, navigateToCell, saveButtonRef])
+  }, [testResults, navigateToCell, saveButtonRef])
 
   // Handle Enter navigation (move down to same column)
-  const handleEnterNavigation = useCallback(async (
+  const handleEnterNavigation = useCallback((
     currentRowId: number,
     currentColumn: EditableColumn
   ) => {
@@ -191,11 +152,6 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
 
     const nextRowIndex = currentRowIndex + 1
 
-    // Save changes when leaving row
-    if (pendingChanges) {
-      await savePendingChanges()
-    }
-
     if (nextRowIndex >= testResults.length) {
       // At last row, just end editing
       setEditingCell(null)
@@ -203,12 +159,12 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     }
 
     navigateToCell(nextRowIndex, currentColumn)
-  }, [testResults, pendingChanges, savePendingChanges, navigateToCell])
+  }, [testResults, navigateToCell])
 
-  // Handle update - track change without immediate save
+  // Handle update - save immediately
   const handleCellChange = useCallback((rowId: number, field: string, value: string) => {
-    trackChange(rowId, field, value)
-  }, [trackChange])
+    onUpdateResult(rowId, field, value)
+  }, [onUpdateResult])
 
   // Start editing a cell
   const startEdit = useCallback((rowId: number, columnId: string) => {

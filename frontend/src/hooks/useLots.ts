@@ -87,6 +87,7 @@ export function useUpdateLotStatus() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(variables.id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
     },
   })

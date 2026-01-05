@@ -11,7 +11,7 @@ import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
 import { PdfUploadDropzone } from "./PdfUploadDropzone"
 
-import { useLotWithSpecs, lotKeys, useUpdateLotStatus } from "@/hooks/useLots"
+import { useLotWithSpecs, lotKeys, useUpdateLotStatus, useSubmitForReview } from "@/hooks/useLots"
 import { useTestResults, useUpdateTestResult, useCreateTestResult } from "@/hooks/useTestResults"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import { useUploadPdf } from "@/hooks/useUploads"
@@ -93,17 +93,18 @@ export function SampleModal({
   const createTestResultMutation = useCreateTestResult()
   const uploadMutation = useUploadPdf()
   const updateStatusMutation = useUpdateLotStatus()
+  const submitForReviewMutation = useSubmitForReview()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Derived state
-  const isLocked = lot?.status === "approved" || lot?.status === "released"
-  const isQCManagerOrAdmin = user?.role === "QC_MANAGER" || user?.role === "ADMIN"
+  // Derived state - use lotWithSpecs status if available (fresh data), fallback to lot prop
+  const currentStatus = lotWithSpecs?.status ?? lot?.status
+  const isLocked = currentStatus === "approved" || currentStatus === "released"
+  const isQCManagerOrAdmin = user?.role === "qc_manager" || user?.role === "admin"
+  const canSubmitForReview = currentStatus === "under_review"
   const canApproveReject =
     isQCManagerOrAdmin &&
-    (lot?.status === "under_review" ||
-      lot?.status === "awaiting_release" ||
-      lot?.status === "needs_attention")
-  const needsOverrideApproval = lot?.status === "needs_attention"
+    (currentStatus === "awaiting_release" || currentStatus === "needs_attention")
+  const needsOverrideApproval = currentStatus === "needs_attention"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -419,7 +420,7 @@ export function SampleModal({
 
     try {
       await updateStatusMutation.mutateAsync({ id: lot.id, status: "approved" })
-      toast.success("Sample approved")
+      toast.success("Sample approved! COA ready for release")
     } catch (error) {
       toast.error("Failed to approve")
     }
@@ -436,7 +437,7 @@ export function SampleModal({
       })
       setShowOverrideDialog(false)
       setOverrideReason("")
-      toast.success("Sample approved with override")
+      toast.success("Sample approved with override! COA ready for release")
     } catch (error) {
       toast.error("Failed to approve")
     }
@@ -458,6 +459,18 @@ export function SampleModal({
       toast.error("Failed to reject")
     }
   }, [lot, rejectionReason, updateStatusMutation])
+
+  // Handle submit for review (moves from under_review to awaiting_release)
+  const handleSubmitForReview = useCallback(async () => {
+    if (!lot) return
+    try {
+      await submitForReviewMutation.mutateAsync(lot.id)
+      toast.success("Sample submitted for release review")
+      onClose()
+    } catch (error) {
+      toast.error("Failed to submit for review")
+    }
+  }, [lot, submitForReviewMutation, onClose])
 
   // Handle modal close attempt (check for unsaved changes)
   const handleCloseAttempt = useCallback(() => {
@@ -767,7 +780,21 @@ export function SampleModal({
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
           <div className="flex w-full items-center justify-end gap-2">
-            {/* QC actions */}
+            {/* Submit for Release action (available to any authenticated user for under_review status) */}
+            {canSubmitForReview && (
+              <Button
+                onClick={handleSubmitForReview}
+                disabled={submitForReviewMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {submitForReviewMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : null}
+                Submit for Release
+              </Button>
+            )}
+
+            {/* QC actions (for awaiting_release and needs_attention statuses) */}
             {canApproveReject && !showRejectDialog && (
               <>
                 <Button

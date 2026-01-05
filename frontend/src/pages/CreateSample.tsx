@@ -35,7 +35,7 @@ const LOT_TYPES: { value: SelectableLotType; label: string; description: string 
   {
     value: "parent_lot",
     label: "Parent Lot",
-    description: "Master lot with sublots",
+    description: "Master Lot with Sub-Batches of same product",
   },
   {
     value: "multi_sku_composite",
@@ -402,6 +402,15 @@ export function CreateSamplePage() {
               // Move to mfg_date column
               setEditingCompositeCell({ rowId, columnId: 'mfg_date' })
             }}
+            onPrevCell={() => {
+              // Shift+Tab: Go to previous row's batch_number or let browser handle if first row
+              const currentRowIndex = compositeProducts.findIndex(cp => cp.id === rowId)
+              if (currentRowIndex > 0) {
+                const prevRowId = compositeProducts[currentRowIndex - 1].id
+                setEditingCompositeCell({ rowId: prevRowId, columnId: 'batch_number' })
+              }
+              // If first row, don't prevent default - let browser handle natural tab order
+            }}
           />
         )
       },
@@ -428,7 +437,19 @@ export function CreateSamplePage() {
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   setEditingCompositeCell(null)
-                } else if (e.key === 'Tab') {
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault()
+                  // Shift+Tab: Focus product input in same row
+                  setEditingCompositeCell(null)
+                  const tableEl = (e.target as HTMLElement).closest('table')
+                  const rows = tableEl?.querySelectorAll('tbody tr')
+                  const currentRowIndex = compositeProducts.findIndex(cp => cp.id === rowId)
+                  const currentRow = rows?.[currentRowIndex]
+                  requestAnimationFrame(() => {
+                    const productInput = currentRow?.querySelector('input[type="text"]') as HTMLInputElement
+                    productInput?.focus()
+                  })
+                } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault()
                   setEditingCompositeCell({ rowId, columnId: 'batch_number' })
                 }
@@ -483,6 +504,10 @@ export function CreateSamplePage() {
                     const firstFocusable = nextSection?.querySelector('button, input') as HTMLElement
                     firstFocusable?.focus()
                   }, 0)
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault()
+                  // Shift+Tab: Go back to mfg_date in same row
+                  setEditingCompositeCell({ rowId, columnId: 'mfg_date' })
                 } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault()
                   setEditingCompositeCell(null)
@@ -582,6 +607,22 @@ export function CreateSamplePage() {
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   setEditingSubBatchCell(null)
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault()
+                  // Shift+Tab: Go to previous row's mfg_date or focus element before table
+                  const currentRowIndex = subBatches.findIndex(sb => sb.id === rowId)
+                  if (currentRowIndex > 0) {
+                    const prevRowId = subBatches[currentRowIndex - 1].id
+                    setEditingSubBatchCell({ rowId: prevRowId, columnId: 'mfg_date' })
+                  } else {
+                    // First row - focus reference number field
+                    setEditingSubBatchCell(null)
+                    setTimeout(() => {
+                      const form = (e.target as HTMLElement).closest('form')
+                      const refInput = form?.querySelector('#reference_number') as HTMLElement
+                      refInput?.focus()
+                    }, 0)
+                  }
                 } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault()
                   // Tab to mfg_date in same row
@@ -646,6 +687,10 @@ export function CreateSamplePage() {
                     const submitBtn = form?.querySelector('button[type="submit"]') as HTMLElement
                     submitBtn?.focus()
                   }, 0)
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault()
+                  // Shift+Tab: Go back to batch_number in same row
+                  setEditingSubBatchCell({ rowId, columnId: 'batch_number' })
                 } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault()
 

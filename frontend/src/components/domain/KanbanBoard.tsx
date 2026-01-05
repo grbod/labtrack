@@ -1,24 +1,82 @@
 import { useState, useMemo } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import type { Lot, LotStatus } from "@/types"
 
 /**
- * Kanban column configuration
- * Maps each column to its status (or special "recently_completed" identifier)
+ * Animation configuration for Kanban cards
+ * Enterprise-style: smooth fade + slide up, staggered cascade
  */
-interface KanbanColumnConfig {
-  id: LotStatus | "recently_completed"
-  label: string
+const cardVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: (index: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.25,
+      ease: [0.25, 0.1, 0.25, 1] as const, // Smooth easeOut (cubic bezier)
+      delay: index * 0.04, // 40ms stagger between cards
+    },
+  }),
+  exit: {
+    opacity: 0,
+    y: -6,
+    transition: {
+      duration: 0.15,
+      ease: "easeIn" as const,
+    },
+  },
 }
 
-// Base columns without the dynamic Recently Completed label
-const BASE_KANBAN_COLUMNS: KanbanColumnConfig[] = [
-  { id: "awaiting_results", label: "Awaiting Results" },
-  { id: "partial_results", label: "Partial Results" },
-  { id: "needs_attention", label: "Needs Attention" },
-  { id: "under_review", label: "Under Review" },
-  { id: "awaiting_release", label: "Awaiting Release" },
-  { id: "rejected", label: "Rejected" },
+/**
+ * Kanban column configuration
+ * Maps each column to its status with color theming
+ */
+interface KanbanColumnConfig {
+  id: LotStatus
+  label: string
+  headerBg: string
+  headerText: string
+  countBg: string
+  countText: string
+}
+
+// Sample Tracker only shows active workflow columns
+// Approved/released items appear in Release Queue, rejected in Archive
+// Color scheme: sky=waiting, amber=in-progress, red=attention, violet=review
+const KANBAN_COLUMNS: KanbanColumnConfig[] = [
+  {
+    id: "awaiting_results",
+    label: "Awaiting Results",
+    headerBg: "bg-sky-50",
+    headerText: "text-sky-700",
+    countBg: "bg-sky-100",
+    countText: "text-sky-700",
+  },
+  {
+    id: "partial_results",
+    label: "Partial Results",
+    headerBg: "bg-amber-50",
+    headerText: "text-amber-700",
+    countBg: "bg-amber-100",
+    countText: "text-amber-700",
+  },
+  {
+    id: "needs_attention",
+    label: "Needs Attention",
+    headerBg: "bg-red-50",
+    headerText: "text-red-700",
+    countBg: "bg-red-100",
+    countText: "text-red-700",
+  },
+  {
+    id: "under_review",
+    label: "Under Review",
+    headerBg: "bg-violet-50",
+    headerText: "text-violet-700",
+    countBg: "bg-violet-100",
+    countText: "text-violet-700",
+  },
 ]
 
 const CARDS_PER_COLUMN = 8
@@ -28,7 +86,6 @@ interface KanbanBoardProps {
   onCardClick: (lot: Lot) => void
   staleWarningDays?: number
   staleCriticalDays?: number
-  recentlyCompletedDays?: number
 }
 
 /**
@@ -41,10 +98,12 @@ function calculateStaleness(
   warningDays: number,
   criticalDays: number
 ): { level: StalenessLevel; daysOld: number } {
-  const createdAt = new Date(lot.created_at)
+  // Append 'Z' to treat timestamp as UTC if not already present
+  const timestamp = lot.created_at.endsWith("Z") ? lot.created_at : lot.created_at + "Z"
+  const createdAt = new Date(timestamp)
   const now = new Date()
   const diffTime = now.getTime() - createdAt.getTime()
-  const daysOld = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+  const daysOld = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)))
 
   if (daysOld >= criticalDays) {
     return { level: "critical", daysOld }
@@ -72,10 +131,10 @@ interface KanbanCardProps {
   lot: Lot
   staleness: { level: StalenessLevel; daysOld: number }
   onClick: () => void
-  isCompleted?: boolean
+  index: number // For staggered animation
 }
 
-function KanbanCard({ lot, staleness, onClick, isCompleted = false }: KanbanCardProps) {
+function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
   const borderClass = {
     critical: "border-red-400 border-l-4",
     warning: "border-orange-400 border-l-4",
@@ -84,14 +143,6 @@ function KanbanCard({ lot, staleness, onClick, isCompleted = false }: KanbanCard
 
   // Get days badge configuration based on staleness
   const getDaysBadge = () => {
-    if (isCompleted) {
-      const completedAt = lot.updated_at ? new Date(lot.updated_at) : new Date(lot.created_at)
-      const daysSinceCompletion = Math.floor(
-        (Date.now() - completedAt.getTime()) / (1000 * 60 * 60 * 24)
-      )
-      return { days: daysSinceCompletion, color: "bg-emerald-100 text-emerald-700" }
-    }
-
     const colorMap = {
       critical: "bg-red-100 text-red-700",
       warning: "bg-orange-100 text-orange-700",
@@ -107,12 +158,18 @@ function KanbanCard({ lot, staleness, onClick, isCompleted = false }: KanbanCard
   const hasMultipleProducts = (lot.products?.length ?? 0) > 1
 
   return (
-    <div
+    <motion.div
+      layout
+      variants={cardVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      custom={index}
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm transition-all",
+        "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm transition-colors",
         "hover:border-slate-300 hover:shadow",
-        isCompleted ? "border-slate-200" : borderClass
+        borderClass
       )}
       role="button"
       tabIndex={0}
@@ -196,7 +253,7 @@ function KanbanCard({ lot, staleness, onClick, isCompleted = false }: KanbanCard
           {lot.tests_entered ?? 0}/{lot.tests_total ?? 0}
         </span>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -211,7 +268,6 @@ interface KanbanColumnProps {
 
 function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const isCompletedColumn = config.id === "recently_completed"
 
   const displayedLots = isExpanded ? lots : lots.slice(0, CARDS_PER_COLUMN)
   const hiddenCount = lots.length - CARDS_PER_COLUMN
@@ -219,48 +275,74 @@ function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
 
   return (
     <div className="flex flex-col">
-      {/* Column Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold text-slate-700">{config.label}</h3>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+      {/* Column Header - colored by status */}
+      <div className={cn(
+        "mb-3 flex items-center justify-between rounded-lg px-3 py-2",
+        config.headerBg
+      )}>
+        <h3 className={cn("text-[13px] font-semibold", config.headerText)}>
+          {config.label}
+        </h3>
+        <span className={cn(
+          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+          config.countBg,
+          config.countText
+        )}>
           {lots.length}
         </span>
       </div>
 
       {/* Column Cards Container */}
-      <div className="flex-1 space-y-2 rounded-lg bg-slate-50/50 p-2 min-h-[200px]">
+      <motion.div
+        layout
+        className="flex-1 space-y-2 rounded-lg bg-slate-50/50 p-2 min-h-[200px]"
+      >
         {lots.length === 0 ? (
           <p className="py-8 text-center text-[12px] text-slate-400">No samples</p>
         ) : (
           <>
-            {displayedLots.map((lot) => (
-              <KanbanCard
-                key={lot.id}
-                lot={lot}
-                staleness={lot.staleness}
-                onClick={() => onCardClick(lot)}
-                isCompleted={isCompletedColumn}
-              />
-            ))}
-            {showExpandButton && (
-              <button
-                onClick={() => setIsExpanded(true)}
-                className="w-full rounded-lg py-2 text-[12px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-              >
-                +{hiddenCount} more
-              </button>
-            )}
-            {isExpanded && lots.length > CARDS_PER_COLUMN && (
-              <button
-                onClick={() => setIsExpanded(false)}
-                className="w-full rounded-lg py-2 text-[12px] font-medium text-slate-500 hover:bg-slate-100 transition-colors"
-              >
-                Show less
-              </button>
-            )}
+            <AnimatePresence mode="popLayout">
+              {displayedLots.map((lot, index) => (
+                <KanbanCard
+                  key={lot.id}
+                  lot={lot}
+                  staleness={lot.staleness}
+                  onClick={() => onCardClick(lot)}
+                  index={index}
+                />
+              ))}
+            </AnimatePresence>
+            <AnimatePresence mode="wait">
+              {showExpandButton && (
+                <motion.button
+                  key="expand"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  onClick={() => setIsExpanded(true)}
+                  className="w-full rounded-lg py-2 text-[12px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                >
+                  +{hiddenCount} more
+                </motion.button>
+              )}
+              {isExpanded && lots.length > CARDS_PER_COLUMN && (
+                <motion.button
+                  key="collapse"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  onClick={() => setIsExpanded(false)}
+                  className="w-full rounded-lg py-2 text-[12px] font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                >
+                  Show less
+                </motion.button>
+              )}
+            </AnimatePresence>
           </>
         )}
-      </div>
+      </motion.div>
     </div>
   )
 }
@@ -269,7 +351,8 @@ function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
  * KanbanBoard displays lots organized by status in columns.
  *
  * Features:
- * - 6 columns: Awaiting Results, Partial Results, In Review, Awaiting Release, Rejected, Recently Completed
+ * - 4 columns: Awaiting Results, Partial Results, Needs Attention, Under Review
+ * - Approved/released items appear in Release Queue, rejected in Archive
  * - Stale items bubble to top with visual indicators (red/orange borders, warning icons)
  * - Maximum 8 cards per column with "+X more" button to expand
  * - Click cards to trigger onCardClick callback
@@ -279,22 +362,11 @@ export function KanbanBoard({
   onCardClick,
   staleWarningDays = 7,
   staleCriticalDays = 12,
-  recentlyCompletedDays = 7,
 }: KanbanBoardProps) {
-  // Build columns with dynamic Recently Completed label
-  const kanbanColumns = useMemo((): KanbanColumnConfig[] => [
-    ...BASE_KANBAN_COLUMNS,
-    { id: "recently_completed", label: `Recently Completed (${recentlyCompletedDays}d)` },
-  ], [recentlyCompletedDays])
-
   /**
    * Process and organize lots by column with staleness information
    */
   const columnData = useMemo(() => {
-    const now = new Date()
-    const recentlyCompletedCutoff = new Date()
-    recentlyCompletedCutoff.setDate(now.getDate() - recentlyCompletedDays)
-
     // Group lots by status with staleness calculation
     const groupedLots: Record<
       string,
@@ -302,7 +374,7 @@ export function KanbanBoard({
     > = {}
 
     // Initialize all columns
-    kanbanColumns.forEach((col) => {
+    KANBAN_COLUMNS.forEach((col) => {
       groupedLots[col.id] = []
     })
 
@@ -310,22 +382,8 @@ export function KanbanBoard({
       const staleness = calculateStaleness(lot, staleWarningDays, staleCriticalDays)
       const lotWithStaleness = { ...lot, staleness }
 
-      // Handle "approved" status - only show in recently_completed if within 7 days
-      if (lot.status === "approved") {
-        const updatedAt = lot.updated_at ? new Date(lot.updated_at) : new Date(lot.created_at)
-        if (updatedAt >= recentlyCompletedCutoff) {
-          groupedLots["recently_completed"].push(lotWithStaleness)
-        }
-        // Skip approved lots older than 7 days
-        return
-      }
-
-      // Handle "released" status - don't show in kanban
-      if (lot.status === "released") {
-        return
-      }
-
-      // Add lot to its status column
+      // Only include lots with statuses matching our 4 columns
+      // Skip approved, released, rejected, awaiting_release - they appear elsewhere
       if (groupedLots[lot.status]) {
         groupedLots[lot.status].push(lotWithStaleness)
       }
@@ -344,11 +402,11 @@ export function KanbanBoard({
     })
 
     return groupedLots
-  }, [lots, staleWarningDays, staleCriticalDays, recentlyCompletedDays, kanbanColumns])
+  }, [lots, staleWarningDays, staleCriticalDays])
 
   return (
-    <div className="grid grid-cols-7 gap-4">
-      {kanbanColumns.map((column) => (
+    <div className="grid grid-cols-4 gap-4">
+      {KANBAN_COLUMNS.map((column) => (
         <KanbanColumn
           key={column.id}
           config={column}

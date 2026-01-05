@@ -8,21 +8,21 @@ import type { Lot, LotStatus } from "@/types"
  * Enterprise-style: smooth fade + slide up, staggered cascade
  */
 const cardVariants = {
-  hidden: { opacity: 0, y: 8 },
+  hidden: { opacity: 0, y: 20 },
   visible: (index: number) => ({
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.25,
+      duration: 0.3,
       ease: [0.25, 0.1, 0.25, 1] as const, // Smooth easeOut (cubic bezier)
-      delay: index * 0.04, // 40ms stagger between cards
+      delay: index * 0.05, // 50ms stagger between cards
     },
   }),
   exit: {
     opacity: 0,
-    y: -6,
+    y: -20,
     transition: {
-      duration: 0.15,
+      duration: 0.2,
       ease: "easeIn" as const,
     },
   },
@@ -159,15 +159,16 @@ function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
 
   return (
     <motion.div
-      layout
       variants={cardVariants}
       initial="hidden"
       animate="visible"
       exit="exit"
       custom={index}
+      whileHover={{ scale: 1.01, transition: { duration: 0.15 } }}
+      whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm transition-colors",
+        "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm",
         "hover:border-slate-300 hover:shadow",
         borderClass
       )}

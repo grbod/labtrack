@@ -29,12 +29,13 @@ import { generateDisplayName } from "@/lib/product-utils"
 import type { Lot, LotStatus, LotType } from "@/types"
 
 // Status configuration for display
-const STATUS_CONFIG: Record<LotStatus, { label: string; variant: "amber" | "blue" | "violet" | "emerald" | "red" }> = {
-  awaiting_results: { label: "Awaiting Results", variant: "amber" },
+// Color scheme: sky=waiting, amber=in-progress, red=attention, violet=review
+const STATUS_CONFIG: Record<LotStatus, { label: string; variant: "sky" | "amber" | "orange" | "blue" | "violet" | "emerald" | "red" }> = {
+  awaiting_results: { label: "Awaiting Results", variant: "sky" },
   partial_results: { label: "Partial Results", variant: "amber" },
-  under_review: { label: "In Review", variant: "blue" },
-  awaiting_release: { label: "Awaiting Release", variant: "violet" },
   needs_attention: { label: "Needs Attention", variant: "red" },
+  under_review: { label: "Under Review", variant: "violet" },
+  awaiting_release: { label: "Awaiting Release", variant: "blue" },
   approved: { label: "Approved", variant: "emerald" },
   released: { label: "Released", variant: "emerald" },
   rejected: { label: "Rejected", variant: "red" },
@@ -53,7 +54,8 @@ const STATUS_OPTIONS: SelectOption[] = [
   { value: "all", label: "All Statuses" },
   { value: "awaiting_results", label: "Awaiting Results" },
   { value: "partial_results", label: "Partial Results" },
-  { value: "under_review", label: "In Review" },
+  { value: "needs_attention", label: "Needs Attention" },
+  { value: "under_review", label: "Under Review" },
   { value: "awaiting_release", label: "Awaiting Release" },
   { value: "approved", label: "Approved" },
   { value: "released", label: "Released" },

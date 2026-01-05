@@ -11,6 +11,8 @@ from .pdf_parser_service import PDFParserService, AIProvider, MockAIProvider
 from .pdf_watcher_service import PDFWatcherService
 from .coa_generator_service import COAGeneratorService
 from .lab_test_type_service import LabTestTypeService
+from .email_template_service import EmailTemplateService
+from .customer_service import CustomerService
 
 __all__ = [
     "BaseService",
@@ -26,4 +28,6 @@ __all__ = [
     "PDFWatcherService",
     "COAGeneratorService",
     "LabTestTypeService",
+    "EmailTemplateService",
+    "CustomerService",
 ]

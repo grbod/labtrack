@@ -24,6 +24,7 @@ interface ProductAutocompleteProps {
   onBlur?: () => void
   error?: boolean
   onNextCell?: () => void
+  onPrevCell?: () => void
 }
 
 export function ProductAutocomplete({
@@ -35,6 +36,7 @@ export function ProductAutocomplete({
   onBlur,
   error = false,
   onNextCell,
+  onPrevCell,
 }: ProductAutocompleteProps) {
   const listRef = useRef<HTMLUListElement>(null)
 
@@ -164,12 +166,26 @@ export function ProductAutocomplete({
 
         closeMenu()
 
-        if (onNextCell) {
+        // Handle navigation after selection
+        if (e.key === 'Tab') {
+          if (e.shiftKey && onPrevCell) {
+            setTimeout(() => onPrevCell(), 10)
+          } else if (!e.shiftKey && onNextCell) {
+            setTimeout(() => onNextCell(), 10)
+          }
+        } else if (onNextCell) {
+          // Enter key - move forward
           setTimeout(() => onNextCell(), 10)
         }
-      } else if (e.key === 'Tab' && onNextCell) {
-        e.preventDefault()
-        onNextCell()
+      } else if (e.key === 'Tab') {
+        // Dropdown closed - handle Tab navigation
+        if (e.shiftKey && onPrevCell) {
+          e.preventDefault()
+          onPrevCell()
+        } else if (!e.shiftKey && onNextCell) {
+          e.preventDefault()
+          onNextCell()
+        }
       } else if (e.key === 'Enter') {
         // Prevent form submission even when dropdown is closed
         e.preventDefault()

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Certificate of Analysis - {{ lot_number }}</title>
+  <style>
+    /* Print-friendly CSS for WeasyPrint */
+    @page {
+      size: letter;
+      margin: 0.75in;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.4;
+      color: #1e293b;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #1e293b;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .company-info h1 {
+      font-size: 18pt;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 4px;
+    }
+
+    .company-info p {
+      font-size: 9pt;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    .document-title {
+      text-align: right;
+    }
+
+    .document-title h2 {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #1e293b;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .document-title .date {
+      font-size: 9pt;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    /* Product Info Section */
+    .product-section {
+      background-color: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+
+    .product-section h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .product-field {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .product-field .label {
+      font-size: 8pt;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .product-field .value {
+      font-size: 10pt;
+      font-weight: 500;
+      color: #1e293b;
+    }
+
+    /* Test Results Table */
+    .results-section {
+      margin-bottom: 24px;
+    }
+
+    .results-section h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .results-table th,
+    .results-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .results-table th {
+      background-color: #f1f5f9;
+      font-size: 8pt;
+      font-weight: 600;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .results-table td {
+      font-size: 9pt;
+      color: #1e293b;
+    }
+
+    .results-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .results-table tr:nth-child(even) {
+      background-color: #f8fafc;
+    }
+
+    .status-pass {
+      color: #059669;
+      font-weight: 600;
+    }
+
+    .status-fail {
+      color: #dc2626;
+      font-weight: 600;
+    }
+
+    /* Notes Section */
+    .notes-section {
+      margin-bottom: 24px;
+    }
+
+    .notes-section h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .notes-content {
+      background-color: #fefce8;
+      border: 1px solid #fef08a;
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 9pt;
+      color: #713f12;
+      white-space: pre-wrap;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8pt;
+      color: #64748b;
+    }
+
+    .footer .signature-line {
+      width: 200px;
+      border-top: 1px solid #94a3b8;
+      padding-top: 4px;
+      text-align: center;
+    }
+
+    /* Disclaimer */
+    .disclaimer {
+      margin-top: 24px;
+      padding: 12px;
+      background-color: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 7pt;
+      color: #64748b;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="company-info">
+      <h1>{{ company_name or 'Company Name' }}</h1>
+      {% if company_address %}<p>{{ company_address }}</p>{% endif %}
+      {% if company_phone or company_email %}
+      <p>
+        {% if company_phone %}Tel: {{ company_phone }}{% endif %}
+        {% if company_phone and company_email %} | {% endif %}
+        {% if company_email %}Email: {{ company_email }}{% endif %}
+      </p>
+      {% endif %}
+    </div>
+    <div class="document-title">
+      <h2>Certificate of Analysis</h2>
+      <p class="date">Generated: {{ generated_date }}</p>
+    </div>
+  </div>
+
+  <!-- Product Information -->
+  <div class="product-section">
+    <h3>Product Information</h3>
+    <div class="product-grid">
+      <div class="product-field">
+        <span class="label">Product Name</span>
+        <span class="value">{{ product_name or 'N/A' }}</span>
+      </div>
+      <div class="product-field">
+        <span class="label">Brand</span>
+        <span class="value">{{ brand or 'N/A' }}</span>
+      </div>
+      <div class="product-field">
+        <span class="label">Lot Number</span>
+        <span class="value">{{ lot_number or 'N/A' }}</span>
+      </div>
+      <div class="product-field">
+        <span class="label">Reference Number</span>
+        <span class="value">{{ reference_number or 'N/A' }}</span>
+      </div>
+      {% if mfg_date %}
+      <div class="product-field">
+        <span class="label">Manufacturing Date</span>
+        <span class="value">{{ mfg_date }}</span>
+      </div>
+      {% endif %}
+      {% if exp_date %}
+      <div class="product-field">
+        <span class="label">Expiration Date</span>
+        <span class="value">{{ exp_date }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Test Results -->
+  <div class="results-section">
+    <h3>Test Results</h3>
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th style="width: 30%;">Test Name</th>
+          <th style="width: 20%;">Result</th>
+          <th style="width: 20%;">Unit</th>
+          <th style="width: 20%;">Specification</th>
+          <th style="width: 10%;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if tests %}
+        {% for test in tests %}
+        <tr>
+          <td>{{ test.name }}</td>
+          <td>{{ test.result }}</td>
+          <td>{{ test.unit or '-' }}</td>
+          <td>{{ test.specification }}</td>
+          <td class="{% if test.status == 'Pass' %}status-pass{% else %}status-fail{% endif %}">
+            {{ test.status }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="5" style="text-align: center; color: #64748b; font-style: italic;">
+            No test results available
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Notes (if any) -->
+  {% if notes %}
+  <div class="notes-section">
+    <h3>Notes</h3>
+    <div class="notes-content">{{ notes }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div>
+      <p>Document ID: COA-{{ reference_number }}-{{ generated_date | replace(' ', '') | replace(',', '') }}</p>
+      {% if released_by %}
+      <p>Released by: {{ released_by }}</p>
+      {% endif %}
+    </div>
+    <div class="signature-line">
+      Quality Assurance
+    </div>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="disclaimer">
+    This Certificate of Analysis is issued based on the test results of a representative sample.
+    Results apply only to the lot specified above. This document is electronically generated and valid without signature.
+  </div>
+</body>
+</html>

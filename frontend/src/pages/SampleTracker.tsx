@@ -12,8 +12,12 @@ export function SampleTrackerPage() {
   const [selectedLot, setSelectedLot] = useState<Lot | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // Fetch lots for kanban (all active statuses)
-  const { data: lotsData, isLoading } = useLots({ page_size: 100 })
+  // Fetch lots for kanban (active workflow statuses only)
+  // Exclude approved, released, awaiting_release, rejected - they appear in Release Queue/Archive
+  const { data: lotsData, isLoading } = useLots({
+    page_size: 100,
+    exclude_statuses: ["approved", "released", "awaiting_release", "rejected"],
+  })
 
   // Get stale thresholds from system settings
   const { settings: systemSettings } = useSystemSettings()
@@ -71,7 +75,6 @@ export function SampleTrackerPage() {
             onCardClick={handleCardClick}
             staleWarningDays={systemSettings.staleWarningDays}
             staleCriticalDays={systemSettings.staleCriticalDays}
-            recentlyCompletedDays={systemSettings.recentlyCompletedDays}
           />
         )}
       </div>

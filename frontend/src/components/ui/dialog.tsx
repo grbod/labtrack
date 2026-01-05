@@ -10,16 +10,13 @@ import { cn } from "@/lib/utils"
 /**
  * Smooth modal animation configuration
  * Enterprise-style: gentle fade + scale with easeOut
+ * Timing: 1.75x standard duration for gradual feel
  */
 const overlayVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { duration: 0.2, ease: "easeOut" as const },
-  },
-  exit: {
-    opacity: 0,
-    transition: { duration: 0.15, ease: "easeIn" as const },
+    transition: { duration: 0.35, ease: "easeOut" as const },
   },
 }
 
@@ -30,17 +27,8 @@ const contentVariants = {
     scale: 1,
     y: 0,
     transition: {
-      duration: 0.25,
-      ease: [0.25, 0.1, 0.25, 1] as const, // Smooth easeOut
-    },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.96,
-    y: 10,
-    transition: {
-      duration: 0.15,
-      ease: "easeIn" as const,
+      duration: 0.44,
+      ease: [0.25, 0.1, 0.25, 1] as const,
     },
   },
 }
@@ -73,13 +61,12 @@ function DialogOverlay({
   className,
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
-    <DialogPrimitive.Overlay asChild forceMount>
+    <DialogPrimitive.Overlay asChild>
       <motion.div
         data-slot="dialog-overlay"
         variants={overlayVariants}
         initial="hidden"
         animate="visible"
-        exit="exit"
         className={cn(
           "fixed inset-0 z-50 bg-black/50",
           className
@@ -97,15 +84,14 @@ function DialogContent({
   showCloseButton?: boolean
 }) {
   return (
-    <DialogPortal forceMount data-slot="dialog-portal">
+    <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
-      <DialogPrimitive.Content asChild forceMount>
+      <DialogPrimitive.Content asChild>
         <motion.div
           data-slot="dialog-content"
           variants={contentVariants}
           initial="hidden"
           animate="visible"
-          exit="exit"
           className={cn(
             "bg-background fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
             className

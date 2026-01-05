@@ -62,6 +62,3 @@ clean:
 	rm -rf htmlcov/ .pytest_cache/ .mypy_cache/ dist/ build/ *.egg-info 2>/dev/null || true
 	rm -rf frontend/node_modules/.cache frontend/dist 2>/dev/null || true
 
-# Legacy Streamlit (for reference during migration)
-run-streamlit:
-	cd backend && streamlit run streamlit_app.py

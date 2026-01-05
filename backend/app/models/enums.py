@@ -57,3 +57,10 @@ class AuditAction(str, enum.Enum):
     DELETE = "delete"
     APPROVE = "approve"
     REJECT = "reject"
+
+
+class COAReleaseStatus(str, enum.Enum):
+    """COA release status enumeration."""
+
+    AWAITING_RELEASE = "awaiting_release"
+    RELEASED = "released"

@@ -5,9 +5,10 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func as db_func
 from app.models.test_result import TestResult
-from app.models.lot import Lot
+from app.models.lot import Lot, LotProduct
 from app.models.user import User
-from app.models.enums import TestResultStatus, LotStatus, UserRole, AuditAction
+from app.models.coa_release import COARelease
+from app.models.enums import TestResultStatus, LotStatus, LotType, UserRole, AuditAction, COAReleaseStatus
 from app.models.audit import AuditLog
 from app.services.base import BaseService
 from app.utils.logger import logger
@@ -831,3 +832,100 @@ class ApprovalService(BaseService[TestResult]):
             "issues": issues,
             "warnings": warnings
         }
+
+    def create_coa_releases_for_lot(
+        self,
+        db: Session,
+        lot_id: int,
+        user_id: int,
+    ) -> List[COARelease]:
+        """
+        Create COARelease records when a lot is approved.
+
+        For STANDARD and PARENT_LOT: Creates 1 COARelease with the single product
+        For MULTI_SKU_COMPOSITE: Creates N COARelease records (one per product in LotProduct)
+
+        Args:
+            db: Database session
+            lot_id: ID of the lot being approved
+            user_id: ID of user triggering the approval
+
+        Returns:
+            List of created COARelease records
+        """
+        lot = db.query(Lot).filter(Lot.id == lot_id).first()
+        if not lot:
+            raise ValueError(f"Lot with ID {lot_id} not found")
+
+        # Check if COARelease records already exist for this lot
+        existing_releases = (
+            db.query(COARelease)
+            .filter(COARelease.lot_id == lot_id)
+            .all()
+        )
+        if existing_releases:
+            logger.info(
+                f"COARelease records already exist for lot {lot.lot_number}, skipping creation"
+            )
+            return existing_releases
+
+        # Get products for this lot
+        lot_products = (
+            db.query(LotProduct)
+            .filter(LotProduct.lot_id == lot_id)
+            .all()
+        )
+
+        if not lot_products:
+            raise ValueError(f"Lot {lot.lot_number} has no products")
+
+        created_releases = []
+
+        if lot.lot_type == LotType.MULTI_SKU_COMPOSITE:
+            # Create one COARelease per product
+            for lp in lot_products:
+                release = COARelease(
+                    lot_id=lot_id,
+                    product_id=lp.product_id,
+                    status=COAReleaseStatus.AWAITING_RELEASE,
+                )
+                db.add(release)
+                created_releases.append(release)
+
+            logger.info(
+                f"Created {len(created_releases)} COARelease records for MultiSKU lot {lot.lot_number}"
+            )
+        else:
+            # STANDARD or PARENT_LOT: create 1 COARelease with the single product
+            # Use the first product (should typically be only one)
+            primary_product = lot_products[0]
+            release = COARelease(
+                lot_id=lot_id,
+                product_id=primary_product.product_id,
+                status=COAReleaseStatus.AWAITING_RELEASE,
+            )
+            db.add(release)
+            created_releases.append(release)
+
+            logger.info(
+                f"Created 1 COARelease record for {lot.lot_type.value} lot {lot.lot_number}"
+            )
+
+        db.flush()
+
+        # Log audit for each created release
+        for release in created_releases:
+            self._log_audit(
+                db=db,
+                action=AuditAction.INSERT,
+                record_id=release.id,
+                new_values={
+                    "lot_id": release.lot_id,
+                    "product_id": release.product_id,
+                    "status": release.status.value,
+                },
+                user_id=user_id,
+                reason=f"COARelease created for approved lot {lot.lot_number}",
+            )
+
+        return created_releases

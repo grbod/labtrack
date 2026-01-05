@@ -60,6 +60,9 @@ class Lot(BaseModel):
     coa_history = relationship(
         "COAHistory", back_populates="lot", cascade="all, delete-orphan"
     )
+    coa_releases = relationship(
+        "COARelease", back_populates="lot", cascade="all, delete-orphan"
+    )
 
     # Indexes for performance
     __table_args__ = (

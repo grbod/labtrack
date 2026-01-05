@@ -1,7 +1,7 @@
 """Lot management endpoints."""
 
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func
@@ -63,6 +63,7 @@ async def list_lots(
     page_size: int = Query(50, ge=1, le=100),
     search: Optional[str] = None,
     status_filter: Optional[LotStatus] = Query(None, alias="status"),
+    exclude_statuses: Optional[List[LotStatus]] = Query(None, alias="exclude_statuses"),
     lot_type: Optional[LotType] = None,
 ) -> LotListResponse:
     """List all lots with pagination, filtering, and product info."""
@@ -86,6 +87,9 @@ async def list_lots(
     if status_filter:
         query = query.filter(Lot.status == status_filter)
 
+    if exclude_statuses:
+        query = query.filter(Lot.status.notin_(exclude_statuses))
+
     if lot_type:
         query = query.filter(Lot.lot_type == lot_type)
 
@@ -99,6 +103,8 @@ async def list_lots(
         )
     if status_filter:
         count_query = count_query.filter(Lot.status == status_filter)
+    if exclude_statuses:
+        count_query = count_query.filter(Lot.status.notin_(exclude_statuses))
     if lot_type:
         count_query = count_query.filter(Lot.lot_type == lot_type)
     total = count_query.scalar()

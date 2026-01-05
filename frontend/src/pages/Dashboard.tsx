@@ -2,7 +2,6 @@ import { Link } from "react-router-dom"
 import {
   Package,
   TestTube,
-  CheckSquare,
   FileText,
   ArrowRight,
   FlaskConical,
@@ -12,7 +11,6 @@ import {
 
 import { useProducts } from "@/hooks/useProducts"
 import { useLots, useLotStatusCounts } from "@/hooks/useLots"
-import { usePendingReviewCount } from "@/hooks/useTestResults"
 
 interface StatCardProps {
   title: string
@@ -50,9 +48,7 @@ export function DashboardPage() {
   const { data: productsData, isLoading: productsLoading } = useProducts({ page_size: 1 })
   const { data: lotsData, isLoading: lotsLoading } = useLots({ page_size: 5 })
   const { data: statusCounts, isLoading: statusLoading } = useLotStatusCounts()
-  const { data: pendingCount, isLoading: pendingLoading } = usePendingReviewCount()
 
-  const pendingApprovals = pendingCount?.pending_count ?? 0
   const activeSamples = (statusCounts?.awaiting_results ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
 
   return (
@@ -82,14 +78,6 @@ export function DashboardPage() {
           icon={<TestTube className="h-5 w-5 text-violet-600" />}
           iconBg="bg-violet-50"
           isLoading={statusLoading}
-        />
-        <StatCard
-          title="Pending Review"
-          value={pendingApprovals}
-          subtitle="Awaiting approval"
-          icon={<CheckSquare className="h-5 w-5 text-amber-600" />}
-          iconBg="bg-amber-50"
-          isLoading={pendingLoading}
         />
         <StatCard
           title="Ready to Publish"
@@ -135,21 +123,6 @@ export function DashboardPage() {
                 <div>
                   <p className="font-semibold text-slate-900 text-[14px]">Import Test Results</p>
                   <p className="text-[13px] text-slate-500 mt-0.5">Upload PDF or enter manually</p>
-                </div>
-              </div>
-              <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />
-            </Link>
-            <Link
-              to="/approvals"
-              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50/80 transition-colors group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-amber-50 p-2.5 shadow-sm group-hover:shadow transition-shadow">
-                  <CheckSquare className="h-5 w-5 text-amber-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900 text-[14px]">Review Approvals</p>
-                  <p className="text-[13px] text-slate-500 mt-0.5">{pendingApprovals} items pending review</p>
                 </div>
               </div>
               <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />

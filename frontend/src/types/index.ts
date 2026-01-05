@@ -1,5 +1,5 @@
-// User roles
-export type UserRole = "ADMIN" | "QC_MANAGER" | "LAB_TECH" | "READ_ONLY"
+// User roles (lowercase to match backend)
+export type UserRole = "admin" | "qc_manager" | "lab_tech" | "read_only"
 
 // Lot types and statuses (lowercase to match backend enum values)
 export type LotType = "standard" | "parent_lot" | "sublot" | "multi_sku_composite"
@@ -200,3 +200,14 @@ export interface TestResultRow extends TestResult {
 
 /** Filter status for test results table */
 export type TestFilterStatus = 'all' | 'pending' | 'passed' | 'failed'
+
+// Customer types
+export interface Customer {
+  id: number
+  company_name: string
+  contact_name: string
+  email: string
+  is_active: boolean
+  created_at: string
+  updated_at: string | null
+}

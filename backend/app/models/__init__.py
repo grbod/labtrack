@@ -9,6 +9,7 @@ from app.models.enums import (
     TestResultStatus,
     ParsingStatus,
     AuditAction,
+    COAReleaseStatus,
 )
 from app.models.product import Product
 from app.models.product_size import ProductSize
@@ -20,6 +21,10 @@ from app.models.parsing import ParsingQueue
 from app.models.coa import COAHistory
 from app.models.lab_test_type import LabTestType
 from app.models.product_test_spec import ProductTestSpecification
+from app.models.customer import Customer
+from app.models.coa_release import COARelease
+from app.models.email_history import EmailHistory
+from app.models.email_template import EmailTemplate
 
 # Export all models and enums
 __all__ = [
@@ -32,6 +37,7 @@ __all__ = [
     "TestResultStatus",
     "ParsingStatus",
     "AuditAction",
+    "COAReleaseStatus",
     # Models
     "Product",
     "ProductSize",
@@ -45,4 +51,8 @@ __all__ = [
     "COAHistory",
     "LabTestType",
     "ProductTestSpecification",
+    "Customer",
+    "COARelease",
+    "EmailHistory",
+    "EmailTemplate",
 ]

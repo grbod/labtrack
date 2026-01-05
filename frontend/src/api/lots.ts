@@ -6,6 +6,7 @@ export interface LotFilters {
   page_size?: number
   search?: string
   status?: LotStatus
+  exclude_statuses?: LotStatus[]
   lot_type?: LotType
 }
 
@@ -54,6 +55,9 @@ export const lotsApi = {
     if (filters.page_size) params.append("page_size", filters.page_size.toString())
     if (filters.search) params.append("search", filters.search)
     if (filters.status) params.append("status", filters.status)
+    if (filters.exclude_statuses) {
+      filters.exclude_statuses.forEach(status => params.append("exclude_statuses", status))
+    }
     if (filters.lot_type) params.append("lot_type", filters.lot_type)
 
     const response = await api.get<PaginatedResponse<Lot>>(`/lots?${params}`)

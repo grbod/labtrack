@@ -1,0 +1,1152 @@
+"""COA Release management endpoints."""
+
+from pathlib import Path
+from typing import Optional, List
+
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse, HTMLResponse
+from sqlalchemy.orm import joinedload
+
+from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
+from app.config import settings
+from app.models.coa_release import COARelease
+from app.models.lot import Lot
+from app.services.coa_generation_service import coa_generation_service
+from app.services.release_service import ReleaseService
+from app.schemas.release import (
+    COAReleaseResponse,
+    COAReleaseWithSourcePdfs,
+    LotInRelease,
+    ProductInRelease,
+    CustomerInRelease,
+    ReleaseQueueItem,
+    ReleaseQueueResponse,
+    DraftSaveRequest,
+    SendBackRequest,
+    EmailSendRequest,
+    EmailHistoryResponse,
+    ApproveReleaseResponse,
+    ReleaseDetailsByLotProduct,
+    ApproveByLotProductRequest,
+    ApproveByLotProductResponse,
+)
+
+router = APIRouter()
+release_service = ReleaseService()
+
+
+@router.get("/{release_id}/preview")
+async def preview_coa(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Generate and return COA PDF for preview.
+
+    This endpoint will:
+    1. Check if a valid PDF already exists
+    2. If not, generate a new PDF
+    3. Return the PDF file for viewing
+    """
+    # Verify the release exists
+    coa_release = (
+        db.query(COARelease)
+        .options(joinedload(COARelease.lot))
+        .filter(COARelease.id == release_id)
+        .first()
+    )
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA Release not found",
+        )
+
+    try:
+        # Get or generate the PDF
+        pdf_path = coa_generation_service.get_or_generate_pdf(db, release_id)
+
+        # Verify file exists
+        if not Path(pdf_path).exists():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="PDF file generation failed",
+            )
+
+        # Return PDF for inline viewing
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"COA_{coa_release.lot.lot_number}.pdf",
+            headers={
+                "Content-Disposition": f"inline; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate COA PDF: {str(e)}",
+        )
+
+
+@router.get("/{release_id}/download")
+async def download_coa(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Download the COA PDF.
+
+    Similar to preview, but forces download instead of inline display.
+    """
+    # Verify the release exists
+    coa_release = (
+        db.query(COARelease)
+        .options(joinedload(COARelease.lot))
+        .filter(COARelease.id == release_id)
+        .first()
+    )
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA Release not found",
+        )
+
+    try:
+        # Get or generate the PDF
+        pdf_path = coa_generation_service.get_or_generate_pdf(db, release_id)
+
+        # Verify file exists
+        if not Path(pdf_path).exists():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="PDF file generation failed",
+            )
+
+        # Return PDF for download
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"COA_{coa_release.lot.lot_number}.pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download COA PDF: {str(e)}",
+        )
+
+
+@router.get("/{release_id}/preview-html", response_class=HTMLResponse)
+async def preview_coa_html(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> HTMLResponse:
+    """
+    Return COA as HTML for browser preview.
+
+    This is useful for previewing the COA without generating a PDF.
+    """
+    # Verify the release exists
+    coa_release = db.query(COARelease).filter(COARelease.id == release_id).first()
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA Release not found",
+        )
+
+    try:
+        html_content = coa_generation_service.render_html_preview(db, release_id)
+        return HTMLResponse(content=html_content)
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to render COA preview: {str(e)}",
+        )
+
+
+@router.get("/{release_id}/data")
+async def get_coa_data(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> dict:
+    """
+    Get COA data without generating PDF.
+
+    Returns the data that would be used for COA generation.
+    Useful for frontend preview rendering.
+    """
+    # Verify the release exists
+    coa_release = db.query(COARelease).filter(COARelease.id == release_id).first()
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA Release not found",
+        )
+
+    try:
+        data = coa_generation_service.get_preview_data(db, release_id)
+        return {"status": "success", "data": data}
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get COA data: {str(e)}",
+        )
+
+
+@router.post("/{release_id}/regenerate")
+async def regenerate_coa(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> dict:
+    """
+    Force regeneration of the COA PDF.
+
+    This will always generate a new PDF, even if one exists.
+    """
+    # Verify the release exists
+    coa_release = db.query(COARelease).filter(COARelease.id == release_id).first()
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA Release not found",
+        )
+
+    try:
+        pdf_path = coa_generation_service.generate(db, release_id)
+        return {
+            "status": "success",
+            "message": "COA PDF regenerated successfully",
+            "file_path": pdf_path,
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to regenerate COA PDF: {str(e)}",
+        )
+
+
+# ============================================================================
+# Release Queue and Workflow Endpoints
+# ============================================================================
+
+@router.get("/queue", response_model=ReleaseQueueResponse)
+async def get_release_queue(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReleaseQueueResponse:
+    """
+    Get release queue - lots with awaiting_release status, one item per product.
+
+    Returns Lot+Product pairs for lots with AWAITING_RELEASE status,
+    ordered by created_at desc.
+    """
+    from app.models import Lot, LotProduct, Product
+    from app.models.enums import LotStatus
+
+    # Query lots with awaiting_release status, joined with products
+    results = (
+        db.query(Lot, LotProduct, Product)
+        .join(LotProduct, Lot.id == LotProduct.lot_id)
+        .join(Product, LotProduct.product_id == Product.id)
+        .filter(Lot.status == LotStatus.AWAITING_RELEASE)
+        .order_by(Lot.created_at.desc())
+        .all()
+    )
+
+    items = []
+    for lot, lot_product, product in results:
+        items.append(
+            ReleaseQueueItem(
+                lot_id=lot.id,
+                product_id=product.id,
+                reference_number=lot.reference_number,
+                lot_number=lot.lot_number,
+                product_name=product.product_name,
+                brand=product.brand,
+                flavor=product.flavor,
+                size=product.size,
+                created_at=lot.created_at,
+            )
+        )
+
+    return ReleaseQueueResponse(items=items, total=len(items))
+
+
+# ============================================================================
+# Lot+Product Release Endpoints
+# ============================================================================
+
+@router.get("/{lot_id}/{product_id}", response_model=ReleaseDetailsByLotProduct)
+async def get_release_details_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReleaseDetailsByLotProduct:
+    """
+    Get release details for a specific lot+product pair.
+
+    Returns lot, product, source PDFs, and existing COARelease if any.
+    Used by the Release page to display details before final approval.
+    """
+    from app.models import LotProduct, Product
+
+    # Get lot
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Get product
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Verify lot-product association
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    # Get source PDFs from test results
+    source_pdfs = release_service.get_source_pdfs(db, lot_id)
+
+    # Check for existing COARelease
+    existing_release = (
+        db.query(COARelease)
+        .options(
+            joinedload(COARelease.lot),
+            joinedload(COARelease.product),
+            joinedload(COARelease.customer),
+            joinedload(COARelease.released_by),
+        )
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id
+        )
+        .first()
+    )
+
+    # Determine status
+    from app.models.enums import COAReleaseStatus
+    if existing_release:
+        status = "released" if existing_release.status == COAReleaseStatus.RELEASED else "awaiting_release"
+    else:
+        status = "awaiting_release"
+
+    return ReleaseDetailsByLotProduct(
+        lot_id=lot_id,
+        product_id=product_id,
+        status=status,
+        customer_id=existing_release.customer_id if existing_release else None,
+        notes=existing_release.notes if existing_release else None,
+        released_at=existing_release.released_at if existing_release else None,
+        draft_data=existing_release.draft_data if existing_release else None,
+        lot=LotInRelease.model_validate(lot),
+        product=ProductInRelease.model_validate(product),
+        source_pdfs=source_pdfs,
+        customer=CustomerInRelease.model_validate(existing_release.customer) if existing_release and existing_release.customer else None,
+    )
+
+
+@router.post("/{lot_id}/{product_id}/approve", response_model=ApproveByLotProductResponse)
+async def approve_release_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+    request: ApproveByLotProductRequest = None,
+) -> ApproveByLotProductResponse:
+    """
+    Approve and release a COA for a specific lot+product pair.
+
+    Creates or updates a COARelease record and generates the PDF.
+    Requires QC Manager or Admin role.
+
+    If all products for the lot are released, updates lot status to RELEASED.
+    """
+    from datetime import datetime
+    from app.models import LotProduct, Product
+    from app.models.enums import LotStatus, COAReleaseStatus
+
+    # Default request if not provided
+    if request is None:
+        request = ApproveByLotProductRequest()
+
+    # Validate lot exists and is in awaiting_release status
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    if lot.status != LotStatus.AWAITING_RELEASE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Lot must be in 'awaiting_release' status. Current status: {lot.status.value}",
+        )
+
+    # Validate product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Verify lot-product association
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    # Check for existing COARelease or create new one
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id
+        )
+        .first()
+    )
+
+    if coa_release:
+        # Update existing release if not already released
+        if coa_release.status == COAReleaseStatus.RELEASED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This COA has already been released",
+            )
+        # Update with request data
+        coa_release.customer_id = request.customer_id
+        coa_release.notes = request.notes
+    else:
+        # Create new COARelease record
+        coa_release = COARelease(
+            lot_id=lot_id,
+            product_id=product_id,
+            customer_id=request.customer_id,
+            notes=request.notes,
+            status=COAReleaseStatus.AWAITING_RELEASE,
+        )
+        db.add(coa_release)
+        db.flush()
+
+    # Mark as released
+    coa_release.status = COAReleaseStatus.RELEASED
+    coa_release.released_at = datetime.utcnow()
+    coa_release.released_by_id = current_user.id
+
+    # Generate COA PDF
+    try:
+        pdf_path = coa_generation_service.generate(db, coa_release.id)
+        coa_release.coa_file_path = pdf_path
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate COA PDF: {str(e)}",
+        )
+
+    # Check if all products for this lot are released
+    all_lot_products = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id)
+        .all()
+    )
+
+    all_product_ids = {lp.product_id for lp in all_lot_products}
+
+    released_releases = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.status == COAReleaseStatus.RELEASED
+        )
+        .all()
+    )
+    released_product_ids = {r.product_id for r in released_releases}
+
+    all_products_released = all_product_ids == released_product_ids
+
+    # Update lot status to RELEASED if all products are released
+    if all_products_released:
+        lot.status = LotStatus.RELEASED
+
+    db.commit()
+    db.refresh(coa_release)
+    db.refresh(lot)
+
+    return ApproveByLotProductResponse(
+        status="released",
+        coa_release_id=coa_release.id,
+        lot_status=lot.status,
+        all_products_released=all_products_released,
+    )
+
+
+@router.get("/{lot_id}/{product_id}/preview")
+async def preview_coa_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Generate and return COA PDF preview for a lot+product pair.
+    Works whether or not a COARelease record exists yet.
+    """
+    from app.models import LotProduct, Product
+
+    # Verify lot exists
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Verify product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Verify lot-product association
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    try:
+        # Check if COARelease exists
+        existing_release = (
+            db.query(COARelease)
+            .filter(
+                COARelease.lot_id == lot_id,
+                COARelease.product_id == product_id
+            )
+            .first()
+        )
+
+        if existing_release and existing_release.coa_file_path:
+            pdf_path = existing_release.coa_file_path
+            if Path(pdf_path).exists():
+                return FileResponse(
+                    path=pdf_path,
+                    media_type="application/pdf",
+                    filename=f"COA_{lot.lot_number}.pdf",
+                    headers={
+                        "Content-Disposition": f"inline; filename=\"COA_{lot.lot_number}.pdf\""
+                    }
+                )
+
+        # Generate preview PDF on-the-fly
+        pdf_path = coa_generation_service.generate_preview(db, lot_id, product_id)
+
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"COA_{lot.lot_number}_preview.pdf",
+            headers={
+                "Content-Disposition": f"inline; filename=\"COA_{lot.lot_number}_preview.pdf\""
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate COA preview: {str(e)}",
+        )
+
+
+@router.get("/{lot_id}/{product_id}/download")
+async def download_coa_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Download COA PDF for a lot+product pair.
+    Only works if a COARelease exists and has been released.
+    """
+    from app.models.enums import COAReleaseStatus
+
+    # Get the COARelease
+    coa_release = (
+        db.query(COARelease)
+        .options(joinedload(COARelease.lot))
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id,
+            COARelease.status == COAReleaseStatus.RELEASED
+        )
+        .first()
+    )
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Released COA not found for this lot+product",
+        )
+
+    if not coa_release.coa_file_path or not Path(coa_release.coa_file_path).exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA PDF file not found",
+        )
+
+    return FileResponse(
+        path=coa_release.coa_file_path,
+        media_type="application/pdf",
+        filename=f"COA_{coa_release.lot.lot_number}.pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
+        }
+    )
+
+
+@router.get("/{lot_id}/{product_id}/source-pdfs/{filename}")
+async def get_source_pdf_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    filename: str,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Get a source PDF file for a lot+product pair.
+    """
+    from app.models import LotProduct
+
+    # Verify lot exists and lot-product association
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    # Get source PDFs
+    source_pdfs = release_service.get_source_pdfs(db, lot_id)
+    if filename not in source_pdfs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source PDF not found",
+        )
+
+    # Build the file path
+    pdf_path = Path(settings.UPLOAD_DIR) / "test_results" / filename
+    if not pdf_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source PDF file not found on disk",
+        )
+
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=filename,
+        headers={
+            "Content-Disposition": f"inline; filename=\"{filename}\""
+        }
+    )
+
+
+@router.put("/{lot_id}/{product_id}/draft", response_model=ReleaseDetailsByLotProduct)
+async def save_draft_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    request: DraftSaveRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReleaseDetailsByLotProduct:
+    """
+    Save draft data (customer_id, notes) for a lot+product pair.
+    Creates or updates a draft COARelease record.
+    """
+    from app.models import LotProduct, Product
+    from app.models.enums import COAReleaseStatus
+
+    # Verify lot-product association
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    # Get or create COARelease
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id
+        )
+        .first()
+    )
+
+    if coa_release:
+        # Update existing
+        coa_release.draft_data = {
+            "customer_id": request.customer_id,
+            "notes": request.notes,
+        }
+    else:
+        # Create new draft COARelease
+        coa_release = COARelease(
+            lot_id=lot_id,
+            product_id=product_id,
+            status=COAReleaseStatus.AWAITING_RELEASE,
+            draft_data={
+                "customer_id": request.customer_id,
+                "notes": request.notes,
+            }
+        )
+        db.add(coa_release)
+
+    db.commit()
+
+    # Return updated details
+    source_pdfs = release_service.get_source_pdfs(db, lot_id)
+    coa_release_response = COAReleaseResponse.model_validate(coa_release) if coa_release else None
+
+    return ReleaseDetailsByLotProduct(
+        lot=LotInRelease.model_validate(lot),
+        product=ProductInRelease.model_validate(product),
+        source_pdfs=source_pdfs,
+        coa_release=coa_release_response,
+    )
+
+
+@router.post("/{lot_id}/{product_id}/email", response_model=EmailHistoryResponse)
+async def send_email_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    request: EmailSendRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> EmailHistoryResponse:
+    """
+    Log an email sent for a lot+product's COARelease.
+    Only works after the COA has been released.
+    """
+    from app.models.enums import COAReleaseStatus
+    from app.models.email_history import EmailHistory
+    from datetime import datetime
+
+    # Get the released COARelease
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id,
+            COARelease.status == COAReleaseStatus.RELEASED
+        )
+        .first()
+    )
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="COA must be released before sending email",
+        )
+
+    # Create email history record
+    email_history = EmailHistory(
+        coa_release_id=coa_release.id,
+        recipient_email=request.recipient_email,
+        sent_at=datetime.utcnow(),
+        sent_by_id=current_user.id,
+    )
+    db.add(email_history)
+    db.commit()
+    db.refresh(email_history)
+
+    return EmailHistoryResponse(
+        id=email_history.id,
+        recipient_email=email_history.recipient_email,
+        sent_at=email_history.sent_at,
+        sent_by=current_user.username,
+    )
+
+
+@router.get("/{lot_id}/{product_id}/emails", response_model=List[EmailHistoryResponse])
+async def get_email_history_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> List[EmailHistoryResponse]:
+    """
+    Get email history for a lot+product's COARelease.
+    """
+    from app.models.email_history import EmailHistory
+    from app.models import User
+
+    # Get the COARelease
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id
+        )
+        .first()
+    )
+
+    if not coa_release:
+        return []
+
+    # Get email history
+    emails = (
+        db.query(EmailHistory, User)
+        .join(User, EmailHistory.sent_by_id == User.id)
+        .filter(EmailHistory.coa_release_id == coa_release.id)
+        .order_by(EmailHistory.sent_at.desc())
+        .all()
+    )
+
+    return [
+        EmailHistoryResponse(
+            id=email.id,
+            recipient_email=email.recipient_email,
+            sent_at=email.sent_at,
+            sent_by=user.username,
+        )
+        for email, user in emails
+    ]
+
+
+# ============================================================================
+# Legacy COARelease ID-based Endpoints
+# ============================================================================
+
+@router.get("/{id}", response_model=COAReleaseWithSourcePdfs)
+async def get_release(
+    id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> COAReleaseWithSourcePdfs:
+    """
+    Get a COARelease by ID with all details including source PDFs.
+
+    Returns the COARelease with lot, product, customer relations and
+    list of source PDF filenames from associated test results.
+    """
+    release = release_service.get_by_id(db, id)
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COARelease not found",
+        )
+
+    # Get source PDFs
+    source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
+
+    # Build response with nested relations
+    response = COAReleaseWithSourcePdfs.model_validate(release)
+    response.source_pdfs = source_pdfs
+
+    return response
+
+
+@router.get("/{id}/source-pdfs/{filename}")
+async def get_source_pdf(
+    id: int,
+    filename: str,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Serve a source PDF file.
+
+    Downloads the PDF file from the uploads/pdfs directory.
+    """
+    # Verify release exists
+    release = release_service.get(db, id)
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COARelease not found",
+        )
+
+    # Verify the PDF is associated with this release's lot
+    source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
+    if filename not in source_pdfs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF not associated with this release",
+        )
+
+    # Build file path
+    pdf_path = Path(settings.upload_path) / "pdfs" / filename
+
+    if not pdf_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF file not found",
+        )
+
+    return FileResponse(
+        path=str(pdf_path),
+        filename=filename,
+        media_type="application/pdf",
+    )
+
+
+@router.put("/{id}/draft", response_model=COAReleaseWithSourcePdfs)
+async def save_draft(
+    id: int,
+    draft: DraftSaveRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> COAReleaseWithSourcePdfs:
+    """
+    Save draft data for a COARelease (auto-saved on blur).
+
+    Updates customer_id and notes fields. Both fields are optional.
+    """
+    try:
+        release = release_service.save_draft(
+            db=db,
+            id=id,
+            customer_id=draft.customer_id,
+            notes=draft.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+    # Reload with relations
+    release = release_service.get_by_id(db, id)
+    source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
+
+    response = COAReleaseWithSourcePdfs.model_validate(release)
+    response.source_pdfs = source_pdfs
+
+    return response
+
+
+@router.post("/{id}/approve", response_model=ApproveReleaseResponse)
+async def approve_release(
+    id: int,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+) -> ApproveReleaseResponse:
+    """
+    Approve a COARelease (set status=RELEASED).
+
+    Requires QC Manager or Admin role.
+    Sets released_at timestamp and released_by_id.
+    """
+    try:
+        release = release_service.approve_release(
+            db=db,
+            id=id,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    return ApproveReleaseResponse.model_validate(release)
+
+
+@router.post("/{id}/send-back", response_model=COAReleaseWithSourcePdfs)
+async def send_back_release(
+    id: int,
+    request: SendBackRequest,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+) -> COAReleaseWithSourcePdfs:
+    """
+    Send a COARelease back to Sample Tracker (QC review).
+
+    Requires QC Manager or Admin role.
+    Sets send_back_reason and updates lot status to UNDER_REVIEW.
+    """
+    try:
+        release = release_service.send_back(
+            db=db,
+            id=id,
+            user_id=current_user.id,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # Reload with relations
+    release = release_service.get_by_id(db, id)
+    source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
+
+    response = COAReleaseWithSourcePdfs.model_validate(release)
+    response.source_pdfs = source_pdfs
+
+    return response
+
+
+@router.post("/{id}/email", response_model=EmailHistoryResponse)
+async def log_email_sent(
+    id: int,
+    request: EmailSendRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> EmailHistoryResponse:
+    """
+    Log that an email was sent for a COARelease.
+
+    Note: This is a placeholder - no actual email is sent.
+    Creates an EmailHistory record to track the email.
+    """
+    try:
+        email_record = release_service.log_email_sent(
+            db=db,
+            id=id,
+            recipient_email=request.recipient_email,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+    return EmailHistoryResponse.model_validate(email_record)
+
+
+@router.get("/{id}/emails", response_model=List[EmailHistoryResponse])
+async def get_email_history(
+    id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> List[EmailHistoryResponse]:
+    """
+    Get email history for a COARelease.
+
+    Returns list of EmailHistory records, ordered by sent_at desc.
+    """
+    # Verify release exists
+    release = release_service.get(db, id)
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COARelease not found",
+        )
+
+    emails = release_service.get_email_history(db, id)
+
+    return [EmailHistoryResponse.model_validate(e) for e in emails]

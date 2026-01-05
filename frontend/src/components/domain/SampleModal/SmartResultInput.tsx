@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { getInputTypeForSpec, POSITIVE_NEGATIVE_OPTIONS } from "@/lib/spec-validation"
+import { Check, X } from "lucide-react"
+import { getInputTypeForSpec, POSITIVE_NEGATIVE_OPTIONS, getAutocompleteOptions } from "@/lib/spec-validation"
 
 interface SmartResultInputProps {
   /** Current value */
@@ -20,6 +21,10 @@ interface SmartResultInputProps {
   onEndEdit: () => void
   /** Callback when value changes */
   onChange: (value: string) => void
+  /** Callback for Tab navigation (isShiftTab: boolean) */
+  onTab?: (isShiftTab: boolean) => void
+  /** Callback for Enter navigation */
+  onEnter?: () => void
   /** Additional class names */
   className?: string
 }
@@ -37,6 +42,8 @@ export function SmartResultInput({
   onStartEdit,
   onEndEdit,
   onChange,
+  onTab,
+  onEnter,
   className,
 }: SmartResultInputProps) {
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
@@ -73,9 +80,24 @@ export function SmartResultInput({
       setLocalValue(value) // Reset to original
       onEndEdit()
     } else if (e.key === 'Tab') {
-      // Let the table handle tab navigation
+      e.preventDefault()
       if (localValue !== value) {
         onChange(localValue)
+      }
+      if (onTab) {
+        onTab(e.shiftKey)
+      } else {
+        onEndEdit()
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (localValue !== value) {
+        onChange(localValue)
+      }
+      if (onEnter) {
+        onEnter()
+      } else {
+        onEndEdit()
       }
     }
   }
@@ -117,6 +139,23 @@ export function SmartResultInput({
     )
   }
 
+  // Get autocomplete options for this spec
+  const autocompleteOptions = useMemo(
+    () => getAutocompleteOptions(specification),
+    [specification]
+  )
+
+  // Filter autocomplete options based on current input
+  const filteredOptions = useMemo(() => {
+    if (!localValue.trim()) return autocompleteOptions
+    const search = localValue.trim().toLowerCase()
+    return autocompleteOptions.filter(
+      (opt) =>
+        opt.value.toLowerCase().includes(search) ||
+        opt.label.toLowerCase().includes(search)
+    )
+  }, [autocompleteOptions, localValue])
+
   // Editing mode
   switch (inputType) {
     case 'dropdown':
@@ -144,6 +183,102 @@ export function SmartResultInput({
             </option>
           ))}
         </select>
+      )
+
+    case 'autocomplete':
+      return (
+        <div className="relative">
+          <Input
+            ref={inputRef as React.RefObject<HTMLInputElement>}
+            type="text"
+            value={localValue}
+            onChange={(e) => setLocalValue(e.target.value)}
+            onBlur={() => {
+              // Delay blur to allow click on options
+              setTimeout(() => {
+                if (localValue !== value) {
+                  onChange(localValue)
+                }
+                onEndEdit()
+              }, 150)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setLocalValue(value)
+                onEndEdit()
+              } else if (e.key === 'Tab') {
+                e.preventDefault()
+                if (localValue !== value) {
+                  onChange(localValue)
+                }
+                if (onTab) {
+                  onTab(e.shiftKey)
+                } else {
+                  onEndEdit()
+                }
+              } else if (e.key === 'Enter') {
+                e.preventDefault()
+                if (localValue !== value) {
+                  onChange(localValue)
+                }
+                if (onEnter) {
+                  onEnter()
+                } else {
+                  onEndEdit()
+                }
+              }
+            }}
+            className={cn("h-8 text-sm border-blue-500 focus-visible:ring-blue-500", className)}
+            placeholder="Type or select..."
+          />
+          {filteredOptions.length > 0 && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+              {/* Group by pass/fail */}
+              {filteredOptions.filter(opt => opt.passes).length > 0 && (
+                <div className="px-2 py-1 text-xs font-medium text-slate-500 bg-slate-50 border-b">
+                  Passing
+                </div>
+              )}
+              {filteredOptions.filter(opt => opt.passes).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setLocalValue(opt.value)
+                    onChange(opt.value)
+                    onEndEdit()
+                  }}
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 flex items-center justify-between"
+                >
+                  <span>{opt.label}</span>
+                  <Check className="h-3.5 w-3.5 text-green-600" />
+                </button>
+              ))}
+              {filteredOptions.filter(opt => !opt.passes).length > 0 && (
+                <div className="px-2 py-1 text-xs font-medium text-slate-500 bg-slate-50 border-b border-t">
+                  Failing
+                </div>
+              )}
+              {filteredOptions.filter(opt => !opt.passes).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setLocalValue(opt.value)
+                    onChange(opt.value)
+                    onEndEdit()
+                  }}
+                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 flex items-center justify-between"
+                >
+                  <span>{opt.label}</span>
+                  <X className="h-3.5 w-3.5 text-red-500" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )
 
     case 'number':

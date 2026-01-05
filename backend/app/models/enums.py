@@ -25,7 +25,8 @@ class LotStatus(str, enum.Enum):
 
     AWAITING_RESULTS = "awaiting_results"
     PARTIAL_RESULTS = "partial_results"  # Some results in, missing required tests
-    UNDER_REVIEW = "under_review"
+    NEEDS_ATTENTION = "needs_attention"  # All required tests complete but some fail specs
+    UNDER_REVIEW = "under_review"  # All required tests complete and pass
     AWAITING_RELEASE = "awaiting_release"  # Lab Tech submitted, awaiting QC Manager approval
     APPROVED = "approved"
     RELEASED = "released"

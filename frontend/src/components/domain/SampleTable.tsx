@@ -34,6 +34,7 @@ const STATUS_CONFIG: Record<LotStatus, { label: string; variant: "amber" | "blue
   partial_results: { label: "Partial Results", variant: "amber" },
   under_review: { label: "In Review", variant: "blue" },
   awaiting_release: { label: "Awaiting Release", variant: "violet" },
+  needs_attention: { label: "Needs Attention", variant: "red" },
   approved: { label: "Approved", variant: "emerald" },
   released: { label: "Released", variant: "emerald" },
   rejected: { label: "Rejected", variant: "red" },

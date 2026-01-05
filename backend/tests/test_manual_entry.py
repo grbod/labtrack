@@ -45,7 +45,7 @@ def test_product(test_db: Session):
         flavor="Vanilla",
         size="2 lbs",
         display_name="Test Brand Test Protein - Vanilla (2 lbs)",
-        serving_size=28.5
+        serving_size="28.5g"  # Must be a string
     )
     test_db.add(product)
     test_db.commit()
@@ -138,8 +138,8 @@ def test_lot(test_db: Session, test_product_with_specs: Product):
             "lot_number": "TEST123",
             "lot_type": LotType.STANDARD,
             "mfg_date": date.today(),
-            "exp_date": date(2025, 12, 31),
-            "status": LotStatus.PENDING,
+            "exp_date": date(2028, 12, 31),  # Use future date
+            "status": LotStatus.AWAITING_RESULTS,
             "generate_coa": True
         },
         product_ids=[test_product_with_specs.id]
@@ -167,7 +167,7 @@ class TestManualEntryFeature:
     
     def test_editable_lot_statuses(self, test_db: Session, test_lot: Lot):
         """Test that only certain lot statuses are editable."""
-        editable_statuses = [LotStatus.PENDING, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
+        editable_statuses = [LotStatus.AWAITING_RESULTS, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
         
         # Test editable statuses
         for status in editable_statuses:
@@ -198,7 +198,7 @@ class TestManualEntryFeature:
         update_lot_status(test_db, test_lot)
         
         # Should remain PENDING when no tests
-        assert test_lot.status == LotStatus.PENDING
+        assert test_lot.status == LotStatus.AWAITING_RESULTS
     
     def test_update_lot_status_partial_results(
         self, test_db: Session, test_lot: Lot, test_lab_types: list
@@ -408,7 +408,7 @@ class TestManualEntryValidation:
         test_db.commit()
         
         # Query for editable lots
-        editable_statuses = [LotStatus.PENDING, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
+        editable_statuses = [LotStatus.AWAITING_RESULTS, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
         editable_lots = test_db.query(Lot).filter(
             Lot.status.in_(editable_statuses)
         ).all()
@@ -423,7 +423,7 @@ class TestManualEntryValidation:
         # Test display components
         assert test_lot.lot_number == "TEST123"
         assert test_lot.reference_number is not None
-        assert test_lot.status == LotStatus.PENDING
+        assert test_lot.status == LotStatus.AWAITING_RESULTS
         assert product.display_name == "Test Brand Test Protein - Vanilla (2 lbs)"
         
         # Test formatted string (as would appear in dropdown)
@@ -447,7 +447,7 @@ class TestManualEntryIntegration:
     ):
         """Test complete manual entry workflow."""
         # 1. Verify lot is editable
-        assert test_lot.status == LotStatus.PENDING
+        assert test_lot.status == LotStatus.AWAITING_RESULTS
         
         # 2. Get required tests
         required_test_ids = get_required_tests_for_lot(test_db, test_lot)
@@ -522,7 +522,7 @@ class TestManualEntryIntegration:
         assert count == 0
         
         # Verify lot can still be edited after error
-        assert test_lot.status == LotStatus.PENDING
+        assert test_lot.status == LotStatus.AWAITING_RESULTS
 
 
 # Run tests with: pytest tests/test_manual_entry.py -v

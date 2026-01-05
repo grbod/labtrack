@@ -6,13 +6,51 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 
 
+# Product Size schemas
+class ProductSizeBase(BaseModel):
+    """Base schema for product size."""
+
+    size: str = Field(..., min_length=1, max_length=50)
+
+
+class ProductSizeCreate(ProductSizeBase):
+    """Schema for creating a product size."""
+
+    pass
+
+
+class ProductSizeUpdate(BaseModel):
+    """Schema for updating a product size."""
+
+    size: str = Field(..., min_length=1, max_length=50)
+
+
+class ProductSizeResponse(ProductSizeBase):
+    """Product size response schema."""
+
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProductSizeSimple(BaseModel):
+    """Simplified product size for listing (id and size only)."""
+
+    id: int
+    size: str
+
+    model_config = {"from_attributes": True}
+
+
 class ProductBase(BaseModel):
     """Base product schema."""
 
     brand: str = Field(..., min_length=1, max_length=100)
     product_name: str = Field(..., min_length=1, max_length=200)
     flavor: Optional[str] = Field(None, max_length=100)
-    size: Optional[str] = Field(None, max_length=50)
+    size: Optional[str] = Field(None, max_length=50)  # Legacy field, kept for backward compatibility
     display_name: str = Field(..., min_length=1)
     serving_size: Optional[str] = Field(None, max_length=50)  # e.g., "30g", "2 capsules"
     expiry_duration_months: int = Field(default=36, gt=0)
@@ -74,7 +112,8 @@ class ProductResponse(BaseModel):
     brand: str
     product_name: str
     flavor: Optional[str] = None
-    size: Optional[str] = None
+    size: Optional[str] = None  # Legacy field
+    sizes: List[ProductSizeSimple] = []  # Multiple size variants
     display_name: str
     serving_size: Optional[str] = None
     expiry_duration_months: int

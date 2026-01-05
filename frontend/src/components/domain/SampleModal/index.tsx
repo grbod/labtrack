@@ -4,11 +4,9 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Loader2, Lock, AlertTriangle, FileText, Upload, X } from "lucide-react"
 import { toast } from "sonner"
-// cn imported for future use
-// import { cn } from "@/lib/utils"
 
 import { SampleModalHeader } from "./SampleModalHeader"
-import { TestResultsTable } from "./TestResultsTable"
+import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTable"
 import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
 import { PdfUploadDropzone } from "./PdfUploadDropzone"
@@ -64,6 +62,8 @@ export function SampleModal({
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const tableRef = useRef<TestResultsTableHandle>(null)
+  const saveButtonRef = useRef<HTMLButtonElement>(null)
 
   // State
   const [filter, setFilter] = useState<TestFilterStatus>("all")
@@ -73,6 +73,9 @@ export function SampleModal({
   const [savingRowId, setSavingRowId] = useState<number | null>(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [showRejectDialog, setShowRejectDialog] = useState(false)
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
+  const [showOverrideDialog, setShowOverrideDialog] = useState(false)
+  const [overrideReason, setOverrideReason] = useState("")
 
   // Fetch lot with specs
   const { data: lotWithSpecs } = useLotWithSpecs(lot?.id ?? 0)
@@ -97,7 +100,10 @@ export function SampleModal({
   const isQCManagerOrAdmin = user?.role === "QC_MANAGER" || user?.role === "ADMIN"
   const canApproveReject =
     isQCManagerOrAdmin &&
-    (lot?.status === "under_review" || lot?.status === "awaiting_release")
+    (lot?.status === "under_review" ||
+      lot?.status === "awaiting_release" ||
+      lot?.status === "needs_attention")
+  const needsOverrideApproval = lot?.status === "needs_attention"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -401,16 +407,40 @@ export function SampleModal({
     [uploadMutation]
   )
 
-  // Handle approve
+  // Handle approve (or show override dialog for needs_attention)
   const handleApprove = useCallback(async () => {
     if (!lot) return
+
+    // If in needs_attention status, show override dialog first
+    if (needsOverrideApproval) {
+      setShowOverrideDialog(true)
+      return
+    }
+
     try {
       await updateStatusMutation.mutateAsync({ id: lot.id, status: "approved" })
       toast.success("Sample approved")
     } catch (error) {
       toast.error("Failed to approve")
     }
-  }, [lot, updateStatusMutation])
+  }, [lot, updateStatusMutation, needsOverrideApproval])
+
+  // Handle override approval (for needs_attention status)
+  const handleOverrideApprove = useCallback(async () => {
+    if (!lot || !overrideReason.trim()) return
+    try {
+      await updateStatusMutation.mutateAsync({
+        id: lot.id,
+        status: "approved",
+        overrideReason: overrideReason.trim(),
+      })
+      setShowOverrideDialog(false)
+      setOverrideReason("")
+      toast.success("Sample approved with override")
+    } catch (error) {
+      toast.error("Failed to approve")
+    }
+  }, [lot, overrideReason, updateStatusMutation])
 
   // Handle reject
   const handleReject = useCallback(async () => {
@@ -429,6 +459,22 @@ export function SampleModal({
     }
   }, [lot, rejectionReason, updateStatusMutation])
 
+  // Handle modal close attempt (check for unsaved changes)
+  const handleCloseAttempt = useCallback(() => {
+    // Check if table has unsaved changes
+    if (tableRef.current?.hasUnsavedChanges()) {
+      setShowUnsavedWarning(true)
+      return
+    }
+    onClose()
+  }, [onClose])
+
+  // Force close (discard changes)
+  const handleForceClose = useCallback(() => {
+    setShowUnsavedWarning(false)
+    onClose()
+  }, [onClose])
+
   if (!lot) return null
 
   // Get attached PDFs from test results
@@ -441,11 +487,18 @@ export function SampleModal({
   )
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleCloseAttempt()}>
       <DialogContent
         className="sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
         showCloseButton={false}
         onDragEnter={handleDragEnter}
+        onKeyDown={(e) => {
+          // Handle Escape key with unsaved changes check
+          if (e.key === "Escape") {
+            e.preventDefault()
+            handleCloseAttempt()
+          }
+        }}
       >
         {/* Drag-drop overlay */}
         <PdfUploadDropzone
@@ -473,7 +526,7 @@ export function SampleModal({
             prevDisabled={prevDisabled}
             nextDisabled={nextDisabled}
             onNavigate={onNavigate}
-            onClose={onClose}
+            onClose={handleCloseAttempt}
           />
         ) : (
           <div className="h-20 flex items-center justify-center">
@@ -515,11 +568,13 @@ export function SampleModal({
                   {filterCounts.all} complete)
                 </h3>
                 <TestResultsTable
+                  ref={tableRef}
                   testResults={filteredSpecTests}
                   productSpecs={mergedTestSpecs}
                   onUpdateResult={handleUpdateResult}
                   disabled={isLocked}
                   savingRowId={savingRowId}
+                  saveButtonRef={saveButtonRef}
                 />
               </div>
 
@@ -628,6 +683,87 @@ export function SampleModal({
           </div>
         )}
 
+        {/* Unsaved changes warning dialog */}
+        {showUnsavedWarning && (
+          <div className="mx-6 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-500" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800">
+                  You have unsaved changes
+                </p>
+                <p className="mt-1 text-sm text-amber-700">
+                  Are you sure you want to close? Your changes will be lost.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUnsavedWarning(false)}
+              >
+                Keep Editing
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleForceClose}
+              >
+                Discard Changes
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Override approval dialog (for needs_attention status) */}
+        {showOverrideDialog && (
+          <div className="mx-6 mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+            <div className="flex items-start gap-3 mb-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-orange-500" />
+              <div>
+                <p className="text-sm font-medium text-orange-800">
+                  QC Override Required
+                </p>
+                <p className="mt-1 text-sm text-orange-700">
+                  This sample has failing tests. Please provide a justification
+                  for approving despite the failures.
+                </p>
+              </div>
+            </div>
+            <textarea
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="Enter justification for override approval..."
+              className="w-full h-24 px-3 py-2 text-sm border border-orange-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowOverrideDialog(false)
+                  setOverrideReason("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleOverrideApprove}
+                disabled={!overrideReason.trim() || updateStatusMutation.isPending}
+                className="bg-orange-600 hover:bg-orange-700"
+              >
+                {updateStatusMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Approve with Override"
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
           <div className="flex w-full items-center justify-end gap-2">
@@ -655,7 +791,9 @@ export function SampleModal({
             )}
 
             {/* Save/Close button */}
-            <Button onClick={onClose}>Save</Button>
+            <Button ref={saveButtonRef} onClick={handleCloseAttempt}>
+              Save
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>

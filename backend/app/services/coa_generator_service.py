@@ -325,7 +325,10 @@ class COAGeneratorService:
         # QC Approval
         cell1 = table.rows[0].cells[0]
         cell1.text = "QC Approved By: _________________\n\n"
-        cell1.text += f"Name: {lot.test_results[0].approved_by if lot.test_results else 'QC Manager'}\n"
+        approver_name = "QC Manager"
+        if lot.test_results and lot.test_results[0].approved_by_user:
+            approver_name = lot.test_results[0].approved_by_user.username
+        cell1.text += f"Name: {approver_name}\n"
         cell1.text += f"Date: {datetime.now().strftime('%B %d, %Y')}"
 
         # Authorized Signature
@@ -687,6 +690,7 @@ class COAGeneratorService:
 
     def generate_batch_coas(
         self,
+        db: Session,
         lot_ids: List[int],
         template: str = "standard",
         output_format: str = "pdf",
@@ -697,7 +701,7 @@ class COAGeneratorService:
 
         for lot_id in lot_ids:
             try:
-                result = self.generate_coa(lot_id, template, output_format, user_id)
+                result = self.generate_coa(db, lot_id, template, output_format, user_id)
                 results["success"].append(lot_id)
                 results["files"].extend(result["files"])
             except Exception as e:

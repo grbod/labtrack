@@ -70,7 +70,7 @@ class TestLotProductTestWorkflow:
             product_ids=[product.id]
         )
         
-        assert lot.status == LotStatus.PENDING
+        assert lot.status == LotStatus.AWAITING_RESULTS
         assert len(lot.lot_products) == 1
         assert lot.lot_products[0].product_id == product.id
         
@@ -697,7 +697,7 @@ class TestComplexScenarios:
                 reference_number=f"SUB-{sublot.sublot_number}",
                 mfg_date=sublot.production_date,
                 exp_date=parent_lot.exp_date,
-                status=LotStatus.PENDING
+                status=LotStatus.AWAITING_RESULTS
             )
             test_db.add(sublot_lot)
             test_db.flush()  # Flush to get ID

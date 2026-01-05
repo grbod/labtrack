@@ -452,16 +452,20 @@ class LotService(BaseService[Lot]):
         user_id: Optional[int] = None,
     ) -> Lot:
         """
-        Auto-calculate lot status based on test results completion.
+        Auto-calculate lot status based on test results completion and pass/fail.
 
         Called after each test result save to update lot status automatically.
 
         Status transitions:
         - awaiting_results: No test results entered yet
         - partial_results: Some results entered, not all required tests complete
-        - under_review: All required test results entered, ready for QC
+        - needs_attention: All required tests complete, but some fail specs
+        - under_review: All required test results entered and pass
 
         Note: approved/rejected are set manually by QC manager.
+        Auto-recovery: If all tests pass, moves back to under_review from needs_attention.
+        Sticky behavior: Once in needs_attention, stays there even if a failing result is cleared
+                        (unless all remaining tests pass).
 
         Args:
             db: Database session
@@ -481,60 +485,74 @@ class LotService(BaseService[Lot]):
         if lot.status in [LotStatus.APPROVED, LotStatus.RELEASED, LotStatus.REJECTED]:
             return lot
 
-        # Get all required test types from all products in this lot
-        required_test_type_ids = set()
+        # Get all required test specs from all products in this lot
+        required_specs = {}  # test_name -> spec object
         for lot_product in lot.lot_products:
             if not lot_product.product:
                 continue
             for spec in lot_product.product.test_specifications:
                 if spec.is_required:
-                    required_test_type_ids.add(spec.lab_test_type_id)
+                    required_specs[spec.test_name] = spec
+
+        # Get test results for this lot
+        test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
+
+        # Build map of test_type -> result_value for completed tests
+        completed_results = {}  # test_type -> result_value
+        for result in test_results:
+            if result.result_value is not None and result.result_value.strip() != "":
+                completed_results[result.test_type] = result.result_value
 
         # If no required tests, status depends on whether any tests exist
-        if not required_test_type_ids:
-            # No required tests defined - just check if there are any test results
-            test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
+        if not required_specs:
             if test_results:
-                # Has some test results, consider ready for review
                 new_status = LotStatus.UNDER_REVIEW
             else:
                 new_status = LotStatus.AWAITING_RESULTS
         else:
-            # Get test results for this lot
-            test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
-
-            # Count results with values by test type
-            completed_test_type_ids = set()
-            for result in test_results:
-                if result.result_value is not None and result.result_value.strip() != "":
-                    # Need to match test_type name to lab_test_type_id
-                    # For simplicity, we'll check by test_type name
-                    completed_test_type_ids.add(result.test_type)
-
-            # Match completed test types to required specs
-            # We need to check if the test_type name matches any required test
+            # Count completed required tests and check pass/fail
             completed_required = 0
-            for lot_product in lot.lot_products:
-                if not lot_product.product:
-                    continue
-                for spec in lot_product.product.test_specifications:
-                    if spec.is_required and spec.test_name in completed_test_type_ids:
-                        completed_required += 1
+            failing_tests = []
 
-            total_required = len(required_test_type_ids)
+            for test_name, spec in required_specs.items():
+                if test_name in completed_results:
+                    completed_required += 1
+                    # Check if this result passes the spec
+                    result_value = completed_results[test_name]
+                    if not spec.matches_result(result_value):
+                        failing_tests.append(test_name)
+
+            total_required = len(required_specs)
 
             if completed_required == 0:
                 new_status = LotStatus.AWAITING_RESULTS
             elif completed_required < total_required:
-                new_status = LotStatus.PARTIAL_RESULTS
+                # Sticky behavior: if currently NEEDS_ATTENTION, stay there
+                if lot.status == LotStatus.NEEDS_ATTENTION:
+                    new_status = LotStatus.NEEDS_ATTENTION
+                else:
+                    new_status = LotStatus.PARTIAL_RESULTS
             else:
                 # All required tests completed
-                new_status = LotStatus.UNDER_REVIEW
+                if failing_tests:
+                    # Some tests fail - needs attention
+                    new_status = LotStatus.NEEDS_ATTENTION
+                else:
+                    # All tests pass - ready for review (auto-recovery)
+                    new_status = LotStatus.UNDER_REVIEW
 
         # Only update if status changed
         if lot.status != new_status:
             old_status = lot.status
             lot.status = new_status
+
+            # Build detailed audit reason
+            if new_status == LotStatus.NEEDS_ATTENTION and failing_tests:
+                reason = f"Auto-calculated: tests failing specs: {', '.join(failing_tests)}"
+            elif new_status == LotStatus.UNDER_REVIEW and old_status == LotStatus.NEEDS_ATTENTION:
+                reason = "Auto-calculated: all tests now pass (auto-recovery)"
+            else:
+                reason = "Auto-calculated based on test results"
 
             self._log_audit(
                 db=db,
@@ -543,7 +561,7 @@ class LotService(BaseService[Lot]):
                 old_values={"status": old_status.value},
                 new_values={"status": new_status.value},
                 user_id=user_id,
-                reason="Auto-calculated based on test results",
+                reason=reason,
             )
 
             db.commit()

@@ -8,33 +8,6 @@ export interface ProductFilters {
   brand?: string
 }
 
-// Backend response type (before transformation)
-interface ProductFromBackend {
-  id: number
-  brand: string
-  product_name: string
-  flavor: string | null
-  size: string | null
-  display_name: string
-  serving_size: string | null
-  expiry_duration_months: number
-  created_at: string
-  updated_at: string | null
-}
-
-// Transform backend product to frontend Product with sizes array
-function transformProduct(p: ProductFromBackend): Product {
-  // Convert single size to sizes array (temporary until backend supports multi-size)
-  const sizes: ProductSize[] = p.size
-    ? [{ id: 1, size: p.size }]
-    : []
-
-  return {
-    ...p,
-    sizes,
-  }
-}
-
 export interface CreateProductData {
   brand: string
   product_name: string
@@ -75,6 +48,14 @@ export interface BulkImportResult {
   errors: string[]
 }
 
+export interface CreateSizeData {
+  size: string
+}
+
+export interface UpdateSizeData {
+  size: string
+}
+
 export const productsApi = {
   list: async (filters: ProductFilters = {}): Promise<PaginatedResponse<Product>> => {
     const params = new URLSearchParams()
@@ -83,16 +64,13 @@ export const productsApi = {
     if (filters.search) params.append("search", filters.search)
     if (filters.brand) params.append("brand", filters.brand)
 
-    const response = await api.get<PaginatedResponse<ProductFromBackend>>(`/products?${params}`)
-    return {
-      ...response.data,
-      items: response.data.items.map(transformProduct),
-    }
+    const response = await api.get<PaginatedResponse<Product>>(`/products?${params}`)
+    return response.data
   },
 
   get: async (id: number): Promise<Product> => {
-    const response = await api.get<ProductFromBackend>(`/products/${id}`)
-    return transformProduct(response.data)
+    const response = await api.get<Product>(`/products/${id}`)
+    return response.data
   },
 
   getBrands: async (): Promise<string[]> => {
@@ -101,13 +79,13 @@ export const productsApi = {
   },
 
   create: async (data: CreateProductData): Promise<Product> => {
-    const response = await api.post<ProductFromBackend>("/products", data)
-    return transformProduct(response.data)
+    const response = await api.post<Product>("/products", data)
+    return response.data
   },
 
   update: async (id: number, data: UpdateProductData): Promise<Product> => {
-    const response = await api.patch<ProductFromBackend>(`/products/${id}`, data)
-    return transformProduct(response.data)
+    const response = await api.patch<Product>(`/products/${id}`, data)
+    return response.data
   },
 
   delete: async (id: number): Promise<void> => {
@@ -116,11 +94,28 @@ export const productsApi = {
 
   // Get product with test specifications
   getWithSpecs: async (id: number): Promise<ProductWithSpecs> => {
-    const response = await api.get<ProductFromBackend & { test_specifications: ProductTestSpecification[] }>(`/products/${id}`)
-    return {
-      ...transformProduct(response.data),
-      test_specifications: response.data.test_specifications,
-    }
+    const response = await api.get<ProductWithSpecs>(`/products/${id}`)
+    return response.data
+  },
+
+  // Size operations
+  listSizes: async (productId: number): Promise<ProductSize[]> => {
+    const response = await api.get<ProductSize[]>(`/products/${productId}/sizes`)
+    return response.data
+  },
+
+  createSize: async (productId: number, data: CreateSizeData): Promise<ProductSize> => {
+    const response = await api.post<ProductSize>(`/products/${productId}/sizes`, data)
+    return response.data
+  },
+
+  updateSize: async (productId: number, sizeId: number, data: UpdateSizeData): Promise<ProductSize> => {
+    const response = await api.patch<ProductSize>(`/products/${productId}/sizes/${sizeId}`, data)
+    return response.data
+  },
+
+  deleteSize: async (productId: number, sizeId: number): Promise<void> => {
+    await api.delete(`/products/${productId}/sizes/${sizeId}`)
   },
 
   // Test specification operations

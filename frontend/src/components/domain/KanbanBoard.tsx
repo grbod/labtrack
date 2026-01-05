@@ -15,7 +15,8 @@ interface KanbanColumnConfig {
 const BASE_KANBAN_COLUMNS: KanbanColumnConfig[] = [
   { id: "awaiting_results", label: "Awaiting Results" },
   { id: "partial_results", label: "Partial Results" },
-  { id: "under_review", label: "In Review" },
+  { id: "needs_attention", label: "Needs Attention" },
+  { id: "under_review", label: "Under Review" },
   { id: "awaiting_release", label: "Awaiting Release" },
   { id: "rejected", label: "Rejected" },
 ]
@@ -177,8 +178,22 @@ function KanbanCard({ lot, staleness, onClick, isCompleted = false }: KanbanCard
         <p className="text-[11px] text-slate-600">
           Lab Ref <span className="font-mono font-medium">{lot.reference_number}</span>
         </p>
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
-          0/0
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[9px] font-medium",
+            (() => {
+              const entered = lot.tests_entered ?? 0
+              const total = lot.tests_total ?? 0
+              const failed = lot.tests_failed ?? 0
+              if (failed > 0) return "bg-red-100 text-red-700"
+              if (total === 0) return "bg-slate-100 text-slate-500"
+              if (entered === total) return "bg-emerald-100 text-emerald-700"
+              if (entered > 0) return "bg-amber-100 text-amber-700"
+              return "bg-slate-100 text-slate-500"
+            })()
+          )}
+        >
+          {lot.tests_entered ?? 0}/{lot.tests_total ?? 0}
         </span>
       </div>
     </div>
@@ -332,7 +347,7 @@ export function KanbanBoard({
   }, [lots, staleWarningDays, staleCriticalDays, recentlyCompletedDays, kanbanColumns])
 
   return (
-    <div className="grid grid-cols-6 gap-4">
+    <div className="grid grid-cols-7 gap-4">
       {kanbanColumns.map((column) => (
         <KanbanColumn
           key={column.id}

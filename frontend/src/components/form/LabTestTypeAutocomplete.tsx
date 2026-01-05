@@ -20,6 +20,10 @@ interface LabTestTypeAutocompleteProps {
   onSelect: (labTest: LabTestType) => void
   onClear: () => void
   placeholder?: string
+  /** Called when Tab is pressed (after selecting from dropdown if applicable) */
+  onTab?: () => void
+  /** Ref to expose focus method */
+  inputRef?: React.MutableRefObject<{ focus: () => void } | null>
 }
 
 export function LabTestTypeAutocomplete({
@@ -29,8 +33,20 @@ export function LabTestTypeAutocomplete({
   onSelect,
   onClear,
   placeholder = 'Search tests...',
+  onTab,
+  inputRef,
 }: LabTestTypeAutocompleteProps) {
   const listRef = useRef<HTMLUListElement>(null)
+  const internalInputRef = useRef<HTMLInputElement>(null)
+
+  // Expose focus method via inputRef
+  useEffect(() => {
+    if (inputRef) {
+      inputRef.current = {
+        focus: () => internalInputRef.current?.focus()
+      }
+    }
+  }, [inputRef])
   const [localInput, setLocalInput] = useState('')
 
   // Filter lab test types synchronously based on localInput
@@ -136,6 +152,9 @@ export function LabTestTypeAutocomplete({
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
         onClear()
+      } else if (e.key === 'Tab' && !e.shiftKey) {
+        // Value selected, Tab should move to next field
+        onTab?.()
       }
       return
     }
@@ -153,6 +172,10 @@ export function LabTestTypeAutocomplete({
         if (itemToSelect && !excludeIds.includes(itemToSelect.id)) {
           selectItem(itemToSelect)
           onSelect(itemToSelect)
+          // After selecting via Tab, call onTab to move to next field
+          if (e.key === 'Tab') {
+            setTimeout(() => onTab?.(), 0)
+          }
         }
 
         closeMenu()
@@ -198,6 +221,7 @@ export function LabTestTypeAutocomplete({
           {...getInputProps({
             onKeyDown: handleKeyDown,
             disabled: !!value,
+            ref: internalInputRef,
           })}
           placeholder={value ? '' : placeholder}
           className={`flex-1 h-full border-0 focus:outline-none focus:ring-0 bg-transparent placeholder:text-slate-400 text-sm ${

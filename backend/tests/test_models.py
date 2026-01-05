@@ -44,7 +44,7 @@ class TestLotModel:
             reference_number="241101-001",
             mfg_date=date.today(),
             exp_date=date(2027, 1, 1),
-            status=LotStatus.PENDING,
+            status=LotStatus.AWAITING_RESULTS,
         )
         test_db.add(lot)
         test_db.commit()
@@ -56,13 +56,13 @@ class TestLotModel:
     def test_lot_status_transition(self, sample_lot, test_db):
         """Test lot status transitions."""
         # Valid transition
-        sample_lot.update_status(LotStatus.TESTED)
+        sample_lot.update_status(LotStatus.UNDER_REVIEW)
         test_db.commit()
-        assert sample_lot.status == LotStatus.TESTED
+        assert sample_lot.status == LotStatus.UNDER_REVIEW
 
-        # Invalid transition (can't go back to pending)
+        # Invalid transition (can't go back to awaiting_results)
         with pytest.raises(ValueError):
-            sample_lot.update_status(LotStatus.PENDING)
+            sample_lot.update_status(LotStatus.AWAITING_RESULTS)
 
     def test_parent_lot_sublots(self, test_db, sample_product):
         """Test parent lot with sublots."""
@@ -145,7 +145,7 @@ class TestTestResultModel:
 
         assert result.id is not None
         assert result.lot_id == sample_lot.id
-        assert result.can_transition_to(TestResultStatus.REVIEWED)
+        assert result.can_transition_to(TestResultStatus.APPROVED)
 
     def test_test_result_approval(self, test_db, sample_test_results):
         """Test test result approval workflow."""
@@ -153,16 +153,13 @@ class TestTestResultModel:
             r for r in sample_test_results if r.status == TestResultStatus.DRAFT
         )
 
-        # Draft -> Reviewed
-        draft_result.status = TestResultStatus.REVIEWED
-        test_db.commit()
-        assert draft_result.can_transition_to(TestResultStatus.APPROVED)
-
-        # Reviewed -> Approved
+        # Draft -> Approved
         draft_result.status = TestResultStatus.APPROVED
         draft_result.approved_by_id = 1  # User ID
         draft_result.approved_at = datetime.now()
         test_db.commit()
+
+        assert draft_result.status == TestResultStatus.APPROVED
 
         # Can go back to draft (admin override)
         assert draft_result.can_transition_to(TestResultStatus.DRAFT)

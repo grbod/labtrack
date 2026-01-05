@@ -73,8 +73,17 @@ export function useUpdateLotStatus() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, status, rejectionReason }: { id: number; status: LotStatus; rejectionReason?: string }) =>
-      lotsApi.updateStatus(id, status, rejectionReason),
+    mutationFn: ({
+      id,
+      status,
+      rejectionReason,
+      overrideReason,
+    }: {
+      id: number
+      status: LotStatus
+      rejectionReason?: string
+      overrideReason?: string
+    }) => lotsApi.updateStatus(id, status, rejectionReason, overrideReason),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })

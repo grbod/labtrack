@@ -4,6 +4,8 @@ import {
   type ProductFilters,
   type CreateProductData,
   type UpdateProductData,
+  type CreateSizeData,
+  type UpdateSizeData,
   type CreateTestSpecData,
   type UpdateTestSpecData,
   type BulkImportProductRow,
@@ -16,6 +18,7 @@ export const productKeys = {
   details: () => [...productKeys.all, "detail"] as const,
   detail: (id: number) => [...productKeys.details(), id] as const,
   brands: () => [...productKeys.all, "brands"] as const,
+  sizes: (productId: number) => [...productKeys.all, "sizes", productId] as const,
   testSpecs: (productId: number) => [...productKeys.all, "testSpecs", productId] as const,
 }
 
@@ -73,6 +76,57 @@ export function useDeleteProduct() {
     mutationFn: (id: number) => productsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+    },
+  })
+}
+
+// Size hooks
+export function useProductSizes(productId: number) {
+  return useQuery({
+    queryKey: productKeys.sizes(productId),
+    queryFn: () => productsApi.listSizes(productId),
+    enabled: !!productId,
+  })
+}
+
+export function useCreateSize() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ productId, data }: { productId: number; data: CreateSizeData }) =>
+      productsApi.createSize(productId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
+    },
+  })
+}
+
+export function useUpdateSize() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ productId, sizeId, data }: { productId: number; sizeId: number; data: UpdateSizeData }) =>
+      productsApi.updateSize(productId, sizeId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
+    },
+  })
+}
+
+export function useDeleteSize() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ productId, sizeId }: { productId: number; sizeId: number }) =>
+      productsApi.deleteSize(productId, sizeId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
     },
   })
 }

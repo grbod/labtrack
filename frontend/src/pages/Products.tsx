@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, Package, ArrowRight, FlaskConical, Check, X, ChevronDown } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, Package, ArrowRight, Check, X, ChevronDown } from "lucide-react"
+import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
 import { TestSpecsTooltip } from "@/components/domain/TestSpecsTooltip"
 import { LabTestTypeAutocomplete } from "@/components/form/LabTestTypeAutocomplete"
 import { generateDisplayName } from "@/lib/product-utils"
@@ -43,6 +44,9 @@ import {
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
+  useCreateSize,
+  useUpdateSize,
+  useDeleteSize,
   useProductTestSpecs,
   useCreateTestSpec,
   useUpdateTestSpec,
@@ -216,6 +220,19 @@ const productSchema = z.object({
 
 type ProductForm = z.infer<typeof productSchema>
 
+// Type for test spec table rows (existing specs + add row)
+interface TestSpecRow {
+  id: number | 'new'
+  lab_test_type_id: number | null
+  test_name: string
+  test_method: string | null
+  test_category: string | null
+  test_unit: string | null
+  specification: string
+  is_required: boolean
+  isAddRow?: boolean
+}
+
 export function ProductsPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
@@ -226,16 +243,27 @@ export function ProductsPage() {
   // Test specs dialog state
   const [isTestSpecsDialogOpen, setIsTestSpecsDialogOpen] = useState(false)
   const [selectedProductForSpecs, setSelectedProductForSpecs] = useState<Product | null>(null)
-  const [selectedTestType, setSelectedTestType] = useState<LabTestType | null>(null)
-  const [testSpecification, setTestSpecification] = useState("")
-  const [isRequired, setIsRequired] = useState(true)
-  const [isEditTestDialogOpen, setIsEditTestDialogOpen] = useState(false)
-  const [selectedTestSpec, setSelectedTestSpec] = useState<ProductTestSpecification | null>(null)
+
+  // Inline add row state for test specs
+  const [addRowTestType, setAddRowTestType] = useState<LabTestType | null>(null)
+  const [addRowSpecification, setAddRowSpecification] = useState("")
+  const [addRowRequired, setAddRowRequired] = useState(true)
+  const [editingSpecCell, setEditingSpecCell] = useState<{ rowId: number; columnId: string } | null>(null)
+
+  // Refs for add row tab navigation
+  const addRowSpecInputRef = useRef<HTMLInputElement>(null)
+  const addRowRequiredRef = useRef<HTMLInputElement>(null)
+  const addRowTestTypeRef = useRef<{ focus: () => void } | null>(null)
 
   const { data, isLoading } = useProducts({ page, page_size: 50, search: search || undefined })
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
+
+  // Size mutation hooks
+  const createSizeMutation = useCreateSize()
+  const updateSizeMutation = useUpdateSize()
+  const deleteSizeMutation = useDeleteSize()
 
   // Test specs hooks
   const { data: testSpecs } = useProductTestSpecs(selectedProductForSpecs?.id ?? 0)
@@ -337,64 +365,88 @@ export function ProductsPage() {
     }
   }
 
-  // Size management handlers (placeholder until backend supports multi-size)
-  const handleAddSize = (productId: number, size: string) => {
-    // TODO: Implement when backend supports multi-size
-    console.log(`Add size "${size}" to product ${productId}`)
-    alert(`Size "${size}" will be saved when backend is ready. For now, edit the product to change the size.`)
+  // Size management handlers
+  const handleAddSize = async (productId: number, size: string) => {
+    try {
+      await createSizeMutation.mutateAsync({
+        productId,
+        data: { size },
+      })
+    } catch (error) {
+      console.error("Failed to add size:", error)
+    }
   }
 
-  const handleEditSize = (productId: number, sizeId: number, newSize: string) => {
-    // TODO: Implement when backend supports multi-size
-    console.log(`Edit size ${sizeId} to "${newSize}" for product ${productId}`)
-    alert(`Size edit will be saved when backend is ready. For now, edit the product to change the size.`)
+  const handleEditSize = async (productId: number, sizeId: number, newSize: string) => {
+    try {
+      await updateSizeMutation.mutateAsync({
+        productId,
+        sizeId,
+        data: { size: newSize },
+      })
+    } catch (error) {
+      console.error("Failed to update size:", error)
+    }
   }
 
-  const handleDeleteSize = (productId: number, sizeId: number) => {
-    // TODO: Implement when backend supports multi-size
-    console.log(`Delete size ${sizeId} from product ${productId}`)
-    alert(`Size delete will be saved when backend is ready. For now, edit the product to change the size.`)
+  const handleDeleteSize = async (productId: number, sizeId: number) => {
+    try {
+      await deleteSizeMutation.mutateAsync({
+        productId,
+        sizeId,
+      })
+    } catch (error) {
+      console.error("Failed to delete size:", error)
+    }
   }
 
   const openTestSpecsDialog = (product: Product) => {
     setSelectedProductForSpecs(product)
-    setSelectedTestType(null)
-    setTestSpecification("")
-    setIsRequired(true)
+    // Reset add row state
+    setAddRowTestType(null)
+    setAddRowSpecification("")
+    setAddRowRequired(true)
+    setEditingSpecCell(null)
     setIsTestSpecsDialogOpen(true)
   }
 
-  const handleSelectTestType = (labTest: LabTestType) => {
-    setSelectedTestType(labTest)
-    setTestSpecification(labTest.default_specification || "")
+  // Handler for selecting test type in add row
+  const handleAddRowSelectTestType = (labTest: LabTestType) => {
+    setAddRowTestType(labTest)
+    setAddRowSpecification(labTest.default_specification || "")
   }
 
-  const handleClearTestType = () => {
-    setSelectedTestType(null)
-    setTestSpecification("")
-    setIsRequired(true)
+  const handleAddRowClearTestType = () => {
+    setAddRowTestType(null)
+    setAddRowSpecification("")
+    setAddRowRequired(true)
   }
 
-  const handleCreateTestSpec = async () => {
-    if (!selectedProductForSpecs || !selectedTestType) return
+  // Create new test spec from inline add row
+  const handleInlineCreateTestSpec = useCallback(async () => {
+    if (!selectedProductForSpecs || !addRowTestType || !addRowSpecification.trim()) return
 
     try {
       await createTestSpecMutation.mutateAsync({
         productId: selectedProductForSpecs.id,
         data: {
-          lab_test_type_id: selectedTestType.id,
-          specification: testSpecification,
-          is_required: isRequired,
+          lab_test_type_id: addRowTestType.id,
+          specification: addRowSpecification,
+          is_required: addRowRequired,
         },
       })
-      // Clear fields for next entry
-      setSelectedTestType(null)
-      setTestSpecification("")
-      setIsRequired(true)
+      // Clear add row for next entry
+      setAddRowTestType(null)
+      setAddRowSpecification("")
+      setAddRowRequired(true)
+      // Focus back to test type for next entry
+      setTimeout(() => {
+        addRowTestTypeRef.current?.focus()
+      }, 50)
     } catch {
       // Error handled by mutation
     }
-  }
+  }, [selectedProductForSpecs, addRowTestType, addRowSpecification, addRowRequired, createTestSpecMutation])
 
   const handleDeleteTestSpec = async (specId: number) => {
     if (!selectedProductForSpecs) return
@@ -415,34 +467,266 @@ export function ProductsPage() {
     })
   }
 
-  const openEditTestDialog = (spec: ProductTestSpecification) => {
-    setSelectedTestSpec(spec)
-    setTestSpecification(spec.specification)
-    setIsRequired(spec.is_required)
-    setIsEditTestDialogOpen(true)
-  }
-
-  const handleUpdateTestSpec = async () => {
-    if (!selectedProductForSpecs || !selectedTestSpec) return
-
-    try {
-      await updateTestSpecMutation.mutateAsync({
-        productId: selectedProductForSpecs.id,
-        specId: selectedTestSpec.id,
-        data: {
-          specification: testSpecification,
-          is_required: isRequired,
-        },
-      })
-      setIsEditTestDialogOpen(false)
-      setSelectedTestSpec(null)
-      setTestSpecification("")
-    } catch {
-      // Error handled by mutation
-    }
-  }
-
   const isMutating = createMutation.isPending || updateMutation.isPending
+
+  // Build table data: existing specs + add row
+  const testSpecTableData = useMemo<TestSpecRow[]>(() => {
+    const existingRows: TestSpecRow[] = (testSpecs || []).map((spec) => ({
+      id: spec.id,
+      lab_test_type_id: spec.lab_test_type_id,
+      test_name: spec.test_name,
+      test_method: spec.test_method,
+      test_category: spec.test_category,
+      test_unit: spec.test_unit,
+      specification: spec.specification,
+      is_required: spec.is_required,
+      isAddRow: false,
+    }))
+
+    // Add empty "add" row at the bottom
+    const addRow: TestSpecRow = {
+      id: 'new',
+      lab_test_type_id: addRowTestType?.id ?? null,
+      test_name: addRowTestType?.test_name ?? '',
+      test_method: addRowTestType?.test_method ?? null,
+      test_category: addRowTestType?.test_category ?? null,
+      test_unit: addRowTestType?.default_unit ?? null,
+      specification: addRowSpecification,
+      is_required: addRowRequired,
+      isAddRow: true,
+    }
+
+    return [...existingRows, addRow]
+  }, [testSpecs, addRowTestType, addRowSpecification, addRowRequired])
+
+  // TanStack Table columns for Test Specifications
+  const testSpecColumnHelper = createColumnHelper<TestSpecRow>()
+  const testSpecColumns = useMemo(() => [
+    testSpecColumnHelper.accessor('test_name', {
+      header: 'Test Name',
+      size: 220,
+      cell: (info) => {
+        const row = info.row.original
+
+        if (row.isAddRow) {
+          // Add row - show autocomplete
+          return (
+            <LabTestTypeAutocomplete
+              labTestTypes={labTestTypes?.items || []}
+              excludeIds={testSpecs?.map(s => s.lab_test_type_id) || []}
+              value={addRowTestType}
+              onSelect={handleAddRowSelectTestType}
+              onClear={handleAddRowClearTestType}
+              placeholder="Search tests..."
+              inputRef={addRowTestTypeRef}
+              onTab={() => addRowSpecInputRef.current?.focus()}
+            />
+          )
+        }
+
+        // Existing row - display test name
+        return (
+          <div>
+            <p className="font-semibold text-slate-900 text-[14px]">{row.test_name}</p>
+            {row.test_method && (
+              <p className="text-[11px] text-slate-400 mt-0.5">{row.test_method}</p>
+            )}
+          </div>
+        )
+      },
+    }),
+    testSpecColumnHelper.accessor('test_category', {
+      header: 'Category',
+      size: 130,
+      cell: (info) => {
+        const row = info.row.original
+        if ((row.isAddRow && !row.lab_test_type_id) || !row.test_category) {
+          return <span className="text-slate-400 text-[12px] italic">—</span>
+        }
+        return (
+          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide bg-blue-100 text-blue-700">
+            {row.test_category}
+          </span>
+        )
+      },
+    }),
+    testSpecColumnHelper.accessor('specification', {
+      header: 'Specification',
+      size: 180,
+      cell: (info) => {
+        const row = info.row.original
+        const isEditing = editingSpecCell?.rowId === Number(row.id) && editingSpecCell?.columnId === 'specification'
+
+        if (row.isAddRow) {
+          // Add row - show input (always editable)
+          return (
+            <input
+              ref={addRowSpecInputRef}
+              type="text"
+              value={addRowSpecification}
+              onChange={(e) => setAddRowSpecification(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && addRowTestType && addRowSpecification.trim()) {
+                  e.preventDefault()
+                  handleInlineCreateTestSpec()
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault()
+                  addRowRequiredRef.current?.focus()
+                }
+              }}
+              placeholder="e.g., < 5000 CFU/g"
+              className="w-full px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              disabled={!addRowTestType}
+            />
+          )
+        }
+
+        // Existing row - show inline editable
+        if (isEditing) {
+          return (
+            <input
+              type="text"
+              defaultValue={row.specification}
+              onBlur={async (e) => {
+                const newValue = e.target.value.trim()
+                if (newValue && newValue !== row.specification && selectedProductForSpecs) {
+                  await updateTestSpecMutation.mutateAsync({
+                    productId: selectedProductForSpecs.id,
+                    specId: row.id as number,
+                    data: { specification: newValue },
+                  })
+                }
+                setEditingSpecCell(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  ;(e.target as HTMLInputElement).blur()
+                } else if (e.key === 'Escape') {
+                  setEditingSpecCell(null)
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )
+        }
+
+        return (
+          <div
+            onClick={() => setEditingSpecCell({ rowId: row.id as number, columnId: 'specification' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm font-mono"
+          >
+            {row.specification}
+            {row.test_unit && <span className="text-slate-500 ml-1">{row.test_unit}</span>}
+          </div>
+        )
+      },
+    }),
+    testSpecColumnHelper.accessor('is_required', {
+      header: 'Required',
+      size: 100,
+      cell: (info) => {
+        const row = info.row.original
+
+        if (row.isAddRow) {
+          return (
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                ref={addRowRequiredRef}
+                type="checkbox"
+                checked={addRowRequired}
+                onChange={(e) => setAddRowRequired(e.target.checked)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Tab' && !e.shiftKey) {
+                    e.preventDefault()
+                    // Auto-save if valid, then focus back to test type
+                    if (addRowTestType && addRowSpecification.trim()) {
+                      handleInlineCreateTestSpec()
+                    }
+                  }
+                }}
+                disabled={!addRowTestType}
+                className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+              />
+              <span className={`text-[12px] ${addRowTestType ? 'text-slate-700' : 'text-slate-400'}`}>
+                Required
+              </span>
+            </label>
+          )
+        }
+
+        return (
+          <button
+            onClick={() => handleToggleRequired(row as unknown as ProductTestSpecification)}
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors"
+          >
+            {row.is_required ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                <span className="text-emerald-700">Required</span>
+              </>
+            ) : (
+              <>
+                <X className="h-3.5 w-3.5 text-slate-400" />
+                <span className="text-slate-500">Optional</span>
+              </>
+            )}
+          </button>
+        )
+      },
+    }),
+    testSpecColumnHelper.display({
+      id: 'actions',
+      header: '',
+      size: 50,
+      cell: (info) => {
+        const row = info.row.original
+
+        if (row.isAddRow) {
+          // Show add button for add row
+          return (
+            <button
+              onClick={handleInlineCreateTestSpec}
+              disabled={!addRowTestType || !addRowSpecification.trim() || createTestSpecMutation.isPending}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Add test"
+            >
+              {createTestSpecMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+            </button>
+          )
+        }
+
+        return (
+          <button
+            onClick={() => handleDeleteTestSpec(row.id as number)}
+            disabled={deleteTestSpecMutation.isPending}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            title="Delete test"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )
+      },
+    }),
+  ], [
+    addRowTestType, addRowSpecification, addRowRequired, editingSpecCell,
+    labTestTypes, testSpecs, selectedProductForSpecs,
+    handleAddRowSelectTestType, handleAddRowClearTestType, handleInlineCreateTestSpec,
+    handleToggleRequired, handleDeleteTestSpec,
+    updateTestSpecMutation, createTestSpecMutation, deleteTestSpecMutation
+  ])
+
+  const testSpecTable = useReactTable({
+    data: testSpecTableData,
+    columns: testSpecColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id.toString(),
+  })
 
   return (
     <div className="space-y-8">
@@ -751,156 +1035,66 @@ export function ProductsPage() {
           </DialogHeader>
 
           <div className="space-y-4 mt-2">
-            {/* Inline add test row - all 4 elements always visible */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 max-w-[240px]">
-                <LabTestTypeAutocomplete
-                  labTestTypes={labTestTypes?.items || []}
-                  excludeIds={testSpecs?.map(s => s.lab_test_type_id) || []}
-                  value={selectedTestType}
-                  onSelect={handleSelectTestType}
-                  onClear={handleClearTestType}
-                  placeholder="Search tests..."
-                />
-              </div>
-
-              <Input
-                value={testSpecification}
-                onChange={(e) => setTestSpecification(e.target.value)}
-                placeholder="Specification..."
-                className="w-44 h-9"
-                disabled={!selectedTestType}
-              />
-
-              <label className="flex items-center gap-1.5 text-sm whitespace-nowrap text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={isRequired}
-                  onChange={(e) => setIsRequired(e.target.checked)}
-                  disabled={!selectedTestType}
-                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
-                />
-                Required
-              </label>
-
-              <Button
-                size="sm"
-                onClick={handleCreateTestSpec}
-                disabled={!selectedTestType || !testSpecification || createTestSpecMutation.isPending}
-                className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-9"
-              >
-                {createTestSpecMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <Plus className="mr-1 h-4 w-4" />
-                    Add
-                  </>
-                )}
-              </Button>
-            </div>
-
-            <p className="text-[13px] text-slate-500 mt-2">
+            <p className="text-[13px] text-slate-500">
               {testSpecs?.length ?? 0} test{(testSpecs?.length ?? 0) !== 1 ? "s" : ""} configured
             </p>
 
-            {testSpecs && testSpecs.length > 0 ? (
-              <div className="rounded-xl border border-slate-200/60 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
-                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Test Name</TableHead>
-                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Category</TableHead>
-                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Specification</TableHead>
-                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Required</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {testSpecs.map((spec) => (
-                      <TableRow key={spec.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell>
-                          <div>
-                            <p className="font-semibold text-slate-900 text-[14px]">{spec.test_name}</p>
-                            {spec.test_method && (
-                              <p className="text-[11px] text-slate-400 mt-0.5">{spec.test_method}</p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide bg-blue-100 text-blue-700">
-                            {spec.test_category}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <code className="text-[13px] text-slate-700 font-mono flex-1">
-                              {spec.specification}
-                              {spec.test_unit && <span className="text-slate-500 ml-1">{spec.test_unit}</span>}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditTestDialog(spec)}
-                              disabled={updateTestSpecMutation.isPending}
-                              className="h-7 w-7 p-0 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
-                              title="Edit specification"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <button
-                            onClick={() => handleToggleRequired(spec)}
-                            className="inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors"
-                          >
-                            {spec.is_required ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                <span className="text-emerald-700">Required</span>
-                              </>
-                            ) : (
-                              <>
-                                <X className="h-3.5 w-3.5 text-slate-400" />
-                                <span className="text-slate-500">Optional</span>
-                              </>
-                            )}
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteTestSpec(spec.id)}
-                            disabled={deleteTestSpecMutation.isPending}
-                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete specification"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="text-center py-10 rounded-xl border border-slate-200/60 bg-slate-50/30">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center">
-                  <FlaskConical className="h-7 w-7 text-slate-400" />
-                </div>
-                <p className="mt-4 text-[14px] font-medium text-slate-600">No test specifications configured</p>
-                <p className="mt-1 text-[13px] text-slate-500">Add tests from the catalog to define quality requirements</p>
-              </div>
+            {/* TanStack Table with inline add row */}
+            <div className="rounded-xl border border-slate-200/60 overflow-hidden">
+              <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/80">
+                    {testSpecTable.getHeaderGroups().map((headerGroup) =>
+                      headerGroup.headers.map((header) => (
+                        <th
+                          key={header.id}
+                          style={{ width: header.getSize() }}
+                          className="text-left font-semibold text-slate-600 text-[13px] tracking-wide px-3 py-2.5"
+                        >
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                        </th>
+                      ))
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {testSpecTable.getRowModel().rows.map((row) => {
+                    const isAddRow = row.original.isAddRow
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`border-b border-slate-100 transition-colors ${
+                          isAddRow ? 'bg-slate-50/50' : 'hover:bg-slate-50/50'
+                        }`}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-2">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {testSpecs?.length === 0 && !addRowTestType && (
+              <p className="text-center text-[13px] text-slate-400 py-2">
+                Use the row above to add your first test specification
+              </p>
             )}
           </div>
 
-          <DialogFooter className="pt-4">
+          <DialogFooter className="pt-4 flex gap-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => {
+                // Clear pending add row and close
+                setAddRowTestType(null)
+                setAddRowSpecification("")
+                setAddRowRequired(true)
                 setIsTestSpecsDialogOpen(false)
                 setSelectedProductForSpecs(null)
               }}
@@ -908,80 +1102,26 @@ export function ProductsPage() {
             >
               Close
             </Button>
+            <Button
+              type="button"
+              onClick={async () => {
+                // Save pending add row if valid, then close
+                if (addRowTestType && addRowSpecification.trim()) {
+                  await handleInlineCreateTestSpec()
+                }
+                setIsTestSpecsDialogOpen(false)
+                setSelectedProductForSpecs(null)
+              }}
+              disabled={createTestSpecMutation.isPending}
+              className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
+            >
+              {createTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save & Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Test Specification Dialog */}
-      <Dialog open={isEditTestDialogOpen} onOpenChange={setIsEditTestDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-[18px] font-bold text-slate-900">Edit Test Specification</DialogTitle>
-            <DialogDescription className="text-[14px] text-slate-500">
-              Update the specification and requirements
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedTestSpec && (
-            <div className="space-y-4 mt-2">
-              <div className="rounded-xl bg-blue-50/50 border border-blue-200/60 p-4">
-                <p className="font-semibold text-slate-900 text-[14px]">{selectedTestSpec.test_name}</p>
-                <p className="text-[12px] text-slate-500 mt-0.5">{selectedTestSpec.test_category}</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="edit-specification" className="text-[13px] font-semibold text-slate-700">
-                  Specification *
-                </Label>
-                <Input
-                  id="edit-specification"
-                  value={testSpecification}
-                  onChange={(e) => setTestSpecification(e.target.value)}
-                  placeholder="e.g., < 10,000 CFU/g, Negative"
-                  className="border-slate-200 h-10"
-                />
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <input
-                  id="edit-is-required"
-                  type="checkbox"
-                  checked={isRequired}
-                  onChange={(e) => setIsRequired(e.target.checked)}
-                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
-                />
-                <Label htmlFor="edit-is-required" className="font-normal text-[14px] text-slate-700">
-                  Mark as required test
-                </Label>
-              </div>
-
-              <DialogFooter className="flex gap-2 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsEditTestDialogOpen(false)
-                    setSelectedTestSpec(null)
-                    setTestSpecification("")
-                  }}
-                  className="border-slate-200 h-10"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleUpdateTestSpec}
-                  disabled={!testSpecification || updateTestSpecMutation.isPending}
-                  className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
-                >
-                  {updateTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save Changes
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

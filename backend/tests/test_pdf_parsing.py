@@ -115,9 +115,22 @@ class TestPDFParsing:
         assert plate_count.unit == "CFU/g"
         assert plate_count.pdf_source == "test.pdf"
 
-    def test_review_queue_update(self, test_db):
+    @pytest.mark.asyncio
+    async def test_review_queue_update(self, test_db):
         """Test manual review queue updates."""
+        from app.models import Lot
+        from app.models.enums import LotType
+
         service = PDFParserService()
+
+        # Create a lot for the reference number
+        lot = Lot(
+            lot_number="MANUAL123",
+            reference_number="241101-002",
+            lot_type=LotType.STANDARD
+        )
+        test_db.add(lot)
+        test_db.commit()
 
         # Create a pending queue entry
         queue_entry = ParsingQueue(

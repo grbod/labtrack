@@ -30,7 +30,7 @@ class TestPydanticAIProvider:
     @pytest.fixture
     def provider(self, mock_env):
         """Create a PydanticAI provider instance."""
-        with patch('src.services.pydantic_ai_provider.Agent'):
+        with patch('app.services.pydantic_ai_provider.Agent'):
             return PydanticAIProvider()
     
     @pytest.mark.asyncio

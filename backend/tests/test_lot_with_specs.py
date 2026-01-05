@@ -337,3 +337,205 @@ class TestLotWithSpecs:
         # Each product should have its own specs
         for lp in lot.lot_products:
             assert len(lp.product.test_specifications) >= 1
+
+
+class TestNeedsAttentionStatus:
+    """Test NEEDS_ATTENTION status functionality."""
+
+    def test_recalculate_status_needs_attention_on_fail(
+        self, test_db, sample_product_with_specs, sample_lab_test_types
+    ):
+        """Test status changes to NEEDS_ATTENTION when required test fails."""
+        # Create lot
+        lot = Lot(
+            lot_number="TEST-FAIL001",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-010",
+            status=LotStatus.AWAITING_RESULTS,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        # Link product to lot
+        lot_product = LotProduct(lot_id=lot.id, product_id=sample_product_with_specs.id)
+        test_db.add(lot_product)
+        test_db.commit()
+
+        # Add all required test results, with one failing
+        test_results = [
+            TestResult(
+                lot_id=lot.id,
+                test_type="Total Plate Count",
+                result_value="50000",  # FAIL: spec is < 10000
+                unit="CFU/g",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="E. coli",
+                result_value="Negative",  # PASS
+                unit="Positive/Negative",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="Lead",
+                result_value="0.1",  # PASS
+                unit="ppm",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="Protein",
+                result_value="22",  # PASS
+                unit="g/100g",
+                status=TestResultStatus.DRAFT,
+            ),
+        ]
+        for tr in test_results:
+            test_db.add(tr)
+        test_db.commit()
+
+        # Recalculate status
+        service = LotService()
+        updated_lot = service.recalculate_lot_status(test_db, lot.id)
+
+        # Should be NEEDS_ATTENTION due to failed TPC test
+        assert updated_lot.status == LotStatus.NEEDS_ATTENTION
+
+    def test_recalculate_status_auto_recovery(
+        self, test_db, sample_product_with_specs, sample_lab_test_types
+    ):
+        """Test status recovers to UNDER_REVIEW when all tests pass."""
+        # Create lot in NEEDS_ATTENTION state
+        lot = Lot(
+            lot_number="TEST-RECOVER001",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-011",
+            status=LotStatus.NEEDS_ATTENTION,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        # Link product to lot
+        lot_product = LotProduct(lot_id=lot.id, product_id=sample_product_with_specs.id)
+        test_db.add(lot_product)
+        test_db.commit()
+
+        # Add all required test results - all passing now
+        test_results = [
+            TestResult(
+                lot_id=lot.id,
+                test_type="Total Plate Count",
+                result_value="500",  # PASS: spec is < 10000
+                unit="CFU/g",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="E. coli",
+                result_value="Negative",  # PASS
+                unit="Positive/Negative",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="Lead",
+                result_value="0.1",  # PASS
+                unit="ppm",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="Protein",
+                result_value="22",  # PASS
+                unit="g/100g",
+                status=TestResultStatus.DRAFT,
+            ),
+        ]
+        for tr in test_results:
+            test_db.add(tr)
+        test_db.commit()
+
+        # Recalculate status
+        service = LotService()
+        updated_lot = service.recalculate_lot_status(test_db, lot.id)
+
+        # Should auto-recover to UNDER_REVIEW when all tests pass
+        assert updated_lot.status == LotStatus.UNDER_REVIEW
+
+
+class TestQCOverrideApproval:
+    """Test QC override approval functionality."""
+
+    def test_lot_update_status_needs_override_reason(
+        self, test_db, sample_product_with_specs
+    ):
+        """Test that approving from NEEDS_ATTENTION requires override reason."""
+        # Create lot in NEEDS_ATTENTION state
+        lot = Lot(
+            lot_number="TEST-OVERRIDE001",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-012",
+            status=LotStatus.NEEDS_ATTENTION,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        # Attempt to approve without override reason - should fail
+        with pytest.raises(ValueError) as exc_info:
+            lot.update_status(LotStatus.APPROVED)
+        assert "Override justification is required" in str(exc_info.value)
+
+    def test_lot_update_status_with_override_reason(
+        self, test_db, sample_product_with_specs
+    ):
+        """Test approving from NEEDS_ATTENTION with override reason."""
+        # Create lot in NEEDS_ATTENTION state
+        lot = Lot(
+            lot_number="TEST-OVERRIDE002",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-013",
+            status=LotStatus.NEEDS_ATTENTION,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        # Approve with override reason
+        lot.update_status(
+            LotStatus.APPROVED,
+            override_reason="TPC limit was borderline and confirmed by retest"
+        )
+        test_db.commit()
+
+        # Should be approved
+        assert lot.status == LotStatus.APPROVED
+        # Override reason should be stored with [QC Override] prefix
+        assert "[QC Override]" in lot.rejection_reason
+        assert "TPC limit was borderline" in lot.rejection_reason
+
+    def test_lot_update_status_normal_approval_no_override_needed(
+        self, test_db, sample_product_with_specs
+    ):
+        """Test normal approval from AWAITING_RELEASE doesn't need override."""
+        # Create lot in AWAITING_RELEASE state
+        lot = Lot(
+            lot_number="TEST-NORMAL001",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-014",
+            status=LotStatus.AWAITING_RELEASE,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        # Approve without override reason - should work
+        lot.update_status(LotStatus.APPROVED)
+        test_db.commit()
+
+        # Should be approved
+        assert lot.status == LotStatus.APPROVED

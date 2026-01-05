@@ -109,17 +109,18 @@ class Lot(BaseModel):
             and all(tr.status == TestResultStatus.APPROVED for tr in self.test_results)
         )
 
-    def update_status(self, new_status, rejection_reason: str = None):
+    def update_status(self, new_status, rejection_reason: str = None, override_reason: str = None):
         """Update lot status with validation."""
         # Valid transitions
         valid_transitions = {
-            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.PARTIAL_RESULTS: [LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.UNDER_REVIEW: [LotStatus.AWAITING_RELEASE, LotStatus.REJECTED],
+            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.NEEDS_ATTENTION, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
+            LotStatus.PARTIAL_RESULTS: [LotStatus.NEEDS_ATTENTION, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
+            LotStatus.NEEDS_ATTENTION: [LotStatus.UNDER_REVIEW, LotStatus.APPROVED, LotStatus.REJECTED],  # APPROVED requires override_reason
+            LotStatus.UNDER_REVIEW: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION, LotStatus.REJECTED],
             LotStatus.AWAITING_RELEASE: [LotStatus.APPROVED, LotStatus.REJECTED],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.REJECTED],
             LotStatus.RELEASED: [],  # Terminal state
-            LotStatus.REJECTED: [LotStatus.AWAITING_RELEASE],  # Can resubmit for QC review
+            LotStatus.REJECTED: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION],  # Can resubmit for QC review
         }
 
         if new_status not in valid_transitions.get(self.status, []):
@@ -135,6 +136,13 @@ class Lot(BaseModel):
         elif new_status == LotStatus.AWAITING_RELEASE and self.status == LotStatus.REJECTED:
             # Clear rejection reason when resubmitting
             self.rejection_reason = None
+
+        # Override reason is required when approving from NEEDS_ATTENTION (QC override)
+        if self.status == LotStatus.NEEDS_ATTENTION and new_status == LotStatus.APPROVED:
+            if not override_reason or not override_reason.strip():
+                raise ValueError("Override justification is required when approving a lot with failing tests")
+            # Store override reason in rejection_reason field (reused for override notes)
+            self.rejection_reason = f"[QC Override] {override_reason.strip()}"
 
         self.status = new_status
 

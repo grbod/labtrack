@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
-from app.models import Lot, LotProduct, Product, Sublot, ProductTestSpecification
+from app.models import Lot, LotProduct, Product, Sublot, ProductTestSpecification, TestResult
 from app.models.enums import LotType, LotStatus
 from app.schemas.lot import (
     LotCreate,
@@ -66,9 +66,13 @@ async def list_lots(
     lot_type: Optional[LotType] = None,
 ) -> LotListResponse:
     """List all lots with pagination, filtering, and product info."""
-    # Eager load products to avoid N+1 queries
+    # Eager load products, test specs (with lab test types), and test results to avoid N+1 queries
     query = db.query(Lot).options(
-        joinedload(Lot.lot_products).joinedload(LotProduct.product)
+        joinedload(Lot.lot_products)
+        .joinedload(LotProduct.product)
+        .joinedload(Product.test_specifications)
+        .joinedload(ProductTestSpecification.lab_test_type),
+        joinedload(Lot.test_results),
     )
 
     # Apply filters
@@ -110,7 +114,7 @@ async def list_lots(
 
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
-    # Build response with product summaries
+    # Build response with product summaries and test counts
     items = []
     for lot in lots:
         lot_response = LotWithProductSummaryResponse.model_validate(lot)
@@ -126,6 +130,39 @@ async def list_lots(
             for lp in lot.lot_products
             if lp.product
         ]
+
+        # Calculate test counts
+        # tests_total: sum of test specifications across all products in the lot
+        tests_total = sum(
+            len(lp.product.test_specifications)
+            for lp in lot.lot_products
+            if lp.product
+        )
+
+        # Build a map of test_name -> spec for failure checking
+        spec_by_test_name = {}
+        for lp in lot.lot_products:
+            if lp.product:
+                for spec in lp.product.test_specifications:
+                    if spec.lab_test_type:
+                        spec_by_test_name[spec.lab_test_type.test_name] = spec
+
+        # tests_entered: count of test results with a value entered
+        # tests_failed: count of test results that failed their specification
+        tests_entered = 0
+        tests_failed = 0
+        for tr in lot.test_results:
+            if tr.result_value is not None and tr.result_value.strip() != "":
+                tests_entered += 1
+                # Check if this test fails its specification
+                spec = spec_by_test_name.get(tr.test_type)
+                if spec and not spec.matches_result(tr.result_value):
+                    tests_failed += 1
+
+        lot_response.tests_total = tests_total
+        lot_response.tests_entered = tests_entered
+        lot_response.tests_failed = tests_failed
+
         items.append(lot_response)
 
     return LotListResponse(
@@ -442,11 +479,16 @@ async def update_lot_status(
             )
         lot.rejection_reason = status_update.rejection_reason.strip()
     elif status_update.status == LotStatus.APPROVED:
-        # Clear any previous rejection reason when approving
-        lot.rejection_reason = None
+        # Clear any previous rejection reason when approving (unless it's a QC override note)
+        if lot.rejection_reason and not lot.rejection_reason.startswith("[QC Override]"):
+            lot.rejection_reason = None
 
     try:
-        lot.update_status(status_update.status)
+        lot.update_status(
+            status_update.status,
+            rejection_reason=status_update.rejection_reason,
+            override_reason=status_update.override_reason,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

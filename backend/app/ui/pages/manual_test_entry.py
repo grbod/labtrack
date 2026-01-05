@@ -50,8 +50,8 @@ def show(db: Session):
     # Lot selector section
     st.markdown("### Select Lot to Edit")
     
-    # Get editable lots (pending, partial results, under review)
-    editable_statuses = [LotStatus.PENDING, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
+    # Get editable lots (awaiting results, partial results, under review)
+    editable_statuses = [LotStatus.AWAITING_RESULTS, LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW]
     editable_lots = (
         db.query(Lot)
         .filter(Lot.status.in_(editable_statuses))
@@ -536,7 +536,7 @@ def update_lot_status(db: Session, lot: Lot):
     test_results = db.query(TestResult).filter(TestResult.lot_id == lot.id).all()
     
     if not test_results:
-        lot.status = LotStatus.PENDING
+        lot.status = LotStatus.AWAITING_RESULTS
     else:
         # Check if all required tests have results
         required_tests = get_required_tests_for_lot(db, lot)

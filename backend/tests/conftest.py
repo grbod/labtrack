@@ -50,7 +50,7 @@ def sample_lot(test_db, sample_product):
         reference_number="241101-001",
         mfg_date=date(2024, 11, 1),
         exp_date=date(2027, 11, 1),
-        status=LotStatus.PENDING,
+        status=LotStatus.AWAITING_RESULTS,
         generate_coa=True,
     )
     test_db.add(lot)

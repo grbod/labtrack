@@ -68,7 +68,7 @@ class TestDefaultSpecificationIntegration:
             flavor="Vanilla",
             size="2 lbs",
             display_name="Test Brand Test Protein - Vanilla (2 lbs)",
-            serving_size=28.5,
+            serving_size="28.5g",  # Must be a string
             expiry_duration_months=36
         )
         test_db.add(product)

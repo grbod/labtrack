@@ -35,9 +35,15 @@ class Product(BaseModel):
     )
     test_specifications = relationship(
         "ProductTestSpecification",
-        back_populates="product", 
+        back_populates="product",
         cascade="all, delete-orphan",
         order_by="ProductTestSpecification.lab_test_type_id"
+    )
+    sizes = relationship(
+        "ProductSize",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductSize.id"
     )
 
     # Indexes for performance

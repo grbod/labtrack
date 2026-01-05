@@ -11,6 +11,7 @@ from app.models.enums import (
     AuditAction,
 )
 from app.models.product import Product
+from app.models.product_size import ProductSize
 from app.models.lot import Lot, Sublot, LotProduct
 from app.models.user import User
 from app.models.test_result import TestResult
@@ -33,6 +34,7 @@ __all__ = [
     "AuditAction",
     # Models
     "Product",
+    "ProductSize",
     "Lot",
     "Sublot",
     "LotProduct",

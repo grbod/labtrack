@@ -3,7 +3,7 @@ export type UserRole = "ADMIN" | "QC_MANAGER" | "LAB_TECH" | "READ_ONLY"
 
 // Lot types and statuses (lowercase to match backend enum values)
 export type LotType = "standard" | "parent_lot" | "sublot" | "multi_sku_composite"
-export type LotStatus = "awaiting_results" | "partial_results" | "under_review" | "awaiting_release" | "approved" | "released" | "rejected"
+export type LotStatus = "awaiting_results" | "partial_results" | "needs_attention" | "under_review" | "awaiting_release" | "approved" | "released" | "rejected"
 export type TestResultStatus = "draft" | "reviewed" | "approved"
 
 // User type
@@ -91,6 +91,9 @@ export interface Lot {
   created_at: string
   updated_at: string | null
   products?: ProductSummary[]  // Included in list responses for Kanban display
+  tests_entered?: number  // Count of test results with values entered
+  tests_total?: number  // Total expected tests from product specs
+  tests_failed?: number  // Count of test results that failed specification
 }
 
 export interface ProductInLot {

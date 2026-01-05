@@ -95,6 +95,9 @@ class LotWithProductSummaryResponse(LotResponse):
     """Lot response with minimal product info for list views."""
 
     products: List[ProductSummary] = []
+    tests_entered: int = 0  # Count of test results with values entered
+    tests_total: int = 0  # Total expected tests from product specs
+    tests_failed: int = 0  # Count of test results that failed specification
 
 
 class LotListResponse(BaseModel):
@@ -142,6 +145,7 @@ class LotStatusUpdate(BaseModel):
 
     status: LotStatus
     rejection_reason: Optional[str] = None  # Required when status is 'rejected'
+    override_reason: Optional[str] = None  # Required when approving from 'needs_attention'
 
 
 # Extended schemas for modal with test specifications

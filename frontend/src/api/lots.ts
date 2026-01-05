@@ -86,10 +86,16 @@ export const lotsApi = {
     return response.data
   },
 
-  updateStatus: async (id: number, status: LotStatus, rejectionReason?: string): Promise<Lot> => {
+  updateStatus: async (
+    id: number,
+    status: LotStatus,
+    rejectionReason?: string,
+    overrideReason?: string
+  ): Promise<Lot> => {
     const response = await api.patch<Lot>(`/lots/${id}/status`, {
       status,
       rejection_reason: rejectionReason,
+      override_reason: overrideReason,
     })
     return response.data
   },

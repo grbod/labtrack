@@ -474,15 +474,25 @@ export function CreateSamplePage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
+                  // Enter closes editing and moves to next section
                   setEditingCompositeCell(null)
-                } else if (e.key === 'Tab') {
-                  // Close editing
+                  // Focus next section's first input (exp date nudge)
+                  setTimeout(() => {
+                    const form = (e.target as HTMLElement).closest('form')
+                    const nextSection = form?.querySelector('[data-section="lab-reference"]')
+                    const firstFocusable = nextSection?.querySelector('button, input') as HTMLElement
+                    firstFocusable?.focus()
+                  }, 0)
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault()
                   setEditingCompositeCell(null)
 
-                  // Check if we're on the last row
                   const currentRowIndex = compositeProducts.findIndex(cp => cp.id === rowId)
-                  if (currentRowIndex === compositeProducts.length - 1) {
-                    // Add new row immediately so Tab can find it
+                  const isLastRow = currentRowIndex === compositeProducts.length - 1
+                  const tableEl = (e.target as HTMLElement).closest('table')
+
+                  if (isLastRow) {
+                    // Add new row (spreadsheet convention)
                     const newRow = {
                       id: nextCompositeId,
                       product_id: null,
@@ -493,7 +503,16 @@ export function CreateSamplePage() {
                     setCompositeProducts(prev => [...prev, newRow])
                     setNextCompositeId(prev => prev + 1)
                   }
-                  // Don't preventDefault - let Tab naturally move to next row's Product input
+
+                  // Focus next row's product input after React renders
+                  requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                      const rows = tableEl?.querySelectorAll('tbody tr')
+                      const nextRow = rows?.[currentRowIndex + 1]
+                      const productInput = nextRow?.querySelector('input[type="text"]') as HTMLInputElement
+                      productInput?.focus()
+                    })
+                  })
                 }
               }}
               autoFocus
@@ -520,6 +539,7 @@ export function CreateSamplePage() {
           onClick={() => removeCompositeProduct(info.row.original.id)}
           className="text-slate-400 hover:text-red-600 transition-colors p-1"
           type="button"
+          tabIndex={-1}
           title="Delete row"
         >
           <Trash2 className="h-4 w-4" />
@@ -540,6 +560,50 @@ export function CreateSamplePage() {
   // TanStack Table columns for Sub-Batches (parent_lot)
   const subBatchColumnHelper = createColumnHelper<SubBatchRow>()
   const subBatchColumns = useMemo(() => [
+    subBatchColumnHelper.accessor('batch_number', {
+      header: 'Batch #',
+      size: 200,
+      cell: (info) => {
+        const rowId = info.row.original.id
+        const isEditing = editingSubBatchCell?.rowId === rowId && editingSubBatchCell?.columnId === 'batch_number'
+
+        if (isEditing) {
+          return (
+            <input
+              type="text"
+              value={info.getValue()}
+              onChange={(e) => {
+                setSubBatches(prev =>
+                  prev.map(sb => sb.id === rowId ? { ...sb, batch_number: e.target.value } : sb)
+                )
+              }}
+              onBlur={() => setEditingSubBatchCell(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  setEditingSubBatchCell(null)
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault()
+                  // Tab to mfg_date in same row
+                  setEditingSubBatchCell({ rowId, columnId: 'mfg_date' })
+                }
+              }}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )
+        }
+
+        return (
+          <div
+            onClick={() => setEditingSubBatchCell({ rowId, columnId: 'batch_number' })}
+            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
+          >
+            {info.getValue() || <span className="text-slate-400 italic text-xs">Click to edit...</span>}
+          </div>
+        )
+      },
+    }),
     subBatchColumnHelper.accessor('mfg_date', {
       header: 'Mfg Date',
       size: 104,
@@ -575,10 +639,36 @@ export function CreateSamplePage() {
                   setSubBatches(prev => prev.map(sb => sb.id === rowId ? { ...sb, mfg_date: currentDate.toISOString().split('T')[0] } : sb))
                 } else if (e.key === 'Enter') {
                   e.preventDefault()
+                  // Enter closes editing and moves to submit button
                   setEditingSubBatchCell(null)
-                } else if (e.key === 'Tab') {
+                  setTimeout(() => {
+                    const form = (e.target as HTMLElement).closest('form')
+                    const submitBtn = form?.querySelector('button[type="submit"]') as HTMLElement
+                    submitBtn?.focus()
+                  }, 0)
+                } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault()
-                  setEditingSubBatchCell({ rowId, columnId: 'batch_number' })
+
+                  const currentRowIndex = subBatches.findIndex(sb => sb.id === rowId)
+                  const isLastRow = currentRowIndex === subBatches.length - 1
+
+                  if (isLastRow) {
+                    // Add new row and focus it
+                    const newRowId = nextSubBatchId
+                    const newRow = {
+                      id: newRowId,
+                      mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
+                      batch_number: ''
+                    }
+                    setSubBatches(prev => [...prev, newRow])
+                    setNextSubBatchId(prev => prev + 1)
+                    // Focus the new row's batch_number
+                    setEditingSubBatchCell({ rowId: newRowId, columnId: 'batch_number' })
+                  } else {
+                    // Focus next existing row's batch_number
+                    const nextRowId = subBatches[currentRowIndex + 1].id
+                    setEditingSubBatchCell({ rowId: nextRowId, columnId: 'batch_number' })
+                  }
                 }
               }}
               autoFocus
@@ -597,61 +687,6 @@ export function CreateSamplePage() {
             <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-          </div>
-        )
-      },
-    }),
-    subBatchColumnHelper.accessor('batch_number', {
-      header: 'Batch #',
-      size: 200,
-      cell: (info) => {
-        const rowId = info.row.original.id
-        const isEditing = editingSubBatchCell?.rowId === rowId && editingSubBatchCell?.columnId === 'batch_number'
-
-        if (isEditing) {
-          return (
-            <input
-              type="text"
-              value={info.getValue()}
-              onChange={(e) => {
-                setSubBatches(prev =>
-                  prev.map(sb => sb.id === rowId ? { ...sb, batch_number: e.target.value } : sb)
-                )
-              }}
-              onBlur={() => setEditingSubBatchCell(null)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  setEditingSubBatchCell(null)
-                } else if (e.key === 'Tab') {
-                  setEditingSubBatchCell(null)
-
-                  const currentRowIndex = subBatches.findIndex(sb => sb.id === rowId)
-                  if (currentRowIndex === subBatches.length - 1) {
-                    // Last row - add new row
-                    const newRow = {
-                      id: nextSubBatchId,
-                      mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
-                      batch_number: ''
-                    }
-                    setSubBatches(prev => [...prev, newRow])
-                    setNextSubBatchId(prev => prev + 1)
-                  }
-                  // Don't preventDefault - let Tab naturally move to next row's mfg_date
-                }
-              }}
-              autoFocus
-              className="w-full px-2 py-0.5 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          )
-        }
-
-        return (
-          <div
-            onClick={() => setEditingSubBatchCell({ rowId, columnId: 'batch_number' })}
-            className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm"
-          >
-            {info.getValue() || <span className="text-slate-400 italic text-xs">Click to edit...</span>}
           </div>
         )
       },
@@ -1194,7 +1229,7 @@ export function CreateSamplePage() {
 
         {/* multi_sku_composite: Lab Reference & Exp Date */}
         {watchedLotType === "multi_sku_composite" && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+          <div data-section="lab-reference" className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
             <div className="border-b border-slate-100 px-6 py-4">
               <div className="flex items-center gap-2">
                 <Package className="h-5 w-5 text-slate-600" />

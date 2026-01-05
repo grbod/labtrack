@@ -15,10 +15,11 @@ import { cn } from "@/lib/utils"
 import type { LotWithProductSpecs, LotStatus } from "@/types"
 
 /** Status label configuration */
-const STATUS_CONFIG: Record<LotStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+const STATUS_CONFIG: Record<LotStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
   awaiting_results: { label: "Awaiting Results", variant: "secondary" },
   partial_results: { label: "Partial Results", variant: "secondary" },
-  under_review: { label: "In Review", variant: "default" },
+  needs_attention: { label: "Needs Attention", variant: "outline", className: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-100" },
+  under_review: { label: "Under Review", variant: "default" },
   awaiting_release: { label: "Awaiting Release", variant: "default" },
   approved: { label: "Approved", variant: "outline" },
   released: { label: "Released", variant: "outline" },
@@ -128,7 +129,7 @@ export function SampleModalHeader({
             <span className="text-slate-300">|</span>
             <span className="text-slate-600">{lot.reference_number}</span>
             <span className="text-slate-300">|</span>
-            <Badge variant={statusConfig.variant}>
+            <Badge variant={statusConfig.variant} className={statusConfig.className}>
               {isLocked && <Lock className="h-3 w-3 mr-1" />}
               {statusConfig.label}
             </Badge>

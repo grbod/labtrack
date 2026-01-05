@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.dependencies import DbSession, CurrentUser, AdminUser
-from app.models import Product, ProductTestSpecification, LabTestType
+from app.models import Product, ProductTestSpecification, LabTestType, ProductSize
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -17,9 +17,30 @@ from app.schemas.product import (
     TestSpecificationResponse,
     ProductBulkImportRow,
     ProductBulkImportResult,
+    ProductSizeCreate,
+    ProductSizeUpdate,
+    ProductSizeResponse,
+    ProductSizeSimple,
 )
 
 router = APIRouter()
+
+
+def build_product_response(product: Product) -> ProductResponse:
+    """Build ProductResponse with sizes from a Product model."""
+    return ProductResponse(
+        id=product.id,
+        brand=product.brand,
+        product_name=product.product_name,
+        flavor=product.flavor,
+        size=product.size,
+        sizes=[ProductSizeSimple(id=s.id, size=s.size) for s in product.sizes],
+        display_name=product.display_name,
+        serving_size=product.serving_size,
+        expiry_duration_months=product.expiry_duration_months,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+    )
 
 
 @router.get("", response_model=ProductListResponse)
@@ -62,7 +83,7 @@ async def list_products(
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
     return ProductListResponse(
-        items=[ProductResponse.model_validate(p) for p in products],
+        items=[build_product_response(p) for p in products],
         total=total,
         page=page,
         page_size=page_size,
@@ -99,23 +120,33 @@ async def get_product(
             detail="Product not found",
         )
 
-    # Build response with specs
-    response = ProductWithSpecsResponse.model_validate(product)
-    response.test_specifications = [
-        {
-            "id": spec.id,
-            "lab_test_type_id": spec.lab_test_type_id,
-            "test_name": spec.lab_test_type.test_name if spec.lab_test_type else "",
-            "test_category": spec.lab_test_type.test_category if spec.lab_test_type else None,
-            "test_method": spec.lab_test_type.test_method if spec.lab_test_type else None,
-            "test_unit": spec.lab_test_type.default_unit if spec.lab_test_type else None,
-            "specification": spec.specification,
-            "is_required": spec.is_required,
-        }
-        for spec in product.test_specifications
-    ]
-
-    return response
+    # Build response with specs and sizes
+    return ProductWithSpecsResponse(
+        id=product.id,
+        brand=product.brand,
+        product_name=product.product_name,
+        flavor=product.flavor,
+        size=product.size,
+        sizes=[ProductSizeSimple(id=s.id, size=s.size) for s in product.sizes],
+        display_name=product.display_name,
+        serving_size=product.serving_size,
+        expiry_duration_months=product.expiry_duration_months,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+        test_specifications=[
+            {
+                "id": spec.id,
+                "lab_test_type_id": spec.lab_test_type_id,
+                "test_name": spec.lab_test_type.test_name if spec.lab_test_type else "",
+                "test_category": spec.lab_test_type.test_category if spec.lab_test_type else None,
+                "test_method": spec.lab_test_type.test_method if spec.lab_test_type else None,
+                "test_unit": spec.lab_test_type.default_unit if spec.lab_test_type else None,
+                "specification": spec.specification,
+                "is_required": spec.is_required,
+            }
+            for spec in product.test_specifications
+        ],
+    )
 
 
 @router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
@@ -150,7 +181,7 @@ async def create_product(
     db.commit()
     db.refresh(product)
 
-    return ProductResponse.model_validate(product)
+    return build_product_response(product)
 
 
 @router.patch("/{product_id}", response_model=ProductResponse)
@@ -192,7 +223,7 @@ async def update_product(
     db.commit()
     db.refresh(product)
 
-    return ProductResponse.model_validate(product)
+    return build_product_response(product)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -211,6 +242,141 @@ async def delete_product(
 
     # Delete product
     db.delete(product)
+    db.commit()
+
+
+# Product Size endpoints
+@router.get("/{product_id}/sizes", response_model=list[ProductSizeResponse])
+async def list_product_sizes(
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[ProductSizeResponse]:
+    """List all sizes for a product."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    return [ProductSizeResponse.model_validate(s) for s in product.sizes]
+
+
+@router.post("/{product_id}/sizes", response_model=ProductSizeResponse, status_code=status.HTTP_201_CREATED)
+async def create_product_size(
+    product_id: int,
+    size_in: ProductSizeCreate,
+    db: DbSession,
+    current_user: AdminUser,
+) -> ProductSizeResponse:
+    """Add a size variant to a product (admin only)."""
+    # Verify product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Check for duplicate size
+    existing = (
+        db.query(ProductSize)
+        .filter(
+            ProductSize.product_id == product_id,
+            ProductSize.size == size_in.size.strip(),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Size '{size_in.size}' already exists for this product",
+        )
+
+    # Create size
+    size = ProductSize(
+        product_id=product_id,
+        size=size_in.size.strip(),
+    )
+    db.add(size)
+    db.commit()
+    db.refresh(size)
+
+    return ProductSizeResponse.model_validate(size)
+
+
+@router.patch("/{product_id}/sizes/{size_id}", response_model=ProductSizeResponse)
+async def update_product_size(
+    product_id: int,
+    size_id: int,
+    size_in: ProductSizeUpdate,
+    db: DbSession,
+    current_user: AdminUser,
+) -> ProductSizeResponse:
+    """Update a product size (admin only)."""
+    size = (
+        db.query(ProductSize)
+        .filter(
+            ProductSize.id == size_id,
+            ProductSize.product_id == product_id,
+        )
+        .first()
+    )
+    if not size:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Size not found",
+        )
+
+    # Check for duplicate size (if changing the size value)
+    new_size_value = size_in.size.strip()
+    if new_size_value != size.size:
+        existing = (
+            db.query(ProductSize)
+            .filter(
+                ProductSize.product_id == product_id,
+                ProductSize.size == new_size_value,
+                ProductSize.id != size_id,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Size '{new_size_value}' already exists for this product",
+            )
+
+    size.size = new_size_value
+    db.commit()
+    db.refresh(size)
+
+    return ProductSizeResponse.model_validate(size)
+
+
+@router.delete("/{product_id}/sizes/{size_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_size(
+    product_id: int,
+    size_id: int,
+    db: DbSession,
+    current_user: AdminUser,
+) -> None:
+    """Delete a product size (admin only)."""
+    size = (
+        db.query(ProductSize)
+        .filter(
+            ProductSize.id == size_id,
+            ProductSize.product_id == product_id,
+        )
+        .first()
+    )
+    if not size:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Size not found",
+        )
+
+    db.delete(size)
     db.commit()
 
 

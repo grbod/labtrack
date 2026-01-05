@@ -131,9 +131,9 @@ class TestLotService:
         """Test updating lot status."""
         service = LotService()
 
-        updated = service.update_lot_status(test_db, sample_lot.id, LotStatus.TESTED)
+        updated = service.update_lot_status(test_db, sample_lot.id, LotStatus.UNDER_REVIEW)
 
-        assert updated.status == LotStatus.TESTED
+        assert updated.status == LotStatus.UNDER_REVIEW
 
     def test_get_expiring_lots(self, test_db, sample_lot):
         """Test getting expiring lots."""
@@ -188,7 +188,16 @@ class TestUserService:
         """Test updating user role."""
         service = UserService()
 
-        updated = service.update_user_role(test_db, sample_user.id, UserRole.ADMIN, updated_by_user_id=1)
+        # Create an admin user to perform the role change
+        admin = service.create_user(
+            test_db,
+            username="admin",
+            email="admin@example.com",
+            password="adminpass",
+            role=UserRole.ADMIN,
+        )
+
+        updated = service.update_user_role(test_db, sample_user.id, UserRole.ADMIN, updated_by_user_id=admin.id)
 
         assert updated.role == UserRole.ADMIN
 
@@ -249,9 +258,9 @@ class TestApprovalService:
 
         test_db.commit()
 
-        # Bulk approve
-        approved_count = service.bulk_approve_results(test_db, result_ids, sample_user.id)
-        assert approved_count == 3
+        # Bulk approve - returns a list of approved results
+        approved_results = service.bulk_approve_results(test_db, result_ids, sample_user.id)
+        assert len(approved_results) == 3
 
         # Verify all approved
         for result_id in result_ids:
@@ -290,7 +299,7 @@ class TestAuditService:
         # Log the change
         from app.models.audit import AuditLog
         from app.models.enums import AuditAction
-        
+
         AuditLog.log_change(
             session=test_db,
             table_name="products",
@@ -303,7 +312,8 @@ class TestAuditService:
 
         test_db.commit()
 
-        # Get audit history
+        # Get audit history - returns list of dicts
         history = service.get_record_history(test_db, "products", sample_product.id)
         assert len(history) == 1
-        assert history[0].action == "update"
+        # Action is returned as string in dict format
+        assert history[0]["action"] == "update"

@@ -129,7 +129,7 @@ class TestTableExtraction:
         
         mock_pdfplumber_open.return_value = mock_pdf_with_tables
         
-        with patch('src.utils.pdf_utils.extract_text_from_pdf') as mock_text_extract:
+        with patch('app.utils.pdf_utils.extract_text_from_pdf') as mock_text_extract:
             mock_text_extract.return_value = "Certificate of Analysis\nReference: 241215-001"
             
             pdf_path = Path("test.pdf")

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef, useImperativeHandle, forwardRef } from "react"
 import {
   useReactTable,
   getCoreRowModel,
@@ -16,6 +16,16 @@ interface EditingCell {
   columnId: string
 }
 
+// Editable columns in tab order
+const EDITABLE_COLUMNS = ["result_value", "method", "notes"] as const
+type EditableColumn = typeof EDITABLE_COLUMNS[number]
+
+// Track pending changes for a row
+interface PendingRowChanges {
+  rowId: number
+  changes: Record<string, string>
+}
+
 interface TestResultsTableProps {
   /** Test result rows with validation state */
   testResults: TestResultRow[]
@@ -29,6 +39,15 @@ interface TestResultsTableProps {
   disabled?: boolean
   /** ID of the row currently being saved */
   savingRowId?: number | null
+  /** Ref to the save button for focus on last cell Tab */
+  saveButtonRef?: React.RefObject<HTMLButtonElement | null>
+}
+
+export interface TestResultsTableHandle {
+  /** Check if there are unsaved changes */
+  hasUnsavedChanges: () => boolean
+  /** Get current editing state */
+  isEditing: () => boolean
 }
 
 const columnHelper = createColumnHelper<TestResultRow>()
@@ -36,24 +55,160 @@ const columnHelper = createColumnHelper<TestResultRow>()
 /**
  * TanStack React Table for test results with inline editing.
  * Columns: Test Type(*) | Category | Spec | Result | Unit | Method | Notes | Pass/Fail
+ *
+ * Tab navigation: Result → Method → Notes → next row's Result
+ * Enter: Save and move down to same column in next row
+ * Save on row exit (not on every cell change)
  */
-export function TestResultsTable({
-  testResults,
-  productSpecs: _productSpecs,
-  onUpdateResult,
-  isUpdating: _isUpdating = false,
-  disabled = false,
-  savingRowId,
-}: TestResultsTableProps) {
-  const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
-
-  // Handle update with auto-save
-  const handleUpdateResult = useCallback(
-    async (id: number, field: string, value: string) => {
-      await onUpdateResult(id, field, value)
+export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTableProps>(
+  function TestResultsTable(
+    {
+      testResults,
+      productSpecs: _productSpecs,
+      onUpdateResult,
+      isUpdating: _isUpdating = false,
+      disabled = false,
+      savingRowId,
+      saveButtonRef,
     },
-    [onUpdateResult]
-  )
+    ref
+  ) {
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
+  const [pendingChanges, setPendingChanges] = useState<PendingRowChanges | null>(null)
+
+  // Refs for cell navigation
+  const cellRefs = useRef<Map<string, HTMLElement>>(new Map())
+
+  // Expose methods to parent
+  useImperativeHandle(ref, () => ({
+    hasUnsavedChanges: () => pendingChanges !== null && Object.keys(pendingChanges.changes).length > 0,
+    isEditing: () => editingCell !== null,
+  }))
+
+  // Save pending changes for a row
+  const savePendingChanges = useCallback(async () => {
+    if (!pendingChanges || Object.keys(pendingChanges.changes).length === 0) return
+
+    const { rowId, changes } = pendingChanges
+    setPendingChanges(null)
+
+    // Save all pending changes for this row
+    for (const [field, value] of Object.entries(changes)) {
+      await onUpdateResult(rowId, field, value)
+    }
+  }, [pendingChanges, onUpdateResult])
+
+  // Track a change without saving immediately
+  const trackChange = useCallback((rowId: number, field: string, value: string) => {
+    setPendingChanges(prev => {
+      // If changing to a different row, we'll save the old one first via navigation logic
+      if (prev && prev.rowId !== rowId) {
+        return { rowId, changes: { [field]: value } }
+      }
+      return {
+        rowId,
+        changes: { ...(prev?.changes || {}), [field]: value }
+      }
+    })
+  }, [])
+
+  // Navigate to a specific cell
+  const navigateToCell = useCallback((rowIndex: number, columnId: EditableColumn) => {
+    const row = testResults[rowIndex]
+    if (!row) return false
+
+    // Use timeout to allow current cell to finish
+    setTimeout(() => {
+      setEditingCell({ rowId: row.id, columnId })
+      // Focus the cell element
+      const key = `${row.id}-${columnId}`
+      const element = cellRefs.current.get(key)
+      if (element) {
+        element.focus()
+      }
+    }, 0)
+    return true
+  }, [testResults])
+
+  // Handle Tab navigation
+  const handleTabNavigation = useCallback(async (
+    currentRowId: number,
+    currentColumn: EditableColumn,
+    isShiftTab: boolean
+  ) => {
+    const currentRowIndex = testResults.findIndex(r => r.id === currentRowId)
+    if (currentRowIndex === -1) return
+
+    const currentColIndex = EDITABLE_COLUMNS.indexOf(currentColumn)
+
+    let nextRowIndex = currentRowIndex
+    let nextColIndex = currentColIndex
+
+    if (isShiftTab) {
+      // Move backwards
+      nextColIndex--
+      if (nextColIndex < 0) {
+        nextColIndex = EDITABLE_COLUMNS.length - 1
+        nextRowIndex--
+      }
+    } else {
+      // Move forwards
+      nextColIndex++
+      if (nextColIndex >= EDITABLE_COLUMNS.length) {
+        nextColIndex = 0
+        nextRowIndex++
+      }
+    }
+
+    // Check if we're leaving the current row
+    if (nextRowIndex !== currentRowIndex && pendingChanges) {
+      await savePendingChanges()
+    }
+
+    // Check bounds
+    if (nextRowIndex < 0) {
+      // At beginning, stay on first cell
+      return
+    }
+
+    if (nextRowIndex >= testResults.length) {
+      // At end, focus save button
+      setEditingCell(null)
+      saveButtonRef?.current?.focus()
+      return
+    }
+
+    navigateToCell(nextRowIndex, EDITABLE_COLUMNS[nextColIndex])
+  }, [testResults, pendingChanges, savePendingChanges, navigateToCell, saveButtonRef])
+
+  // Handle Enter navigation (move down to same column)
+  const handleEnterNavigation = useCallback(async (
+    currentRowId: number,
+    currentColumn: EditableColumn
+  ) => {
+    const currentRowIndex = testResults.findIndex(r => r.id === currentRowId)
+    if (currentRowIndex === -1) return
+
+    const nextRowIndex = currentRowIndex + 1
+
+    // Save changes when leaving row
+    if (pendingChanges) {
+      await savePendingChanges()
+    }
+
+    if (nextRowIndex >= testResults.length) {
+      // At last row, just end editing
+      setEditingCell(null)
+      return
+    }
+
+    navigateToCell(nextRowIndex, currentColumn)
+  }, [testResults, pendingChanges, savePendingChanges, navigateToCell])
+
+  // Handle update - track change without immediate save
+  const handleCellChange = useCallback((rowId: number, field: string, value: string) => {
+    trackChange(rowId, field, value)
+  }, [trackChange])
 
   // Start editing a cell
   const startEdit = useCallback((rowId: number, columnId: string) => {
@@ -119,7 +274,12 @@ export function TestResultsTable({
           const isSaving = savingRowId === row.id
 
           return (
-            <div className="relative">
+            <div
+              className="relative"
+              ref={(el) => {
+                if (el) cellRefs.current.set(`${row.id}-result_value`, el)
+              }}
+            >
               <SmartResultInput
                 value={row.result_value || ""}
                 specification={row.specification || ""}
@@ -128,7 +288,9 @@ export function TestResultsTable({
                 disabled={disabled || isSaving}
                 onStartEdit={() => startEdit(row.id, "result_value")}
                 onEndEdit={endEdit}
-                onChange={(value) => handleUpdateResult(row.id, "result_value", value)}
+                onChange={(value) => handleCellChange(row.id, "result_value", value)}
+                onTab={(isShift) => handleTabNavigation(row.id, "result_value", isShift)}
+                onEnter={() => handleEnterNavigation(row.id, "result_value")}
               />
               {isSaving && (
                 <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-blue-500" />
@@ -168,6 +330,9 @@ export function TestResultsTable({
                 onClick={() => startEdit(row.id, "method")}
                 className="min-h-[32px] px-2 py-1 rounded cursor-text hover:bg-slate-50 flex items-center"
                 tabIndex={0}
+                ref={(el) => {
+                  if (el) cellRefs.current.set(`${row.id}-method`, el)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault()
@@ -190,13 +355,20 @@ export function TestResultsTable({
               autoFocus
               defaultValue={info.getValue() || ""}
               onBlur={(e) => {
-                handleUpdateResult(row.id, "method", e.target.value)
+                handleCellChange(row.id, "method", e.target.value)
                 endEdit()
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") endEdit()
                 if (e.key === "Tab") {
-                  handleUpdateResult(row.id, "method", e.currentTarget.value)
+                  e.preventDefault()
+                  handleCellChange(row.id, "method", e.currentTarget.value)
+                  handleTabNavigation(row.id, "method", e.shiftKey)
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleCellChange(row.id, "method", e.currentTarget.value)
+                  handleEnterNavigation(row.id, "method")
                 }
               }}
               className="h-8 w-full px-2 text-xs border border-blue-500 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -226,6 +398,9 @@ export function TestResultsTable({
                 onClick={() => startEdit(row.id, "notes")}
                 className="min-h-[32px] px-2 py-1 rounded cursor-text hover:bg-slate-50 flex items-center"
                 tabIndex={0}
+                ref={(el) => {
+                  if (el) cellRefs.current.set(`${row.id}-notes`, el)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault()
@@ -250,13 +425,20 @@ export function TestResultsTable({
               autoFocus
               defaultValue={info.getValue() || ""}
               onBlur={(e) => {
-                handleUpdateResult(row.id, "notes", e.target.value)
+                handleCellChange(row.id, "notes", e.target.value)
                 endEdit()
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") endEdit()
                 if (e.key === "Tab") {
-                  handleUpdateResult(row.id, "notes", e.currentTarget.value)
+                  e.preventDefault()
+                  handleCellChange(row.id, "notes", e.currentTarget.value)
+                  handleTabNavigation(row.id, "notes", e.shiftKey)
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleCellChange(row.id, "notes", e.currentTarget.value)
+                  handleEnterNavigation(row.id, "notes")
                 }
               }}
               className="h-8 w-full px-2 text-xs border border-blue-500 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -282,7 +464,7 @@ export function TestResultsTable({
         },
       }),
     ],
-    [editingCell, disabled, startEdit, endEdit, handleUpdateResult, savingRowId]
+    [editingCell, disabled, startEdit, endEdit, handleCellChange, handleTabNavigation, handleEnterNavigation, savingRowId]
   )
 
   const table = useReactTable({
@@ -352,4 +534,4 @@ export function TestResultsTable({
       </div>
     </div>
   )
-}
+})

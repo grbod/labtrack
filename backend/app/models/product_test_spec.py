@@ -75,30 +75,51 @@ class ProductTestSpecification(BaseModel):
         """Get test category from related lab test type."""
         return self.lab_test_type.test_category if self.lab_test_type else None
     
+    # Accepted values for specs starting with "Negative" (case-insensitive)
+    NEGATIVE_ACCEPTED_VALUES = ['negative', 'nd', 'not detected', 'bdl']
+
+    # Accepted values for specs starting with "Positive" (case-insensitive)
+    POSITIVE_ACCEPTED_VALUES = ['positive', 'detected', 'present', '+']
+
     def matches_result(self, result_value):
         """
         Check if a test result matches this specification.
-        
+
         Args:
             result_value: The actual test result value
-            
+
         Returns:
             bool: True if passes, False if fails
         """
         if not result_value:
             return False
-        
+
         spec = self.specification.strip().lower()
         value = str(result_value).strip().lower()
-        
-        # Handle Positive/Negative results
+
+        # Handle Positive/Negative results (legacy unit-based check)
         if self.test_unit == "Positive/Negative":
-            if spec == "negative" and value in ["negative", "nd", "not detected"]:
+            if spec == "negative" and value in self.NEGATIVE_ACCEPTED_VALUES:
                 return True
-            if spec == "positive" and value == "positive":
+            if spec == "positive" and value in self.POSITIVE_ACCEPTED_VALUES:
                 return True
             return False
-        
+
+        # Handle specs starting with "Negative" (e.g., "Negative in 10g")
+        if spec.startswith("negative"):
+            # Accept: Negative, ND, Not Detected, BDL, or any <X value
+            if value in self.NEGATIVE_ACCEPTED_VALUES:
+                return True
+            # Also accept "<X" values (below detection limit)
+            if value.startswith("<"):
+                return True
+            return False
+
+        # Handle specs starting with "Positive" (e.g., "Positive in 10g")
+        if spec.startswith("positive"):
+            # Accept: Positive, Detected, Present, +
+            return value in self.POSITIVE_ACCEPTED_VALUES
+
         # Handle "< X" specifications
         if spec.startswith("<"):
             try:
@@ -110,7 +131,7 @@ class ProductTestSpecification(BaseModel):
                 return result_val < spec_limit
             except:
                 return False
-        
+
         # Handle "> X" specifications
         if spec.startswith(">"):
             try:
@@ -122,7 +143,7 @@ class ProductTestSpecification(BaseModel):
                 return result_val > spec_limit
             except:
                 return False
-        
+
         # Handle range specifications
         if "-" in spec and not spec.startswith("-"):
             try:
@@ -134,7 +155,7 @@ class ProductTestSpecification(BaseModel):
                     return min_val <= result_val <= max_val
             except:
                 return False
-        
+
         # Handle exact match
         return spec == value
     

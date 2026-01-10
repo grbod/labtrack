@@ -130,6 +130,8 @@ export interface ArchiveFilters {
 export interface SaveDraftData {
   customer_id?: number | null
   notes?: string | null
+  mfg_date?: string | null  // ISO date string
+  exp_date?: string | null  // ISO date string
 }
 
 // Create customer data
@@ -137,4 +139,41 @@ export interface CreateCustomerData {
   company_name: string
   contact_name?: string
   email?: string
+}
+
+// COA Preview Data types
+export interface COATestResult {
+  name: string
+  result: string
+  unit: string | null
+  specification: string
+  status: string  // "Pass" or "Fail"
+}
+
+export interface COAPreviewData {
+  // Company info
+  company_name: string | null
+  company_address: string | null
+  company_phone: string | null
+  company_email: string | null
+
+  // Product info
+  product_name: string
+  brand: string
+
+  // Lot info
+  lot_number: string
+  reference_number: string
+  mfg_date: string | null  // Formatted date string
+  exp_date: string | null  // Formatted date string
+
+  // Test results
+  tests: COATestResult[]
+
+  // Notes
+  notes: string | null
+
+  // Generation info
+  generated_date: string
+  released_by: string | null
 }

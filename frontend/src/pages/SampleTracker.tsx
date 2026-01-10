@@ -52,7 +52,8 @@ export function SampleTrackerPage() {
   const nextDisabled = currentIndex < 0 || (lotsData?.items && currentIndex >= lotsData.items.length - 1)
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -112,6 +113,7 @@ export function SampleTrackerPage() {
         prevDisabled={prevDisabled}
         nextDisabled={nextDisabled ?? false}
       />
+      </div>
     </div>
   )
 }

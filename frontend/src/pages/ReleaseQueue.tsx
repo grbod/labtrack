@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom"
+import { motion } from "framer-motion"
 import { Loader2, Inbox } from "lucide-react"
 import {
   Table,
@@ -29,7 +30,14 @@ export function ReleaseQueuePage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.275 }}
+        className="space-y-8"
+      >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -123,6 +131,7 @@ export function ReleaseQueuePage() {
           </Table>
         )}
       </div>
+      </motion.div>
     </div>
   )
 }

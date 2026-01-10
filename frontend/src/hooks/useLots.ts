@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { lotsApi, type LotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
+import { releaseKeys } from "@/hooks/useRelease"
 import type { LotStatus } from "@/types"
 
 export const lotKeys = {
@@ -89,6 +90,8 @@ export function useUpdateLotStatus() {
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(variables.id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      // Invalidate release queue when status changes (e.g., approved → shows in release queue)
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
     },
   })
 }

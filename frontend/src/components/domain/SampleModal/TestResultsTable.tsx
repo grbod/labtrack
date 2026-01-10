@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useImperativeHandle, forwardRef } from "react"
+import { useState, useMemo, useCallback, useRef, useImperativeHandle, forwardRef, useEffect } from "react"
 import {
   useReactTable,
   getCoreRowModel,
@@ -16,8 +16,8 @@ interface EditingCell {
   columnId: string
 }
 
-// Editable columns in tab order
-const EDITABLE_COLUMNS = ["result_value", "method", "notes"] as const
+// Editable columns in tab order (Result → Notes, skip Method since it's from spec)
+const EDITABLE_COLUMNS = ["result_value", "notes"] as const
 type EditableColumn = typeof EDITABLE_COLUMNS[number]
 
 interface TestResultsTableProps {
@@ -69,8 +69,11 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
   ) {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
 
-  // Refs for cell navigation
-  const cellRefs = useRef<Map<string, HTMLElement>>(new Map())
+  // Refs for input elements (set when in editing mode)
+  const inputRefs = useRef<Map<string, HTMLInputElement | HTMLSelectElement>>(new Map())
+
+  // Track pending tab navigation - when set, endEdit should navigate to this cell instead of clearing
+  const pendingTabNavigation = useRef<EditingCell | null>(null)
 
   // Expose methods to parent
   useImperativeHandle(ref, () => ({
@@ -78,25 +81,123 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     isEditing: () => editingCell !== null,
   }))
 
+  // Focus input when editingCell changes
+  useEffect(() => {
+    if (editingCell) {
+      // Use requestAnimationFrame to wait for render, then focus
+      requestAnimationFrame(() => {
+        const key = `${editingCell.rowId}-${editingCell.columnId}`
+        const input = inputRefs.current.get(key)
+        if (input) {
+          input.focus()
+          if ('select' in input && typeof input.select === 'function') {
+            input.select()
+          }
+        }
+      })
+    }
+  }, [editingCell])
+
+  // CRITICAL: Intercept Tab in CAPTURE phase on WINDOW - runs BEFORE Radix Dialog focus trap
+  // Radix's focus trap listens on document capture phase, but window capture runs first
+  useEffect(() => {
+    const handleTabCapture = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+
+      // Check if active element is one of our tracked inputs
+      const activeEl = document.activeElement
+      let currentRowId: number | null = null
+      let currentColumnId: EditableColumn | null = null
+
+      // Find which of our inputs is focused
+      for (const [key, input] of inputRefs.current.entries()) {
+        if (input === activeEl) {
+          const dashIndex = key.indexOf('-')
+          const rowIdStr = key.substring(0, dashIndex)
+          const colId = key.substring(dashIndex + 1) as EditableColumn
+          currentRowId = parseInt(rowIdStr, 10)
+          currentColumnId = colId
+          break
+        }
+      }
+
+      // Not our input - let Radix handle it normally
+      if (currentRowId === null || currentColumnId === null) return
+
+      // KILL the event before Radix focus trap sees it
+      e.stopImmediatePropagation()
+      e.preventDefault()
+
+      // Calculate next cell
+      const currentRowIndex = testResults.findIndex(r => r.id === currentRowId)
+      if (currentRowIndex === -1) return
+
+      const currentColIndex = EDITABLE_COLUMNS.indexOf(currentColumnId)
+      let nextRowIndex = currentRowIndex
+      let nextColIndex = currentColIndex
+
+      if (e.shiftKey) {
+        // Move backwards
+        nextColIndex--
+        if (nextColIndex < 0) {
+          nextColIndex = EDITABLE_COLUMNS.length - 1
+          nextRowIndex--
+        }
+      } else {
+        // Move forwards
+        nextColIndex++
+        if (nextColIndex >= EDITABLE_COLUMNS.length) {
+          nextColIndex = 0
+          nextRowIndex++
+        }
+      }
+
+      // Check bounds
+      if (nextRowIndex < 0) {
+        // At beginning, stay on first cell
+        return
+      }
+
+      if (nextRowIndex >= testResults.length) {
+        // At end, focus save button after blur completes
+        pendingTabNavigation.current = null
+        // Blur the current input to trigger save, then focus save button
+        if (activeEl instanceof HTMLElement) {
+          activeEl.blur()
+        }
+        // Use setTimeout to focus save button after blur handler runs
+        setTimeout(() => {
+          saveButtonRef?.current?.focus()
+        }, 0)
+        return
+      }
+
+      // Set pending navigation - endEdit will navigate to this cell when blur handler calls it
+      const nextRow = testResults[nextRowIndex]
+      pendingTabNavigation.current = { rowId: nextRow.id, columnId: EDITABLE_COLUMNS[nextColIndex] }
+
+      // Blur the current input - this triggers the blur handler which calls onChange and endEdit
+      // The endEdit will see pendingTabNavigation and navigate to the next cell
+      if (activeEl instanceof HTMLElement) {
+        activeEl.blur()
+      }
+    }
+
+    // Add listener on WINDOW with CAPTURE phase - runs before document-level Radix listener
+    window.addEventListener('keydown', handleTabCapture, { capture: true })
+    return () => window.removeEventListener('keydown', handleTabCapture, { capture: true })
+  }, [testResults, saveButtonRef])
+
   // Navigate to a specific cell
   const navigateToCell = useCallback((rowIndex: number, columnId: EditableColumn) => {
     const row = testResults[rowIndex]
     if (!row) return false
 
-    // Use timeout to allow current cell to finish
-    setTimeout(() => {
-      setEditingCell({ rowId: row.id, columnId })
-      // Focus the cell element
-      const key = `${row.id}-${columnId}`
-      const element = cellRefs.current.get(key)
-      if (element) {
-        element.focus()
-      }
-    }, 0)
+    setEditingCell({ rowId: row.id, columnId })
     return true
   }, [testResults])
 
-  // Handle Tab navigation
+  // Handle Tab navigation - navigates IMMEDIATELY to override blur's setEditingCell(null)
   const handleTabNavigation = useCallback((
     currentRowId: number,
     currentColumn: EditableColumn,
@@ -139,10 +240,13 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
       return
     }
 
-    navigateToCell(nextRowIndex, EDITABLE_COLUMNS[nextColIndex])
-  }, [testResults, navigateToCell, saveButtonRef])
+    // Navigate IMMEDIATELY - React batches this with blur's setEditingCell(null)
+    // Our call comes later in the event, so it wins
+    const nextRow = testResults[nextRowIndex]
+    setEditingCell({ rowId: nextRow.id, columnId: EDITABLE_COLUMNS[nextColIndex] })
+  }, [testResults, saveButtonRef])
 
-  // Handle Enter navigation (move down to same column)
+  // Handle Enter navigation (move down to same column) - navigates immediately
   const handleEnterNavigation = useCallback((
     currentRowId: number,
     currentColumn: EditableColumn
@@ -158,8 +262,10 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
       return
     }
 
-    navigateToCell(nextRowIndex, currentColumn)
-  }, [testResults, navigateToCell])
+    // Navigate IMMEDIATELY
+    const nextRow = testResults[nextRowIndex]
+    setEditingCell({ rowId: nextRow.id, columnId: currentColumn })
+  }, [testResults])
 
   // Handle update - save immediately
   const handleCellChange = useCallback((rowId: number, field: string, value: string) => {
@@ -172,9 +278,15 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     setEditingCell({ rowId, columnId })
   }, [disabled])
 
-  // End editing
+  // End editing - but check if we have pending tab navigation
   const endEdit = useCallback(() => {
-    setEditingCell(null)
+    if (pendingTabNavigation.current) {
+      // Tab navigation is pending - navigate to next cell instead of clearing
+      setEditingCell(pendingTabNavigation.current)
+      pendingTabNavigation.current = null
+    } else {
+      setEditingCell(null)
+    }
   }, [])
 
   // Define columns
@@ -230,12 +342,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
           const isSaving = savingRowId === row.id
 
           return (
-            <div
-              className="relative"
-              ref={(el) => {
-                if (el) cellRefs.current.set(`${row.id}-result_value`, el)
-              }}
-            >
+            <div className="relative">
               <SmartResultInput
                 value={row.result_value || ""}
                 specification={row.specification || ""}
@@ -247,6 +354,11 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                 onChange={(value) => handleCellChange(row.id, "result_value", value)}
                 onTab={(isShift) => handleTabNavigation(row.id, "result_value", isShift)}
                 onEnter={() => handleEnterNavigation(row.id, "result_value")}
+                onInputRef={(el) => {
+                  if (el) {
+                    inputRefs.current.set(`${row.id}-result_value`, el)
+                  }
+                }}
               />
               {isSaving && (
                 <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-blue-500" />
@@ -286,9 +398,6 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                 onClick={() => startEdit(row.id, "method")}
                 className="min-h-[32px] px-2 py-1 rounded cursor-text hover:bg-slate-50 flex items-center"
                 tabIndex={0}
-                ref={(el) => {
-                  if (el) cellRefs.current.set(`${row.id}-method`, el)
-                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault()
@@ -308,6 +417,9 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
           return (
             <input
               type="text"
+              ref={(el) => {
+                if (el) inputRefs.current.set(`${row.id}-method`, el)
+              }}
               autoFocus
               defaultValue={info.getValue() || ""}
               onBlur={(e) => {
@@ -318,13 +430,20 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                 if (e.key === "Escape") endEdit()
                 if (e.key === "Tab") {
                   e.preventDefault()
+                  e.stopPropagation() // Prevent Radix Dialog focus trap from intercepting
                   handleCellChange(row.id, "method", e.currentTarget.value)
-                  handleTabNavigation(row.id, "method", e.shiftKey)
+                  // Method is not in tab order - go to Notes (forward) or Result (backward) in same row
+                  const currentRowIndex = testResults.findIndex(r => r.id === row.id)
+                  if (e.shiftKey) {
+                    navigateToCell(currentRowIndex, "result_value")
+                  } else {
+                    navigateToCell(currentRowIndex, "notes")
+                  }
                 }
                 if (e.key === "Enter") {
                   e.preventDefault()
                   handleCellChange(row.id, "method", e.currentTarget.value)
-                  handleEnterNavigation(row.id, "method")
+                  endEdit()
                 }
               }}
               className="h-8 w-full px-2 text-xs border border-blue-500 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -354,9 +473,6 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                 onClick={() => startEdit(row.id, "notes")}
                 className="min-h-[32px] px-2 py-1 rounded cursor-text hover:bg-slate-50 flex items-center"
                 tabIndex={0}
-                ref={(el) => {
-                  if (el) cellRefs.current.set(`${row.id}-notes`, el)
-                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault()
@@ -378,6 +494,9 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
           return (
             <input
               type="text"
+              ref={(el) => {
+                if (el) inputRefs.current.set(`${row.id}-notes`, el)
+              }}
               autoFocus
               defaultValue={info.getValue() || ""}
               onBlur={(e) => {
@@ -388,6 +507,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                 if (e.key === "Escape") endEdit()
                 if (e.key === "Tab") {
                   e.preventDefault()
+                  e.stopPropagation() // Prevent Radix Dialog focus trap from intercepting
                   handleCellChange(row.id, "notes", e.currentTarget.value)
                   handleTabNavigation(row.id, "notes", e.shiftKey)
                 }
@@ -420,7 +540,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
         },
       }),
     ],
-    [editingCell, disabled, startEdit, endEdit, handleCellChange, handleTabNavigation, handleEnterNavigation, savingRowId]
+    [editingCell, disabled, startEdit, endEdit, handleCellChange, handleTabNavigation, handleEnterNavigation, savingRowId, testResults, navigateToCell, inputRefs]
   )
 
   const table = useReactTable({

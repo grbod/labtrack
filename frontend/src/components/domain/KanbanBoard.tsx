@@ -44,6 +44,7 @@ interface KanbanColumnConfig {
 // Sample Tracker only shows active workflow columns
 // Approved/released items appear in Release Queue, rejected in Archive
 // Color scheme: sky=waiting, amber=in-progress, red=attention, violet=review
+// NOTE: Drag-and-drop is DISABLED - status is auto-calculated based on test results
 const KANBAN_COLUMNS: KanbanColumnConfig[] = [
   {
     id: "awaiting_results",
@@ -134,7 +135,7 @@ interface KanbanCardProps {
   index: number // For staggered animation
 }
 
-function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
+function KanbanCardContent({ lot, staleness, onClick }: Omit<KanbanCardProps, 'index'>) {
   const borderClass = {
     critical: "border-red-400 border-l-4",
     warning: "border-orange-400 border-l-4",
@@ -158,14 +159,7 @@ function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
   const hasMultipleProducts = (lot.products?.length ?? 0) > 1
 
   return (
-    <motion.div
-      variants={cardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      custom={index}
-      whileHover={{ scale: 1.01, transition: { duration: 0.15 } }}
-      whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}
+    <div
       onClick={onClick}
       className={cn(
         "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm",
@@ -254,6 +248,26 @@ function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
           {lot.tests_entered ?? 0}/{lot.tests_total ?? 0}
         </span>
       </div>
+    </div>
+  )
+}
+
+function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
+  return (
+    <motion.div
+      variants={cardVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      custom={index}
+      whileHover={{ scale: 1.01, transition: { duration: 0.15 } }}
+      whileTap={{ scale: 0.98, transition: { duration: 0.1 } }}
+    >
+      <KanbanCardContent
+        lot={lot}
+        staleness={staleness}
+        onClick={onClick}
+      />
     </motion.div>
   )
 }
@@ -299,7 +313,9 @@ function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
         className="flex-1 space-y-2 rounded-lg bg-slate-50/50 p-2 min-h-[200px]"
       >
         {lots.length === 0 ? (
-          <p className="py-8 text-center text-[12px] text-slate-400">No samples</p>
+          <p className="py-8 text-center text-[12px] text-slate-400">
+            No samples
+          </p>
         ) : (
           <>
             <AnimatePresence mode="popLayout">
@@ -353,6 +369,7 @@ function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
  *
  * Features:
  * - 4 columns: Awaiting Results, Partial Results, Needs Attention, Under Review
+ * - Status is auto-calculated based on test results (no manual drag-and-drop)
  * - Approved/released items appear in Release Queue, rejected in Archive
  * - Stale items bubble to top with visual indicators (red/orange borders, warning icons)
  * - Maximum 8 cards per column with "+X more" button to expand
@@ -364,6 +381,7 @@ export function KanbanBoard({
   staleWarningDays = 7,
   staleCriticalDays = 12,
 }: KanbanBoardProps) {
+
   /**
    * Process and organize lots by column with staleness information
    */

@@ -1,5 +1,6 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
+import { motion } from "framer-motion"
 import { ArrowLeft, Loader2, AlertCircle, GripVertical } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,6 +32,40 @@ export function ReleasePage() {
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(50) // percentage of left two panes
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Find current position in queue for keyboard navigation
+  const currentIndex = queue.findIndex(
+    (item) => item.lot_id === lotId && item.product_id === productId
+  )
+  const prevItem = currentIndex > 0 ? queue[currentIndex - 1] : null
+  const nextItem = currentIndex < queue.length - 1 ? queue[currentIndex + 1] : null
+
+  // Keyboard navigation: Escape to go back, left/right arrows to navigate queue
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't navigate if user is typing in an input/textarea
+      const activeEl = document.activeElement as HTMLElement
+      if (
+        activeEl?.tagName === "INPUT" ||
+        activeEl?.tagName === "TEXTAREA" ||
+        activeEl?.isContentEditable
+      ) {
+        return
+      }
+
+      if (e.key === "Escape") {
+        navigate("/release")
+      } else if (e.key === "ArrowLeft" && prevItem) {
+        e.preventDefault()
+        navigate(`/release/${prevItem.lot_id}/${prevItem.product_id}`)
+      } else if (e.key === "ArrowRight" && nextItem) {
+        e.preventDefault()
+        navigate(`/release/${nextItem.lot_id}/${nextItem.product_id}`)
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [navigate, prevItem, nextItem])
 
   // Drag handler for resizable separator
   const handleSeparatorMouseDown = (e: React.MouseEvent) => {
@@ -105,9 +140,15 @@ export function ReleasePage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)]">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.275 }}
+      className="flex flex-col h-[calc(100vh-64px)]"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white shrink-0">
+      <div className="flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white shrink-0">
         <div className="flex items-center gap-4">
           <Button asChild variant="ghost" size="sm">
             <Link to="/release">
@@ -169,14 +210,6 @@ export function ReleasePage() {
             className="flex flex-col min-w-0 overflow-hidden"
             style={{ width: `${100 - leftPanelWidth}%` }}
           >
-            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50">
-              <h2 className="text-[13px] font-semibold text-slate-700">
-                Generated COA
-              </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Certificate of Analysis preview
-              </p>
-            </div>
             <div className="flex-1 overflow-hidden">
               <COAPreview lotId={lotId} productId={productId} />
             </div>
@@ -203,6 +236,6 @@ export function ReleasePage() {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }

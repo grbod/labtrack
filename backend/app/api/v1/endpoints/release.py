@@ -29,6 +29,8 @@ from app.schemas.release import (
     ReleaseDetailsByLotProduct,
     ApproveByLotProductRequest,
     ApproveByLotProductResponse,
+    COAPreviewData,
+    COATestResult,
 )
 
 router = APIRouter()
@@ -686,6 +688,140 @@ async def download_coa_by_lot_product(
     )
 
 
+@router.get("/{lot_id}/{product_id}/preview-data", response_model=COAPreviewData)
+async def get_preview_data_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> COAPreviewData:
+    """
+    Get COA preview data for frontend rendering.
+    Returns all data needed to render a WYSIWYG COA preview.
+    """
+    from datetime import datetime
+    from app.models import LotProduct, Product
+    from app.models.test_result import TestResult
+
+    # Verify lot exists
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    # Verify product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    # Verify lot-product association
+    lot_product = db.query(LotProduct).filter(
+        LotProduct.lot_id == lot_id,
+        LotProduct.product_id == product_id
+    ).first()
+    if not lot_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not associated with this lot",
+        )
+
+    # Get all test results for this lot that have values
+    test_results = (
+        db.query(TestResult)
+        .filter(
+            TestResult.lot_id == lot_id,
+            TestResult.result_value.isnot(None),
+            TestResult.result_value != "",
+        )
+        .order_by(TestResult.test_type)
+        .all()
+    )
+
+    # Get product test specifications for fallback
+    from app.models.product_test_spec import ProductTestSpecification
+    product_specs = (
+        db.query(ProductTestSpecification)
+        .filter(ProductTestSpecification.product_id == product_id)
+        .all()
+    )
+    # Build lookup dict by test name (case-insensitive)
+    spec_lookup = {spec.test_name.lower(): spec.specification for spec in product_specs}
+
+    # Format test results
+    tests = []
+    for result in test_results:
+        # Try to get specification from:
+        # 1. TestResult.specification (what was entered/saved with the result)
+        # 2. ProductTestSpec (product's default specification for this test type)
+        # 3. Default fallback
+        specification = result.specification
+        if not specification:
+            # Look up from product specs
+            specification = spec_lookup.get(result.test_type.lower())
+        if not specification:
+            specification = "Within limits"
+
+        tests.append(COATestResult(
+            name=result.test_type,
+            result=result.result_value or "N/D",
+            unit=result.unit,
+            specification=specification,
+            status="Pass",  # All approved results are considered passing
+        ))
+
+    # Check for existing COARelease to get notes
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id
+        )
+        .first()
+    )
+
+    notes = None
+    released_by = None
+    if coa_release:
+        notes = coa_release.notes
+        if coa_release.draft_data:
+            notes = coa_release.draft_data.get("notes") or notes
+        if coa_release.released_by:
+            released_by = coa_release.released_by.username
+
+    return COAPreviewData(
+        # Company info from settings
+        company_name=settings.company_name,
+        company_address=settings.company_address,
+        company_phone=settings.company_phone,
+        company_email=settings.company_email,
+
+        # Product info
+        product_name=product.display_name,
+        brand=product.brand,
+
+        # Lot info
+        lot_number=lot.lot_number,
+        reference_number=lot.reference_number,
+        mfg_date=lot.mfg_date.strftime("%B %d, %Y") if lot.mfg_date else None,
+        exp_date=lot.exp_date.strftime("%B %d, %Y") if lot.exp_date else None,
+
+        # Test results
+        tests=tests,
+
+        # Notes
+        notes=notes,
+
+        # Generation info
+        generated_date=datetime.now().strftime("%B %d, %Y"),
+        released_by=released_by,
+    )
+
+
 @router.get("/{lot_id}/{product_id}/source-pdfs/{filename}")
 async def get_source_pdf_by_lot_product(
     lot_id: int,
@@ -726,7 +862,7 @@ async def get_source_pdf_by_lot_product(
         )
 
     # Build the file path
-    pdf_path = Path(settings.UPLOAD_DIR) / "test_results" / filename
+    pdf_path = Path(settings.upload_path) / "pdfs" / filename
     if not pdf_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -752,8 +888,9 @@ async def save_draft_by_lot_product(
     current_user: CurrentUser,
 ) -> ReleaseDetailsByLotProduct:
     """
-    Save draft data (customer_id, notes) for a lot+product pair.
+    Save draft data (customer_id, notes, mfg_date, exp_date) for a lot+product pair.
     Creates or updates a draft COARelease record.
+    Also updates Lot dates if provided.
     """
     from app.models import LotProduct, Product
     from app.models.enums import COAReleaseStatus
@@ -782,6 +919,12 @@ async def save_draft_by_lot_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not associated with this lot",
         )
+
+    # Update Lot dates if provided
+    if request.mfg_date is not None:
+        lot.mfg_date = request.mfg_date
+    if request.exp_date is not None:
+        lot.exp_date = request.exp_date
 
     # Get or create COARelease
     coa_release = (
@@ -813,16 +956,21 @@ async def save_draft_by_lot_product(
         db.add(coa_release)
 
     db.commit()
+    db.refresh(lot)  # Refresh to get updated dates
 
     # Return updated details
     source_pdfs = release_service.get_source_pdfs(db, lot_id)
-    coa_release_response = COAReleaseResponse.model_validate(coa_release) if coa_release else None
 
     return ReleaseDetailsByLotProduct(
+        lot_id=lot_id,
+        product_id=product_id,
+        status="awaiting_release",
+        customer_id=coa_release.draft_data.get("customer_id") if coa_release.draft_data else None,
+        notes=coa_release.draft_data.get("notes") if coa_release.draft_data else None,
+        draft_data=coa_release.draft_data,
         lot=LotInRelease.model_validate(lot),
         product=ProductInRelease.model_validate(product),
         source_pdfs=source_pdfs,
-        coa_release=coa_release_response,
     )
 
 

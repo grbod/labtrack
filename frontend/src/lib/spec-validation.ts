@@ -4,6 +4,22 @@
  */
 
 /**
+ * Parse a numeric value from a string, handling commas as thousands separators
+ * and stripping any trailing text (like units).
+ *
+ * @param str - The string to parse (e.g., "10,000", "10,000 CFU/g", "10.5")
+ * @returns The parsed number, or NaN if not a valid number
+ */
+function parseNumericValue(str: string): number {
+  // Remove commas (thousands separators) and trim
+  const cleaned = str.replace(/,/g, '').trim()
+  // Extract the numeric part (handles cases like "10000 CFU/g")
+  const match = cleaned.match(/^-?[\d.]+/)
+  if (!match) return NaN
+  return parseFloat(match[0])
+}
+
+/**
  * Accepted values for specs starting with "Negative" (case-insensitive)
  */
 export const NEGATIVE_ACCEPTED_VALUES = ['negative', 'nd', 'not detected', 'bdl']
@@ -84,37 +100,37 @@ export function matchesResult(
     return POSITIVE_ACCEPTED_VALUES.includes(value)
   }
 
-  // Handle "< X" specifications
+  // Handle "< X" specifications (supports commas and units like "<10,000 CFU/g")
   if (spec.startsWith("<")) {
-    const specLimit = parseFloat(spec.slice(1).trim())
+    const specLimit = parseNumericValue(spec.slice(1))
     if (isNaN(specLimit)) return false
     if (value.startsWith("<")) {
       // Both are "less than" values - pass
       return true
     }
-    const resultVal = parseFloat(value)
+    const resultVal = parseNumericValue(value)
     return !isNaN(resultVal) && resultVal < specLimit
   }
 
-  // Handle "> X" specifications
+  // Handle "> X" specifications (supports commas and units)
   if (spec.startsWith(">")) {
-    const specLimit = parseFloat(spec.slice(1).trim())
+    const specLimit = parseNumericValue(spec.slice(1))
     if (isNaN(specLimit)) return false
     if (value.startsWith(">")) {
       // Both are "greater than" values - pass
       return true
     }
-    const resultVal = parseFloat(value)
+    const resultVal = parseNumericValue(value)
     return !isNaN(resultVal) && resultVal > specLimit
   }
 
-  // Handle range specifications (e.g., "5-10")
+  // Handle range specifications (e.g., "5-10", "1,000-10,000")
   if (spec.includes("-") && !spec.startsWith("-")) {
     const parts = spec.split("-")
     if (parts.length === 2) {
-      const minVal = parseFloat(parts[0].trim())
-      const maxVal = parseFloat(parts[1].trim())
-      const resultVal = parseFloat(value)
+      const minVal = parseNumericValue(parts[0])
+      const maxVal = parseNumericValue(parts[1])
+      const resultVal = parseNumericValue(value)
       if (!isNaN(minVal) && !isNaN(maxVal) && !isNaN(resultVal)) {
         return resultVal >= minVal && resultVal <= maxVal
       }

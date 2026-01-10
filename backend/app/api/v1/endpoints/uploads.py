@@ -5,11 +5,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 from pydantic import BaseModel
+from typing import Optional
 
 from app.dependencies import DbSession, CurrentUser
 from app.config import settings
+from app.models.lot import Lot
 
 router = APIRouter()
 
@@ -27,16 +29,18 @@ class UploadResponse(BaseModel):
 @router.post("/pdf", response_model=UploadResponse)
 async def upload_pdf(
     file: UploadFile = File(...),
+    lot_id: Optional[int] = Form(None),
     db: DbSession = None,
     current_user: CurrentUser = None,
 ) -> UploadResponse:
     """
-    Upload a PDF file.
+    Upload a PDF file and optionally associate it with a lot.
 
     - Validates file is a PDF
     - Generates unique filename with timestamp
     - Saves to configured upload path
-    - Returns file metadata for storing in test result
+    - If lot_id provided, adds filename to lot's attached_pdfs
+    - Returns file metadata
     """
     # Validate file type
     if not file.content_type or file.content_type != "application/pdf":
@@ -68,6 +72,17 @@ async def upload_pdf(
     file_path = upload_dir / new_filename
     with open(file_path, "wb") as f:
         f.write(content)
+
+    # Associate with lot if lot_id provided
+    if lot_id and db:
+        lot = db.query(Lot).filter(Lot.id == lot_id).first()
+        if lot:
+            # Initialize attached_pdfs if None
+            if lot.attached_pdfs is None:
+                lot.attached_pdfs = []
+            # Add the new filename
+            lot.attached_pdfs = lot.attached_pdfs + [new_filename]
+            db.commit()
 
     return UploadResponse(
         filename=new_filename,

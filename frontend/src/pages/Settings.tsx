@@ -215,7 +215,8 @@ export function SettingsPage() {
   const visibleTabs = tabs.filter((tab) => !tab.adminOnly || canEditSystemSettings)
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <div className="space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Settings</h1>
@@ -728,6 +729,7 @@ export function SettingsPage() {
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

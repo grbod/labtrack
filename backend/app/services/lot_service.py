@@ -538,7 +538,7 @@ class LotService(BaseService[Lot]):
                     # Some tests fail - needs attention
                     new_status = LotStatus.NEEDS_ATTENTION
                 else:
-                    # All tests pass - ready for review (auto-recovery)
+                    # All tests pass - ready for review (auto-recovery from needs_attention)
                     new_status = LotStatus.UNDER_REVIEW
 
         # Only update if status changed

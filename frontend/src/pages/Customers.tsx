@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -116,7 +117,13 @@ export function CustomersPage() {
   const isMutating = createMutation.isPending || updateMutation.isPending
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.275 }}
+        className="space-y-8"
+      >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -371,6 +378,7 @@ export function CustomersPage() {
           </form>
         </DialogContent>
       </Dialog>
+      </motion.div>
     </div>
   )
 }

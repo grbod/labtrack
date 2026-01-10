@@ -35,9 +35,10 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check password using SHA256
+    # Check password using SHA256 with salt (must match UserService._hash_password)
     import hashlib
-    sha256_hash = hashlib.sha256(form_data.password.encode()).hexdigest()
+    salt = "coa_system_salt_"
+    sha256_hash = hashlib.sha256(f"{salt}{form_data.password}".encode()).hexdigest()
     password_valid = sha256_hash == user.password_hash
 
     if not password_valid:

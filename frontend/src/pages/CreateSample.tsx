@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react"
+import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -762,7 +763,13 @@ export function CreateSamplePage() {
   })
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="mx-auto max-w-7xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.275 }}
+        className="space-y-8 max-w-3xl"
+      >
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Create Sample</h1>
@@ -1435,6 +1442,7 @@ export function CreateSamplePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </motion.div>
     </div>
   )
 }

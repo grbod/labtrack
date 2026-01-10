@@ -10,12 +10,15 @@ export interface UploadResponse {
 
 export const uploadsApi = {
   /**
-   * Upload a PDF file
-   * Returns metadata including the filename to store in test result
+   * Upload a PDF file and associate it with a lot
+   * Returns metadata including the filename
    */
-  uploadPdf: async (file: File): Promise<UploadResponse> => {
+  uploadPdf: async (file: File, lotId?: number): Promise<UploadResponse> => {
     const formData = new FormData()
     formData.append("file", file)
+    if (lotId) {
+      formData.append("lot_id", lotId.toString())
+    }
 
     const response = await api.post<UploadResponse>("/uploads/pdf", formData, {
       headers: {

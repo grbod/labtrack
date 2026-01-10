@@ -81,6 +81,30 @@ class ProductTestSpecification(BaseModel):
     # Accepted values for specs starting with "Positive" (case-insensitive)
     POSITIVE_ACCEPTED_VALUES = ['positive', 'detected', 'present', '+']
 
+    @staticmethod
+    def _parse_numeric_value(s):
+        """
+        Parse a numeric value from a string, handling commas as thousands separators
+        and stripping any trailing text (like units).
+
+        Args:
+            s: The string to parse (e.g., "10,000", "10,000 CFU/g", "10.5")
+
+        Returns:
+            float or None if not a valid number
+        """
+        import re
+        # Remove commas (thousands separators) and trim
+        cleaned = s.replace(',', '').strip()
+        # Extract the numeric part (handles cases like "10000 CFU/g")
+        match = re.match(r'^-?[\d.]+', cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
     def matches_result(self, result_value):
         """
         Check if a test result matches this specification.
@@ -120,41 +144,42 @@ class ProductTestSpecification(BaseModel):
             # Accept: Positive, Detected, Present, +
             return value in self.POSITIVE_ACCEPTED_VALUES
 
-        # Handle "< X" specifications
+        # Handle "< X" specifications (supports commas and units like "<10,000 CFU/g")
         if spec.startswith("<"):
-            try:
-                spec_limit = float(spec[1:].strip())
-                if value.startswith("<"):
-                    # Both are "less than" values
-                    return True
-                result_val = float(value)
-                return result_val < spec_limit
-            except:
+            spec_limit = self._parse_numeric_value(spec[1:])
+            if spec_limit is None:
                 return False
+            if value.startswith("<"):
+                # Both are "less than" values
+                return True
+            result_val = self._parse_numeric_value(value)
+            if result_val is None:
+                return False
+            return result_val < spec_limit
 
-        # Handle "> X" specifications
+        # Handle "> X" specifications (supports commas and units)
         if spec.startswith(">"):
-            try:
-                spec_limit = float(spec[1:].strip())
-                if value.startswith(">"):
-                    # Both are "greater than" values
-                    return True
-                result_val = float(value)
-                return result_val > spec_limit
-            except:
+            spec_limit = self._parse_numeric_value(spec[1:])
+            if spec_limit is None:
                 return False
+            if value.startswith(">"):
+                # Both are "greater than" values
+                return True
+            result_val = self._parse_numeric_value(value)
+            if result_val is None:
+                return False
+            return result_val > spec_limit
 
-        # Handle range specifications
+        # Handle range specifications (e.g., "5-10", "1,000-10,000")
         if "-" in spec and not spec.startswith("-"):
-            try:
-                parts = spec.split("-")
-                if len(parts) == 2:
-                    min_val = float(parts[0].strip())
-                    max_val = float(parts[1].strip())
-                    result_val = float(value)
+            parts = spec.split("-")
+            if len(parts) == 2:
+                min_val = self._parse_numeric_value(parts[0])
+                max_val = self._parse_numeric_value(parts[1])
+                result_val = self._parse_numeric_value(value)
+                if min_val is not None and max_val is not None and result_val is not None:
                     return min_val <= result_val <= max_val
-            except:
-                return False
+            return False
 
         # Handle exact match
         return spec == value

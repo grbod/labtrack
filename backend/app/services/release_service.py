@@ -79,7 +79,11 @@ class ReleaseService(BaseService[COARelease]):
 
     def get_source_pdfs(self, db: Session, lot_id: int) -> List[str]:
         """
-        Get unique source PDF filenames from TestResult for a lot.
+        Get unique source PDF filenames for a lot.
+
+        Combines:
+        1. PDFs attached directly to the lot (Lot.attached_pdfs)
+        2. PDFs from which test results were extracted (TestResult.pdf_source)
 
         Args:
             db: Database session
@@ -88,6 +92,14 @@ class ReleaseService(BaseService[COARelease]):
         Returns:
             List of unique PDF source filenames
         """
+        pdf_set = set()
+
+        # Get PDFs attached directly to the lot
+        lot = db.query(Lot).filter(Lot.id == lot_id).first()
+        if lot and lot.attached_pdfs:
+            pdf_set.update(lot.attached_pdfs)
+
+        # Get PDFs from test results
         results = (
             db.query(TestResult.pdf_source)
             .filter(
@@ -98,7 +110,9 @@ class ReleaseService(BaseService[COARelease]):
             .distinct()
             .all()
         )
-        return [r[0] for r in results if r[0]]
+        pdf_set.update(r[0] for r in results if r[0])
+
+        return list(pdf_set)
 
     def save_draft(
         self,

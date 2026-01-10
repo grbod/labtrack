@@ -131,6 +131,33 @@ describe('spec-validation', () => {
         expect(matchesResult('5', '< abc', null)).toBe(false)
       })
     })
+
+    describe('Specs with thousands separators (commas)', () => {
+      it('handles specs with commas in less-than comparisons', () => {
+        expect(matchesResult('4000', '<10,000 CFU/g', null)).toBe(true)
+        expect(matchesResult('4000', '< 10,000', null)).toBe(true)
+        expect(matchesResult('9999', '<10,000', null)).toBe(true)
+        expect(matchesResult('10000', '<10,000', null)).toBe(false)
+        expect(matchesResult('15000', '<10,000', null)).toBe(false)
+      })
+
+      it('handles specs with commas in greater-than comparisons', () => {
+        expect(matchesResult('15000', '>10,000', null)).toBe(true)
+        expect(matchesResult('10001', '> 10,000', null)).toBe(true)
+        expect(matchesResult('9999', '>10,000', null)).toBe(false)
+      })
+
+      it('handles results with commas', () => {
+        expect(matchesResult('4,000', '<10,000', null)).toBe(true)
+        expect(matchesResult('15,000', '<10,000', null)).toBe(false)
+      })
+
+      it('handles specs with units after the number', () => {
+        expect(matchesResult('4000', '<10,000 CFU/g', null)).toBe(true)
+        expect(matchesResult('500', '< 1,000 ppm', null)).toBe(true)
+        expect(matchesResult('2000', '< 1,000 ppm', null)).toBe(false)
+      })
+    })
   })
 
   describe('getInputTypeForSpec', () => {

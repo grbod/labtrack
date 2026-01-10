@@ -79,6 +79,7 @@ class LotResponse(BaseModel):
     status: LotStatus
     generate_coa: bool
     rejection_reason: Optional[str] = None
+    attached_pdfs: Optional[List[str]] = None  # List of uploaded PDF filenames
     created_at: datetime
     updated_at: Optional[datetime] = None
 

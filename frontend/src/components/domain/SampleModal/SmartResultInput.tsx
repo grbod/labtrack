@@ -25,6 +25,8 @@ interface SmartResultInputProps {
   onTab?: (isShiftTab: boolean) => void
   /** Callback for Enter navigation */
   onEnter?: () => void
+  /** Callback to register input element for external focus management */
+  onInputRef?: (el: HTMLInputElement | HTMLSelectElement | null) => void
   /** Additional class names */
   className?: string
 }
@@ -44,10 +46,23 @@ export function SmartResultInput({
   onChange,
   onTab,
   onEnter,
+  onInputRef,
   className,
 }: SmartResultInputProps) {
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
   const [localValue, setLocalValue] = useState(value)
+
+  // Register input ref with parent when it changes
+  useEffect(() => {
+    if (isEditing && inputRef.current && onInputRef) {
+      onInputRef(inputRef.current)
+    }
+    return () => {
+      if (onInputRef) {
+        onInputRef(null)
+      }
+    }
+  }, [isEditing, onInputRef])
 
   const inputType = getInputTypeForSpec(specification, testUnit)
 
@@ -81,6 +96,7 @@ export function SmartResultInput({
       onEndEdit()
     } else if (e.key === 'Tab') {
       e.preventDefault()
+      e.stopPropagation() // Prevent Radix Dialog focus trap from intercepting
       if (localValue !== value) {
         onChange(localValue)
       }
@@ -208,6 +224,7 @@ export function SmartResultInput({
                 onEndEdit()
               } else if (e.key === 'Tab') {
                 e.preventDefault()
+                e.stopPropagation() // Prevent Radix Dialog focus trap from intercepting
                 if (localValue !== value) {
                   onChange(localValue)
                 }

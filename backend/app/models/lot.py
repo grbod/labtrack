@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     UniqueConstraint,
     Numeric,
+    JSON,
 )
 from sqlalchemy.orm import relationship, validates
 from app.models.base import BaseModel
@@ -46,6 +47,7 @@ class Lot(BaseModel):
     status = Column(Enum(LotStatus), nullable=False, default=LotStatus.AWAITING_RESULTS)
     generate_coa = Column(Boolean, default=True, nullable=False)
     rejection_reason = Column(Text, nullable=True)  # Required when status is REJECTED
+    attached_pdfs = Column(JSON, nullable=True, default=list)  # List of uploaded PDF filenames
 
     # Relationships
     sublots = relationship(

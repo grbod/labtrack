@@ -88,6 +88,7 @@ export interface Lot {
   status: LotStatus
   generate_coa: boolean
   rejection_reason: string | null
+  attached_pdfs: string[] | null  // List of uploaded PDF filenames
   created_at: string
   updated_at: string | null
   products?: ProductSummary[]  // Included in list responses for Kanban display

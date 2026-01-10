@@ -354,7 +354,8 @@ export function GridShowcasePage() {
   })
 
   return (
-    <div className="space-y-8 max-w-7xl">
+    <div className="mx-auto max-w-7xl p-6">
+      <div className="space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Grid Comparison Showcase</h1>
@@ -615,6 +616,7 @@ export function GridShowcasePage() {
               <li>⚠️ Requires ~150 lines of custom code for basic features</li>
             </ul>
           </div>
+        </div>
         </div>
       </div>
     </div>

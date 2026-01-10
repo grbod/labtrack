@@ -8,6 +8,7 @@ import type {
   ArchiveFilters,
   SaveDraftData,
   CreateCustomerData,
+  COAPreviewData,
 } from "@/types/release"
 import type { PaginatedResponse } from "@/types"
 
@@ -29,9 +30,23 @@ export const releaseApi = {
     return `/api/v1/release/${lotId}/${productId}/preview`
   },
 
+  /** Get COA preview data for frontend rendering */
+  getPreviewData: async (lotId: number, productId: number): Promise<COAPreviewData> => {
+    const response = await api.get<COAPreviewData>(`/release/${lotId}/${productId}/preview-data`)
+    return response.data
+  },
+
   /** Get the source PDF URL for a lot/product */
   getSourcePdfUrl: (lotId: number, productId: number, filename: string): string => {
     return `/api/v1/release/${lotId}/${productId}/source-pdfs/${encodeURIComponent(filename)}`
+  },
+
+  /** Get source PDF as blob (with auth token) */
+  getSourcePdfBlob: async (lotId: number, productId: number, filename: string): Promise<Blob> => {
+    const response = await api.get(`/release/${lotId}/${productId}/source-pdfs/${encodeURIComponent(filename)}`, {
+      responseType: "blob",
+    })
+    return response.data
   },
 
   /** Save draft data (customer_id, notes) for a lot/product */

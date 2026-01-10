@@ -159,6 +159,8 @@ class COAGenerationService:
         Returns:
             Dictionary with all template variables
         """
+        from app.models.product_test_spec import ProductTestSpecification
+
         lot = coa_release.lot
         product = coa_release.product
 
@@ -173,14 +175,33 @@ class COAGenerationService:
             .all()
         )
 
+        # Get product test specifications for fallback
+        product_specs = (
+            db.query(ProductTestSpecification)
+            .filter(ProductTestSpecification.product_id == product.id)
+            .all()
+        ) if product else []
+        # Build lookup dict by test name (case-insensitive)
+        spec_lookup = {spec.test_name.lower(): spec.specification for spec in product_specs}
+
         # Format test results for template
         tests = []
         for result in test_results:
+            # Try to get specification from:
+            # 1. TestResult.specification (what was entered/saved with the result)
+            # 2. ProductTestSpec (product's default specification for this test type)
+            # 3. Default fallback
+            specification = result.specification
+            if not specification:
+                specification = spec_lookup.get(result.test_type.lower())
+            if not specification:
+                specification = self._get_default_spec(result.test_type)
+
             tests.append({
                 "name": result.test_type,
                 "result": result.result_value or "N/D",
                 "unit": result.unit or "",
-                "specification": result.specification or self._get_default_spec(result.test_type),
+                "specification": specification,
                 "status": self._determine_status(result),
             })
 
@@ -327,6 +348,8 @@ class COAGenerationService:
         Returns:
             Dictionary with all template variables
         """
+        from app.models.product_test_spec import ProductTestSpecification
+
         # Get approved test results for this lot
         test_results = (
             db.query(TestResult)
@@ -338,14 +361,33 @@ class COAGenerationService:
             .all()
         )
 
+        # Get product test specifications for fallback
+        product_specs = (
+            db.query(ProductTestSpecification)
+            .filter(ProductTestSpecification.product_id == product.id)
+            .all()
+        )
+        # Build lookup dict by test name (case-insensitive)
+        spec_lookup = {spec.test_name.lower(): spec.specification for spec in product_specs}
+
         # Format test results for template
         tests = []
         for result in test_results:
+            # Try to get specification from:
+            # 1. TestResult.specification (what was entered/saved with the result)
+            # 2. ProductTestSpec (product's default specification for this test type)
+            # 3. Default fallback
+            specification = result.specification
+            if not specification:
+                specification = spec_lookup.get(result.test_type.lower())
+            if not specification:
+                specification = self._get_default_spec(result.test_type)
+
             tests.append({
                 "name": result.test_type,
                 "result": result.result_value or "N/D",
                 "unit": result.unit or "",
-                "specification": result.specification or self._get_default_spec(result.test_type),
+                "specification": specification,
                 "status": self._determine_status(result),
             })
 

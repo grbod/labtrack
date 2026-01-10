@@ -74,8 +74,6 @@ export function SampleModal({
   const [rejectionReason, setRejectionReason] = useState("")
   const [showRejectDialog, setShowRejectDialog] = useState(false)
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
-  const [showOverrideDialog, setShowOverrideDialog] = useState(false)
-  const [overrideReason, setOverrideReason] = useState("")
 
   // Fetch lot with specs
   const { data: lotWithSpecs } = useLotWithSpecs(lot?.id ?? 0)
@@ -102,9 +100,7 @@ export function SampleModal({
   const isQCManagerOrAdmin = user?.role === "qc_manager" || user?.role === "admin"
   const canSubmitForReview = currentStatus === "under_review"
   const canApproveReject =
-    isQCManagerOrAdmin &&
-    (currentStatus === "awaiting_release" || currentStatus === "needs_attention")
-  const needsOverrideApproval = currentStatus === "needs_attention"
+    isQCManagerOrAdmin && currentStatus === "awaiting_release"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -254,6 +250,33 @@ export function SampleModal({
     }
   }, [isOpen, isLoadingResults, specTests])
 
+  // Keyboard navigation: left/right arrows to navigate between samples
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't navigate if user is typing in an input, textarea, or contenteditable
+      const target = e.target as HTMLElement
+      const isInputFocused =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+
+      if (isInputFocused) return
+
+      if (e.key === "ArrowLeft" && !prevDisabled) {
+        e.preventDefault()
+        onNavigate("prev")
+      } else if (e.key === "ArrowRight" && !nextDisabled) {
+        e.preventDefault()
+        onNavigate("next")
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [isOpen, prevDisabled, nextDisabled, onNavigate])
+
   // Handle updating a test result (or creating new one for placeholder rows)
   const handleUpdateResult = useCallback(
     async (id: number, field: string, value: string) => {
@@ -279,9 +302,13 @@ export function SampleModal({
             data: { [field]: value },
           })
         }
-        // Invalidate queries to refresh status
+        // Refresh queries to update status immediately
         queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
         queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+        if (lot) {
+          // Force immediate refetch of lot details so modal shows updated status
+          await queryClient.refetchQueries({ queryKey: lotKeys.detailWithSpecs(lot.id) })
+        }
       } catch (error) {
         toast.error("Failed to save", {
           description: "Please try again",
@@ -363,7 +390,7 @@ export function SampleModal({
       setUploadError(null)
 
       try {
-        await uploadMutation.mutateAsync(pdfFile)
+        await uploadMutation.mutateAsync({ file: pdfFile, lotId: lot?.id })
         toast.success("PDF uploaded successfully")
       } catch (error) {
         setUploadError("Failed to upload file")
@@ -371,7 +398,7 @@ export function SampleModal({
         setIsUploading(false)
       }
     },
-    [uploadMutation]
+    [uploadMutation, lot?.id]
   )
 
   // Handle file input change
@@ -394,7 +421,7 @@ export function SampleModal({
       setUploadError(null)
 
       try {
-        await uploadMutation.mutateAsync(file)
+        await uploadMutation.mutateAsync({ file, lotId: lot?.id })
         toast.success("PDF uploaded successfully")
       } catch (error) {
         setUploadError("Failed to upload file")
@@ -405,43 +432,19 @@ export function SampleModal({
         }
       }
     },
-    [uploadMutation]
+    [uploadMutation, lot?.id]
   )
 
-  // Handle approve (or show override dialog for needs_attention)
+  // Handle approve
   const handleApprove = useCallback(async () => {
     if (!lot) return
-
-    // If in needs_attention status, show override dialog first
-    if (needsOverrideApproval) {
-      setShowOverrideDialog(true)
-      return
-    }
-
     try {
       await updateStatusMutation.mutateAsync({ id: lot.id, status: "approved" })
       toast.success("Sample approved! COA ready for release")
     } catch (error) {
       toast.error("Failed to approve")
     }
-  }, [lot, updateStatusMutation, needsOverrideApproval])
-
-  // Handle override approval (for needs_attention status)
-  const handleOverrideApprove = useCallback(async () => {
-    if (!lot || !overrideReason.trim()) return
-    try {
-      await updateStatusMutation.mutateAsync({
-        id: lot.id,
-        status: "approved",
-        overrideReason: overrideReason.trim(),
-      })
-      setShowOverrideDialog(false)
-      setOverrideReason("")
-      toast.success("Sample approved with override! COA ready for release")
-    } catch (error) {
-      toast.error("Failed to approve")
-    }
-  }, [lot, overrideReason, updateStatusMutation])
+  }, [lot, updateStatusMutation])
 
   // Handle reject
   const handleReject = useCallback(async () => {
@@ -465,7 +468,7 @@ export function SampleModal({
     if (!lot) return
     try {
       await submitForReviewMutation.mutateAsync(lot.id)
-      toast.success("Sample submitted for release review")
+      toast.success("Sample submitted for approval")
       onClose()
     } catch (error) {
       toast.error("Failed to submit for review")
@@ -490,14 +493,8 @@ export function SampleModal({
 
   if (!lot) return null
 
-  // Get attached PDFs from test results
-  const attachedPdfs = Array.from(
-    new Set(
-      testResultRows
-        .filter((tr) => tr.pdf_source)
-        .map((tr) => tr.pdf_source as string)
-    )
-  )
+  // Get attached PDFs from lot record
+  const attachedPdfs: string[] = lotWithSpecs?.attached_pdfs || []
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleCloseAttempt()}>
@@ -505,6 +502,8 @@ export function SampleModal({
         className="sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
         showCloseButton={false}
         onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         onKeyDown={(e) => {
           // Handle Escape key with unsaved changes check
           if (e.key === "Escape") {
@@ -729,58 +728,10 @@ export function SampleModal({
           </div>
         )}
 
-        {/* Override approval dialog (for needs_attention status) */}
-        {showOverrideDialog && (
-          <div className="mx-6 mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
-            <div className="flex items-start gap-3 mb-3">
-              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-orange-500" />
-              <div>
-                <p className="text-sm font-medium text-orange-800">
-                  QC Override Required
-                </p>
-                <p className="mt-1 text-sm text-orange-700">
-                  This sample has failing tests. Please provide a justification
-                  for approving despite the failures.
-                </p>
-              </div>
-            </div>
-            <textarea
-              value={overrideReason}
-              onChange={(e) => setOverrideReason(e.target.value)}
-              placeholder="Enter justification for override approval..."
-              className="w-full h-24 px-3 py-2 text-sm border border-orange-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <div className="flex justify-end gap-2 mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setShowOverrideDialog(false)
-                  setOverrideReason("")
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleOverrideApprove}
-                disabled={!overrideReason.trim() || updateStatusMutation.isPending}
-                className="bg-orange-600 hover:bg-orange-700"
-              >
-                {updateStatusMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Approve with Override"
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
           <div className="flex w-full items-center justify-end gap-2">
-            {/* Submit for Release action (available to any authenticated user for under_review status) */}
+            {/* Submit for Approval action (available to any authenticated user for under_review status) */}
             {canSubmitForReview && (
               <Button
                 onClick={handleSubmitForReview}
@@ -790,7 +741,7 @@ export function SampleModal({
                 {submitForReviewMutation.isPending ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : null}
-                Submit for Release
+                Submit for Approval
               </Button>
             )}
 

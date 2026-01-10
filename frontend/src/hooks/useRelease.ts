@@ -8,6 +8,8 @@ export const releaseKeys = {
   details: () => [...releaseKeys.all, "detail"] as const,
   detail: (lotId: number, productId: number) =>
     [...releaseKeys.details(), lotId, productId] as const,
+  previewData: (lotId: number, productId: number) =>
+    [...releaseKeys.all, "preview-data", lotId, productId] as const,
   emailHistory: (lotId: number, productId: number) =>
     [...releaseKeys.all, "emails", lotId, productId] as const,
   archive: (filters: ArchiveFilters) => [...releaseKeys.all, "archive", filters] as const,
@@ -31,6 +33,15 @@ export function useReleaseDetails(lotId: number, productId: number) {
   return useQuery({
     queryKey: releaseKeys.detail(lotId, productId),
     queryFn: () => releaseApi.getDetails(lotId, productId),
+    enabled: lotId > 0 && productId > 0,
+  })
+}
+
+/** Fetch COA preview data for frontend rendering */
+export function usePreviewData(lotId: number, productId: number) {
+  return useQuery({
+    queryKey: releaseKeys.previewData(lotId, productId),
+    queryFn: () => releaseApi.getPreviewData(lotId, productId),
     enabled: lotId > 0 && productId > 0,
   })
 }

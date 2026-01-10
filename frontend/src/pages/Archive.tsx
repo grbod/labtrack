@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { motion } from "framer-motion"
 import {
   Search,
   Loader2,
@@ -106,7 +107,13 @@ export function ArchivePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-7xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.275 }}
+        className="space-y-6"
+      >
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">
@@ -365,6 +372,7 @@ export function ArchivePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </motion.div>
     </div>
   )
 }

@@ -150,6 +150,8 @@ class DraftSaveRequest(BaseModel):
 
     customer_id: Optional[int] = None
     notes: Optional[str] = None
+    mfg_date: Optional[datetime] = None
+    exp_date: Optional[datetime] = None
 
 
 class SendBackRequest(BaseModel):
@@ -232,3 +234,44 @@ class ApproveByLotProductResponse(BaseModel):
     all_products_released: bool
 
     model_config = {"from_attributes": True}
+
+
+# COA Preview Data schemas
+class COATestResult(BaseModel):
+    """Test result item for COA preview."""
+
+    name: str
+    result: str
+    unit: Optional[str] = None
+    specification: str
+    status: str  # "Pass" or "Fail"
+
+
+class COAPreviewData(BaseModel):
+    """COA preview data for frontend rendering."""
+
+    # Company info
+    company_name: Optional[str] = None
+    company_address: Optional[str] = None
+    company_phone: Optional[str] = None
+    company_email: Optional[str] = None
+
+    # Product info
+    product_name: str
+    brand: str
+
+    # Lot info
+    lot_number: str
+    reference_number: str
+    mfg_date: Optional[str] = None  # Formatted date string
+    exp_date: Optional[str] = None  # Formatted date string
+
+    # Test results
+    tests: List[COATestResult] = []
+
+    # Notes
+    notes: Optional[str] = None
+
+    # Generation info
+    generated_date: str
+    released_by: Optional[str] = None

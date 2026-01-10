@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { motion } from "framer-motion"
 import {
   Package,
   TestTube,
@@ -52,7 +53,13 @@ export function DashboardPage() {
   const activeSamples = (statusCounts?.awaiting_results ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-7xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+        className="space-y-8"
+      >
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Dashboard</h1>
@@ -200,6 +207,7 @@ export function DashboardPage() {
       <div className="fixed bottom-4 right-4 text-[11px] text-slate-400 font-mono">
         {__GIT_HASH__}
       </div>
+      </motion.div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { Check, X } from "lucide-react"
+import { Check } from "lucide-react"
 import { getInputTypeForSpec, POSITIVE_NEGATIVE_OPTIONS, getAutocompleteOptions } from "@/lib/spec-validation"
 
 interface SmartResultInputProps {
@@ -224,9 +224,11 @@ export function SmartResultInput({
                 onEndEdit()
               } else if (e.key === 'Tab') {
                 e.preventDefault()
-                e.stopPropagation() // Prevent Radix Dialog focus trap from intercepting
-                if (localValue !== value) {
-                  onChange(localValue)
+                e.stopPropagation()
+                // Auto-select first match if available
+                const finalValue = filteredOptions.length > 0 ? filteredOptions[0].value : localValue
+                if (finalValue !== value) {
+                  onChange(finalValue)
                 }
                 if (onTab) {
                   onTab(e.shiftKey)
@@ -235,8 +237,10 @@ export function SmartResultInput({
                 }
               } else if (e.key === 'Enter') {
                 e.preventDefault()
-                if (localValue !== value) {
-                  onChange(localValue)
+                // Auto-select first match if available
+                const finalValue = filteredOptions.length > 0 ? filteredOptions[0].value : localValue
+                if (finalValue !== value) {
+                  onChange(finalValue)
                 }
                 if (onEnter) {
                   onEnter()
@@ -250,49 +254,40 @@ export function SmartResultInput({
           />
           {filteredOptions.length > 0 && (
             <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
-              {/* Group by pass/fail */}
-              {filteredOptions.filter(opt => opt.passes).length > 0 && (
-                <div className="px-2 py-1 text-xs font-medium text-slate-500 bg-slate-50 border-b">
-                  Passing
-                </div>
-              )}
-              {filteredOptions.filter(opt => opt.passes).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setLocalValue(opt.value)
-                    onChange(opt.value)
-                    onEndEdit()
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 flex items-center justify-between"
-                >
-                  <span>{opt.label}</span>
-                  <Check className="h-3.5 w-3.5 text-green-600" />
-                </button>
-              ))}
-              {filteredOptions.filter(opt => !opt.passes).length > 0 && (
-                <div className="px-2 py-1 text-xs font-medium text-slate-500 bg-slate-50 border-b border-t">
-                  Failing
-                </div>
-              )}
-              {filteredOptions.filter(opt => !opt.passes).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setLocalValue(opt.value)
-                    onChange(opt.value)
-                    onEndEdit()
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-100 flex items-center justify-between"
-                >
-                  <span>{opt.label}</span>
-                  <X className="h-3.5 w-3.5 text-red-500" />
-                </button>
-              ))}
+              {filteredOptions.map((opt) => {
+                const isSelected = localValue.toLowerCase() === opt.value.toLowerCase()
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      setLocalValue(opt.value)
+                      onChange(opt.value)
+                      onEndEdit()
+                    }}
+                    className={cn(
+                      "w-full px-3 py-1.5 text-left text-sm flex items-center justify-between",
+                      isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                      opt.passes ? "text-slate-900" : "text-slate-500"
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      {opt.label}
+                      {opt.passes ? (
+                        <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                          PASS
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                          FAIL
+                        </span>
+                      )}
+                    </span>
+                    {isSelected && <Check className="h-3.5 w-3.5 text-blue-600" />}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

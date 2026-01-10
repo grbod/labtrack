@@ -40,6 +40,95 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Always-visible scrollbar (prevents macOS auto-hide) */
+.scrollbar-visible {
+  overflow-y: scroll !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.08);
+}
+.scrollbar-visible::-webkit-scrollbar {
+  width: 8px;
+  display: block !important;
+}
+.scrollbar-visible::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  min-height: 40px;
+}
+.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* SimpleBar — Refined enterprise scrollbar */
+.simplebar-track.simplebar-vertical {
+  width: 10px !important;
+  background: transparent !important;
+  right: 0 !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  border-radius: 0 !important;
+}
+
+/* Subtle inset track channel */
+.simplebar-track.simplebar-vertical::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 4px;
+  background: hsl(214 15% 93%);
+  border-radius: 2px;
+}
+
+.simplebar-track.simplebar-vertical .simplebar-scrollbar {
+  right: 2px !important;
+  width: 4px !important;
+  cursor: pointer;
+}
+
+/* The thumb — thin pill, subtle slate */
+.simplebar-scrollbar::before {
+  background: hsl(215 15% 78%) !important;
+  border-radius: 2px !important;
+  opacity: 1 !important;
+  left: 0 !important;
+  right: 0 !important;
+  transition: background 0.2s ease !important;
+}
+
+/* Hover state — slightly darker */
+.simplebar-track.simplebar-vertical:hover .simplebar-scrollbar::before,
+.simplebar-scrollbar:hover::before {
+  background: hsl(215 18% 68%) !important;
+}
+
+/* Active/dragging state */
+.simplebar-scrollbar:active::before {
+  background: hsl(215 20% 60%) !important;
+}
+
+/* Always visible */
+.simplebar-track {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.simplebar-scrollbar {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.simplebar-scrollbar.simplebar-visible::before {
+  opacity: 1 !important;
+}
+
 /* Enterprise-grade compact styles */
 .table-compact tr {
   height: 2rem;

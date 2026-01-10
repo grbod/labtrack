@@ -12,6 +12,7 @@ interface SourcePDFViewerProps {
   lotId: number
   productId: number
   sourcePdfs: string[]
+  scrollRef?: React.RefObject<HTMLDivElement>
 }
 
 interface PdfData {
@@ -27,7 +28,8 @@ interface LensPosition {
 }
 
 const ZOOM_FACTOR = 2.5
-const LENS_SIZE = 320
+const LENS_WIDTH = 400  // 5:3 aspect ratio
+const LENS_HEIGHT = 240
 
 function PdfPage({
   pageNumber,
@@ -98,27 +100,27 @@ function PdfPage({
         {globalPageNumber} / {totalPages}
       </div>
 
-      {/* Magnifying lens */}
+      {/* Magnifying lens - 5:3 rectangle */}
       {lens.visible && imageData && (
         <div
-          className="absolute pointer-events-none border-2 border-blue-400 rounded-full overflow-hidden shadow-xl z-10"
+          className="absolute pointer-events-none border-2 border-blue-400 rounded-lg overflow-hidden shadow-xl z-10"
           style={{
-            width: LENS_SIZE,
-            height: LENS_SIZE,
-            left: lens.x - LENS_SIZE / 2,
-            top: lens.y - LENS_SIZE / 2,
+            width: LENS_WIDTH,
+            height: LENS_HEIGHT,
+            left: lens.x - LENS_WIDTH / 2,
+            top: lens.y - LENS_HEIGHT / 2,
             backgroundImage: `url(${imageData})`,
             backgroundSize: `${renderedWidth * ZOOM_FACTOR}px auto`,
-            backgroundPosition: `${-lens.x * ZOOM_FACTOR + LENS_SIZE / 2}px ${-lens.y * ZOOM_FACTOR + LENS_SIZE / 2}px`,
+            backgroundPosition: `${-lens.x * ZOOM_FACTOR + LENS_WIDTH / 2}px ${-lens.y * ZOOM_FACTOR + LENS_HEIGHT / 2}px`,
             backgroundRepeat: "no-repeat",
           }}
         >
           {/* Crosshair in center of lens */}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-px h-3 bg-blue-400/50" />
+            <div className="w-px h-4 bg-blue-400/50" />
           </div>
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-px w-3 bg-blue-400/50" />
+            <div className="h-px w-4 bg-blue-400/50" />
           </div>
         </div>
       )}
@@ -126,35 +128,56 @@ function PdfPage({
   )
 }
 
-export function SourcePDFViewer({ lotId, productId, sourcePdfs }: SourcePDFViewerProps) {
+export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: SourcePDFViewerProps) {
   const [pdfDataList, setPdfDataList] = useState<PdfData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [containerWidth, setContainerWidth] = useState<number>(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
 
-  // Track container width with ResizeObserver
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentRect.width
-        if (width > 0) {
-          setContainerWidth(width)
-        }
-      }
-    })
-
-    observer.observe(containerRef.current)
-
-    // Initial measurement
-    const initialWidth = containerRef.current.offsetWidth
-    if (initialWidth > 0) {
-      setContainerWidth(initialWidth)
+  // Track container width with ResizeObserver using callback ref pattern
+  const setContainerRef = useCallback((node: HTMLDivElement | null) => {
+    // Disconnect previous observer
+    if (observerRef.current) {
+      observerRef.current.disconnect()
     }
 
-    return () => observer.disconnect()
+    if (node) {
+      // Set the ref
+      containerRef.current = node
+
+      // Also set external scrollRef if provided
+      if (scrollRef && 'current' in scrollRef) {
+        (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = node
+      }
+
+      // Initial measurement
+      const width = node.offsetWidth
+      if (width > 0) {
+        setContainerWidth(width)
+      }
+
+      // Set up observer
+      observerRef.current = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const newWidth = entry.contentRect.width
+          if (newWidth > 0) {
+            setContainerWidth(newWidth)
+          }
+        }
+      })
+      observerRef.current.observe(node)
+    }
+  }, [scrollRef])
+
+  // Cleanup observer on unmount
+  useEffect(() => {
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect()
+      }
+    }
   }, [])
 
   // Fetch all PDFs
@@ -250,14 +273,14 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs }: SourcePDFViewe
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
+    <div ref={setContainerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
       {pdfDataList.map((pdf, pdfIndex) => (
         <div key={pdf.filename}>
           {/* Document separator with filename */}
           {pdfIndex > 0 && (
-            <div className="h-px bg-slate-300 my-4" />
+            <div className="h-px bg-slate-300 my-1" />
           )}
-          <div className="bg-slate-100 px-3 py-1.5 mb-2 rounded text-[11px] font-medium text-slate-600 truncate">
+          <div className="bg-slate-100 px-1 py-0.5 mb-1 rounded text-[11px] font-medium text-slate-600 truncate">
             {pdf.filename}
           </div>
 

@@ -195,6 +195,7 @@ export const POSITIVE_NEGATIVE_OPTIONS = [
 
 /**
  * Get autocomplete options for a negative/positive spec with pass/fail hints.
+ * Consolidated to reduce redundant options while still accepting all valid values.
  */
 export function getAutocompleteOptions(specification: string): Array<{
   value: string
@@ -202,24 +203,22 @@ export function getAutocompleteOptions(specification: string): Array<{
   passes: boolean
 }> {
   if (isNegativeSpec(specification)) {
+    // Consolidated: Show common options, but validation still accepts ND, BDL, etc.
     return [
       { value: 'Negative', label: 'Negative', passes: true },
-      { value: 'ND', label: 'ND (Not Detected)', passes: true },
       { value: 'Not Detected', label: 'Not Detected', passes: true },
-      { value: 'BDL', label: 'BDL (Below Detection Limit)', passes: true },
       { value: 'Positive', label: 'Positive', passes: false },
       { value: 'Detected', label: 'Detected', passes: false },
     ]
   }
 
   if (isPositiveSpec(specification)) {
+    // Consolidated: Show common options
     return [
       { value: 'Positive', label: 'Positive', passes: true },
       { value: 'Detected', label: 'Detected', passes: true },
-      { value: 'Present', label: 'Present', passes: true },
-      { value: '+', label: '+ (Positive)', passes: true },
       { value: 'Negative', label: 'Negative', passes: false },
-      { value: 'ND', label: 'ND (Not Detected)', passes: false },
+      { value: 'Not Detected', label: 'Not Detected', passes: false },
     ]
   }
 

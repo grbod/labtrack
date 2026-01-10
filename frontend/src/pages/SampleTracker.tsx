@@ -33,23 +33,24 @@ export function SampleTrackerPage() {
   }
 
   const handleNavigate = (direction: "prev" | "next") => {
-    if (!selectedLot || !lotsData?.items) return
+    if (!selectedLot || !lotsData?.items || lotsData.items.length === 0) return
     const currentIndex = lotsData.items.findIndex(l => l.id === selectedLot.id)
+    const totalItems = lotsData.items.length
 
-    // Stop at ends instead of wrapping
-    if (direction === "prev" && currentIndex > 0) {
-      setSelectedLot(lotsData.items[currentIndex - 1])
-    } else if (direction === "next" && currentIndex < lotsData.items.length - 1) {
-      setSelectedLot(lotsData.items[currentIndex + 1])
+    // Loop around when reaching ends
+    if (direction === "prev") {
+      const newIndex = currentIndex <= 0 ? totalItems - 1 : currentIndex - 1
+      setSelectedLot(lotsData.items[newIndex])
+    } else {
+      const newIndex = currentIndex >= totalItems - 1 ? 0 : currentIndex + 1
+      setSelectedLot(lotsData.items[newIndex])
     }
   }
 
-  // Calculate if navigation is disabled
-  const currentIndex = selectedLot && lotsData?.items
-    ? lotsData.items.findIndex(l => l.id === selectedLot.id)
-    : -1
-  const prevDisabled = currentIndex <= 0
-  const nextDisabled = currentIndex < 0 || (lotsData?.items && currentIndex >= lotsData.items.length - 1)
+  // Navigation is never disabled when looping (except if only 1 item)
+  const hasMultipleItems = (lotsData?.items?.length ?? 0) > 1
+  const prevDisabled = !hasMultipleItems
+  const nextDisabled = !hasMultipleItems
 
   return (
     <div className="mx-auto max-w-7xl p-6">

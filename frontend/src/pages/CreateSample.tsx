@@ -763,12 +763,12 @@ export function CreateSamplePage() {
   })
 
   return (
-    <div className="mx-auto max-w-7xl p-6">
+    <div className="mx-auto max-w-7xl p-6 bg-slate-50/40 min-h-screen">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.275 }}
-        className="space-y-8 max-w-3xl"
+        className="space-y-6 max-w-3xl"
       >
       {/* Header */}
       <div>
@@ -780,11 +780,11 @@ export function CreateSamplePage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Lot Type Selection */}
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-          <div className="border-b border-slate-100 px-6 py-4">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
             <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-slate-600" />
-              <h2 className="font-semibold text-slate-900 text-[15px]">Lot Type</h2>
+              <Package className="h-5 w-5 text-slate-500" />
+              <h2 className="font-semibold text-slate-800 text-[15px]">Lot Type</h2>
             </div>
             <p className="mt-1 text-[13px] text-slate-500">
               Select the type of lot you're creating
@@ -815,11 +815,11 @@ export function CreateSamplePage() {
 
         {/* STANDARD: Combined Product + Lot Details */}
         {watchedLotType === "standard" && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="border-b border-slate-100 px-6 py-4">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Beaker className="h-5 w-5 text-slate-600" />
-                <h2 className="font-semibold text-slate-900 text-[15px]">Lot Details</h2>
+                <Beaker className="h-5 w-5 text-slate-500" />
+                <h2 className="font-semibold text-slate-800 text-[15px]">Lot Details</h2>
               </div>
             </div>
             <div className="p-6 space-y-4">
@@ -970,11 +970,11 @@ export function CreateSamplePage() {
 
         {/* Lab Reference # Autogeneration - separate block */}
         {watchedLotType === "standard" && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="border-b border-slate-100 px-6 py-4">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-slate-600" />
-                <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference #</h2>
+                <Package className="h-5 w-5 text-slate-500" />
+                <h2 className="font-semibold text-slate-800 text-[15px]">Lab Reference #</h2>
               </div>
               <p className="mt-1 text-[13px] text-slate-500">
                 Auto-generated as YYMMDD-XXX unless specified
@@ -1013,11 +1013,11 @@ export function CreateSamplePage() {
         {watchedLotType === "parent_lot" && (
           <>
             {/* Parent Lot Details */}
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-              <div className="border-b border-slate-100 px-6 py-4">
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
                 <div className="flex items-center gap-2">
-                  <Beaker className="h-5 w-5 text-slate-600" />
-                  <h2 className="font-semibold text-slate-900 text-[15px]">Parent Lot Details</h2>
+                  <Beaker className="h-5 w-5 text-slate-500" />
+                  <h2 className="font-semibold text-slate-800 text-[15px]">Parent Lot Details</h2>
                 </div>
               </div>
               <div className="p-6 space-y-4">
@@ -1168,8 +1168,8 @@ export function CreateSamplePage() {
             </div>
 
             {/* Sub-Batches Grid */}
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-              <div className="border-b border-slate-100 px-6 py-4">
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-semibold text-slate-900 text-[15px]">Sub-Batches</h2>
@@ -1225,8 +1225,8 @@ export function CreateSamplePage() {
 
         {/* multi_sku_composite: Composite Products Grid */}
         {watchedLotType === "multi_sku_composite" && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="border-b border-slate-100 px-6 py-4">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-semibold text-slate-900 text-[15px]">Composite Batch Details</h2>
@@ -1281,11 +1281,11 @@ export function CreateSamplePage() {
 
         {/* multi_sku_composite: Lab Reference & Exp Date */}
         {watchedLotType === "multi_sku_composite" && (
-          <div data-section="lab-reference" className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="border-b border-slate-100 px-6 py-4">
+          <div data-section="lab-reference" className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-slate-600" />
-                <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference & Expiration</h2>
+                <Package className="h-5 w-5 text-slate-500" />
+                <h2 className="font-semibold text-slate-800 text-[15px]">Lab Reference & Expiration</h2>
               </div>
             </div>
             <div className="p-6">

@@ -105,6 +105,8 @@ export function useSubmitForReview() {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      // Invalidate release queue so it auto-refreshes when navigating there
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
     },
   })
 }

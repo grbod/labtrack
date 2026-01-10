@@ -14,16 +14,16 @@ import {
 import { cn } from "@/lib/utils"
 import type { LotWithProductSpecs, LotStatus } from "@/types"
 
-/** Status label configuration */
+/** Status label configuration - colors match Kanban board columns */
 const STATUS_CONFIG: Record<LotStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
-  awaiting_results: { label: "Awaiting Results", variant: "secondary" },
-  partial_results: { label: "Partial Results", variant: "secondary" },
-  needs_attention: { label: "Needs Attention", variant: "outline", className: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-100" },
-  under_review: { label: "Under Review", variant: "default" },
-  awaiting_release: { label: "Awaiting Release", variant: "default" },
-  approved: { label: "Approved", variant: "outline" },
-  released: { label: "Released", variant: "outline" },
-  rejected: { label: "Rejected", variant: "destructive" },
+  awaiting_results: { label: "Awaiting Results", variant: "outline", className: "bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-100" },
+  partial_results: { label: "Partial Results", variant: "outline", className: "bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100" },
+  needs_attention: { label: "Needs Attention", variant: "outline", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-100" },
+  under_review: { label: "Under Review", variant: "outline", className: "bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-100" },
+  awaiting_release: { label: "Awaiting Release", variant: "outline", className: "bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100" },
+  approved: { label: "Approved", variant: "outline", className: "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100" },
+  released: { label: "Released", variant: "outline", className: "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-100" },
+  rejected: { label: "Rejected", variant: "outline", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-100" },
 }
 
 interface SampleModalHeaderProps {

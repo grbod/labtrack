@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Loader2, Lock, AlertTriangle, FileText, Upload, X } from "lucide-react"
 import { toast } from "sonner"
+import SimpleBar from "simplebar-react"
+import "simplebar-react/dist/simplebar.min.css"
 
 import { SampleModalHeader } from "./SampleModalHeader"
 import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTable"
@@ -558,7 +560,8 @@ export function SampleModal({
         )}
 
         {/* Scrollable content */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
+        <SimpleBar className="flex-1 min-h-0" style={{ maxHeight: '100%' }}>
+          <div className="px-6 py-4">
           {isLoadingResults ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
@@ -654,7 +657,8 @@ export function SampleModal({
               </div>
             </>
           )}
-        </div>
+          </div>
+        </SimpleBar>
 
         {/* Rejection dialog */}
         {showRejectDialog && (

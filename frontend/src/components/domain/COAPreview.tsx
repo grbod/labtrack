@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { toast } from "sonner"
 import { Loader2, FileText, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,13 +15,22 @@ interface COAPreviewProps {
   productId: number
   isGenerating?: boolean
   hasError?: boolean
+  scrollRef?: React.RefObject<HTMLDivElement>
 }
 
-export function COAPreview({ lotId, productId, isGenerating, hasError }: COAPreviewProps) {
+export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef }: COAPreviewProps) {
   const [zoom, setZoom] = useState(100)
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
+
+  // Combine internal ref with external scrollRef
+  const setRefs = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node
+    if (scrollRef && 'current' in scrollRef) {
+      (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = node
+    }
+  }, [scrollRef])
 
   const { data: previewData, isLoading, error } = usePreviewData(lotId, productId)
   const saveDraft = useSaveDraft()
@@ -124,7 +133,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError }: COAPrev
   return (
     <div className="flex flex-col h-full">
       {/* Header with Title and Zoom Controls */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 bg-slate-50/50 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 bg-slate-50/50 shrink-0">
         <h2 className="text-[13px] font-semibold text-slate-700">
           COA Preview
         </h2>
@@ -163,7 +172,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError }: COAPrev
       </div>
 
       {/* WYSIWYG Preview */}
-      <div ref={containerRef} className="flex-1 overflow-auto bg-slate-100 p-1">
+      <div ref={setRefs} className="flex-1 overflow-auto bg-slate-100 p-1">
         <div
           style={{
             // Set width to scaled document width so it centers properly

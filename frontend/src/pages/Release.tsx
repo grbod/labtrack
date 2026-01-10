@@ -1,9 +1,15 @@
 import { useState, useRef, useEffect } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import { motion } from "framer-motion"
-import { ArrowLeft, Loader2, AlertCircle, GripVertical } from "lucide-react"
+import { ArrowLeft, Loader2, AlertCircle, GripVertical, Keyboard } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { SourcePDFViewer } from "@/components/domain/SourcePDFViewer"
 import { COAPreview } from "@/components/domain/COAPreview"
 import { ReleaseActions } from "@/components/domain/ReleaseActions"
@@ -32,6 +38,8 @@ export function ReleasePage() {
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(50) // percentage of left two panes
   const containerRef = useRef<HTMLDivElement>(null)
+  const pdfPaneRef = useRef<HTMLDivElement>(null)
+  const coaPaneRef = useRef<HTMLDivElement>(null)
 
   // Find current position in queue for keyboard navigation
   const currentIndex = queue.findIndex(
@@ -55,6 +63,30 @@ export function ReleasePage() {
 
       if (e.key === "Escape") {
         navigate("/release")
+      } else if (e.shiftKey && e.key === "ArrowLeft") {
+        // Shift+Left: shrink PDF pane
+        e.preventDefault()
+        setLeftPanelWidth((prev) => Math.max(20, prev - 5))
+      } else if (e.shiftKey && e.key === "ArrowRight") {
+        // Shift+Right: expand PDF pane
+        e.preventDefault()
+        setLeftPanelWidth((prev) => Math.min(80, prev + 5))
+      } else if (e.shiftKey && e.altKey && e.key === "ArrowDown") {
+        // Shift+Alt+Down: scroll COA Preview pane down
+        e.preventDefault()
+        coaPaneRef.current?.scrollBy({ top: 150, behavior: 'smooth' })
+      } else if (e.shiftKey && e.altKey && e.key === "ArrowUp") {
+        // Shift+Alt+Up: scroll COA Preview pane up
+        e.preventDefault()
+        coaPaneRef.current?.scrollBy({ top: -150, behavior: 'smooth' })
+      } else if (e.shiftKey && e.key === "ArrowDown") {
+        // Shift+Down: scroll PDF pane down
+        e.preventDefault()
+        pdfPaneRef.current?.scrollBy({ top: 150, behavior: 'smooth' })
+      } else if (e.shiftKey && e.key === "ArrowUp") {
+        // Shift+Up: scroll PDF pane up
+        e.preventDefault()
+        pdfPaneRef.current?.scrollBy({ top: -150, behavior: 'smooth' })
       } else if (e.key === "ArrowLeft" && prevItem) {
         e.preventDefault()
         navigate(`/release/${prevItem.lot_id}/${prevItem.product_id}`)
@@ -65,7 +97,7 @@ export function ReleasePage() {
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [navigate, prevItem, nextItem])
+  }, [navigate, prevItem, nextItem, leftPanelWidth])
 
   // Drag handler for resizable separator
   const handleSeparatorMouseDown = (e: React.MouseEvent) => {
@@ -163,12 +195,48 @@ export function ReleasePage() {
             </h1>
           </div>
         </div>
-        <Badge
-          variant={release.status === "released" ? "emerald" : "amber"}
-          className="text-[11px]"
-        >
-          {release.status === "released" ? "Released" : "Awaiting Release"}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <Keyboard className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[12px]">
+                <div className="space-y-1">
+                  <div className="font-medium text-slate-700 mb-1.5">Keyboard Shortcuts</div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Scroll PDF</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Shift + ↑↓</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Scroll COA</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Shift + Alt + ↑↓</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Resize panes</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Shift + ←→</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Navigate queue</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">←→</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Back to queue</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Esc</kbd>
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Badge
+            variant={release.status === "released" ? "emerald" : "amber"}
+            className="text-[11px]"
+          >
+            {release.status === "released" ? "Released" : "Awaiting Release"}
+          </Badge>
+        </div>
       </div>
 
       {/* 3-Column Layout */}
@@ -180,19 +248,20 @@ export function ReleasePage() {
             className="flex flex-col min-w-0 overflow-hidden"
             style={{ width: `${leftPanelWidth}%` }}
           >
-            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50">
+            <div className="px-3 py-1.5 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
               <h2 className="text-[13px] font-semibold text-slate-700">
                 Source Documents
               </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {release.source_pdfs.length} PDF{release.source_pdfs.length !== 1 ? "s" : ""} uploaded
-              </p>
+              <span className="text-[11px] text-slate-500">
+                {release.source_pdfs.length} PDF{release.source_pdfs.length !== 1 ? "s" : ""}
+              </span>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 bg-slate-50/30">
+            <div className="flex-1 overflow-hidden p-1 bg-slate-50/30">
               <SourcePDFViewer
                 lotId={lotId}
                 productId={productId}
                 sourcePdfs={release.source_pdfs}
+                scrollRef={pdfPaneRef}
               />
             </div>
           </div>
@@ -211,7 +280,7 @@ export function ReleasePage() {
             style={{ width: `${100 - leftPanelWidth}%` }}
           >
             <div className="flex-1 overflow-hidden">
-              <COAPreview lotId={lotId} productId={productId} />
+              <COAPreview lotId={lotId} productId={productId} scrollRef={coaPaneRef} />
             </div>
           </div>
         </div>

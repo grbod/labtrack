@@ -25,6 +25,8 @@ from app.models.customer import Customer
 from app.models.coa_release import COARelease
 from app.models.email_history import EmailHistory
 from app.models.email_template import EmailTemplate
+from app.models.coa_category_order import COACategoryOrder
+from app.models.lab_info import LabInfo
 
 # Export all models and enums
 __all__ = [
@@ -55,4 +57,6 @@ __all__ = [
     "COARelease",
     "EmailHistory",
     "EmailTemplate",
+    "COACategoryOrder",
+    "LabInfo",
 ]

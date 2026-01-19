@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { releaseApi, customerApi } from "@/api/release"
+import { downloadBlob } from "@/lib/utils"
 import type { ArchiveFilters, SaveDraftData, CreateCustomerData } from "@/types/release"
 
 export const releaseKeys = {
   all: ["releases"] as const,
   queue: () => [...releaseKeys.all, "queue"] as const,
+  recentlyReleased: (days: number) => [...releaseKeys.all, "recently-released", days] as const,
   details: () => [...releaseKeys.all, "detail"] as const,
   detail: (lotId: number, productId: number) =>
     [...releaseKeys.details(), lotId, productId] as const,
@@ -25,6 +27,14 @@ export function useReleaseQueue() {
   return useQuery({
     queryKey: releaseKeys.queue(),
     queryFn: () => releaseApi.getQueue(),
+  })
+}
+
+/** Fetch recently released COAs within a given number of days */
+export function useRecentlyReleased(days: number) {
+  return useQuery({
+    queryKey: releaseKeys.recentlyReleased(days),
+    queryFn: () => releaseApi.getRecentlyReleased(days),
   })
 }
 
@@ -106,6 +116,8 @@ export function useApproveRelease() {
       queryClient.invalidateQueries({
         queryKey: releaseKeys.detail(variables.lotId, variables.productId),
       })
+      // Invalidate all recently released queries to refresh the list
+      queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "recently-released"] })
     },
   })
 }
@@ -128,6 +140,25 @@ export function useSendEmail() {
       queryClient.invalidateQueries({
         queryKey: releaseKeys.emailHistory(variables.lotId, variables.productId),
       })
+    },
+  })
+}
+
+/** Download COA mutation - fetches PDF blob and triggers download */
+export function useDownloadCoa() {
+  return useMutation({
+    mutationFn: async ({ lotId, productId }: { lotId: number; productId: number }) => {
+      const { blob, filename } = await releaseApi.downloadCoaBlob(lotId, productId)
+      downloadBlob(blob, filename)
+    },
+  })
+}
+
+/** Regenerate COA PDF mutation - forces fresh PDF generation */
+export function useRegenerateCoa() {
+  return useMutation({
+    mutationFn: async ({ lotId, productId }: { lotId: number; productId: number }) => {
+      await releaseApi.regenerateCoa(lotId, productId)
     },
   })
 }

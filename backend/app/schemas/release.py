@@ -255,6 +255,7 @@ class COAPreviewData(BaseModel):
     company_address: Optional[str] = None
     company_phone: Optional[str] = None
     company_email: Optional[str] = None
+    company_logo_url: Optional[str] = None
 
     # Product info
     product_name: str
@@ -275,3 +276,4 @@ class COAPreviewData(BaseModel):
     # Generation info
     generated_date: str
     released_by: Optional[str] = None
+    released_by_title: Optional[str] = None

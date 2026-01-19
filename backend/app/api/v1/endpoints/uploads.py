@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -90,6 +91,37 @@ async def upload_pdf(
         path=str(file_path),
         size=len(content),
         content_type=file.content_type,
+    )
+
+
+@router.get("/{filename}")
+async def get_upload(
+    filename: str,
+    current_user: CurrentUser = None,
+) -> FileResponse:
+    """Get an uploaded file by filename."""
+    upload_dir = Path(settings.upload_path) / "pdfs"
+    file_path = upload_dir / filename
+
+    # Security: ensure file is in upload directory (prevent path traversal)
+    try:
+        file_path.resolve().relative_to(upload_dir.resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename",
+        )
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=filename,
     )
 
 

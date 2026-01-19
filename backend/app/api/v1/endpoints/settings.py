@@ -1,15 +1,27 @@
 """Settings management endpoints."""
 
-from fastapi import APIRouter
+from typing import List
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, status
 
 from app.dependencies import DbSession, CurrentUser, AdminUser
 from app.services.email_template_service import EmailTemplateService
+from app.services.coa_category_order_service import coa_category_order_service
+from app.services.lab_info_service import lab_info_service
 from app.schemas.email_template import (
     EmailTemplateResponse,
     EmailTemplateUpdate,
     EmailTemplateVariablesResponse,
     EmailTemplateVariable,
     EmailTemplatePreview,
+)
+from app.schemas.coa_category_order import (
+    COACategoryOrderResponse,
+    COACategoryOrderUpdate,
+)
+from app.schemas.lab_info import (
+    LabInfoResponse,
+    LabInfoUpdate,
 )
 
 router = APIRouter()
@@ -88,3 +100,199 @@ async def preview_email_template(
     subject, body = email_template_service.render(temp_template, sample_context)
 
     return EmailTemplatePreview(subject=subject, body=body)
+
+
+# COA Category Order Endpoints
+
+
+@router.get("/coa-category-order", response_model=COACategoryOrderResponse)
+async def get_coa_category_order(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> COACategoryOrderResponse:
+    """Get the current COA category display order."""
+    order = coa_category_order_service.get_or_create_default(db)
+    return COACategoryOrderResponse.model_validate(order)
+
+
+@router.put("/coa-category-order", response_model=COACategoryOrderResponse)
+async def update_coa_category_order(
+    order_in: COACategoryOrderUpdate,
+    db: DbSession,
+    current_user: AdminUser,
+) -> COACategoryOrderResponse:
+    """Update the COA category display order (admin only)."""
+    order = coa_category_order_service.update_order(
+        db=db,
+        category_order=order_in.category_order,
+        user_id=current_user.id,
+    )
+    return COACategoryOrderResponse.model_validate(order)
+
+
+@router.post("/coa-category-order/reset", response_model=COACategoryOrderResponse)
+async def reset_coa_category_order(
+    db: DbSession,
+    current_user: AdminUser,
+) -> COACategoryOrderResponse:
+    """Reset the COA category order to defaults (admin only)."""
+    order = coa_category_order_service.reset_to_defaults(
+        db=db,
+        user_id=current_user.id,
+    )
+    return COACategoryOrderResponse.model_validate(order)
+
+
+@router.get("/coa-category-order/active-categories", response_model=List[str])
+async def get_active_categories_ordered(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> List[str]:
+    """Get all active categories in configured display order."""
+    return coa_category_order_service.get_all_active_categories_ordered(db)
+
+
+# Lab Info Endpoints
+
+def _build_lab_info_response(lab_info) -> LabInfoResponse:
+    """Build LabInfoResponse with computed logo_url and signature_url."""
+    return LabInfoResponse(
+        id=lab_info.id,
+        company_name=lab_info.company_name,
+        address=lab_info.address,
+        city=lab_info.city,
+        state=lab_info.state,
+        zip_code=lab_info.zip_code,
+        phone=lab_info.phone,
+        email=lab_info.email,
+        logo_url=lab_info_service.get_logo_url(lab_info.logo_path),
+        signature_url=lab_info_service.get_signature_url(lab_info.signature_path),
+        signer_name=lab_info.signer_name,
+        require_pdf_for_submission=lab_info.require_pdf_for_submission,
+        created_at=lab_info.created_at,
+        updated_at=lab_info.updated_at,
+    )
+
+
+@router.get("/lab-info", response_model=LabInfoResponse)
+async def get_lab_info(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> LabInfoResponse:
+    """Get the current lab information for COAs."""
+    lab_info = lab_info_service.get_or_create_default(db)
+    return _build_lab_info_response(lab_info)
+
+
+@router.put("/lab-info", response_model=LabInfoResponse)
+async def update_lab_info(
+    lab_info_in: LabInfoUpdate,
+    db: DbSession,
+    current_user: AdminUser,
+) -> LabInfoResponse:
+    """Update lab information (admin only). Phone/email are per-user, not here."""
+    lab_info = lab_info_service.update_info(
+        db=db,
+        company_name=lab_info_in.company_name,
+        address=lab_info_in.address,
+        city=lab_info_in.city,
+        state=lab_info_in.state,
+        zip_code=lab_info_in.zip_code,
+        require_pdf_for_submission=lab_info_in.require_pdf_for_submission,
+        user_id=current_user.id,
+    )
+    return _build_lab_info_response(lab_info)
+
+
+@router.post("/lab-info/logo", response_model=LabInfoResponse)
+async def upload_logo(
+    db: DbSession,
+    current_user: AdminUser,
+    file: UploadFile = File(...),
+) -> LabInfoResponse:
+    """Upload company logo (admin only)."""
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}",
+        )
+
+    # Validate file size (max 2MB)
+    max_size = 2 * 1024 * 1024  # 2MB
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 2MB.",
+        )
+
+    lab_info = lab_info_service.update_logo(
+        db=db,
+        file_content=content,
+        filename=file.filename or "logo.png",
+        content_type=file.content_type,
+        user_id=current_user.id,
+    )
+    return _build_lab_info_response(lab_info)
+
+
+@router.delete("/lab-info/logo", response_model=LabInfoResponse)
+async def delete_logo(
+    db: DbSession,
+    current_user: AdminUser,
+) -> LabInfoResponse:
+    """Delete company logo (admin only)."""
+    lab_info = lab_info_service.delete_logo(
+        db=db,
+        user_id=current_user.id,
+    )
+    return _build_lab_info_response(lab_info)
+
+
+@router.post("/lab-info/signature", response_model=LabInfoResponse)
+async def upload_signature(
+    db: DbSession,
+    current_user: AdminUser,
+    file: UploadFile = File(...),
+) -> LabInfoResponse:
+    """Upload signature image (admin only)."""
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}",
+        )
+
+    # Validate file size (max 2MB)
+    max_size = 2 * 1024 * 1024  # 2MB
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 2MB.",
+        )
+
+    lab_info = lab_info_service.update_signature(
+        db=db,
+        file_content=content,
+        filename=file.filename or "signature.png",
+        content_type=file.content_type,
+        user_id=current_user.id,
+    )
+    return _build_lab_info_response(lab_info)
+
+
+@router.delete("/lab-info/signature", response_model=LabInfoResponse)
+async def delete_signature(
+    db: DbSession,
+    current_user: AdminUser,
+) -> LabInfoResponse:
+    """Delete signature image (admin only)."""
+    lab_info = lab_info_service.delete_signature(
+        db=db,
+        user_id=current_user.id,
+    )
+    return _build_lab_info_response(lab_info)

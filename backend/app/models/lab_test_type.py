@@ -1,5 +1,6 @@
 """Lab Test Type model for managing test catalog."""
 
+from datetime import datetime
 from sqlalchemy import (
     Column,
     String,
@@ -7,6 +8,9 @@ from sqlalchemy import (
     Boolean,
     Index,
     CheckConstraint,
+    DateTime,
+    Integer,
+    ForeignKey,
     event
 )
 from sqlalchemy.orm import relationship, validates
@@ -42,14 +46,20 @@ class LabTestType(BaseModel):
     abbreviations = Column(Text, nullable=True)  # JSON array of alternative names
     default_specification = Column(String(100), nullable=True)  # Default spec like "< 10,000 CFU/g"
     is_active = Column(Boolean, default=True, nullable=False)
-    
+
+    # Archive metadata fields
+    archived_at = Column(DateTime, nullable=True)
+    archived_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    archive_reason = Column(String(500), nullable=True)
+
     # Relationships
     product_specifications = relationship(
         "ProductTestSpecification",
         back_populates="lab_test_type",
         cascade="all, delete-orphan"
     )
-    
+    archived_by = relationship("User", foreign_keys=[archived_by_id])
+
     # Indexes for performance
     __table_args__ = (
         Index("idx_test_name", "test_name"),
@@ -126,7 +136,32 @@ class LabTestType(BaseModel):
     def get_products_using_test(self):
         """Get all products that use this test type."""
         return [spec.product for spec in self.product_specifications if spec.product]
-    
+
+    def archive(self, user_id: int, reason: str):
+        """
+        Archive this lab test type (soft delete).
+
+        Args:
+            user_id: ID of the user performing the archive
+            reason: Reason for archiving (required)
+        """
+        self.is_active = False
+        self.archived_at = datetime.utcnow()
+        self.archived_by_id = user_id
+        self.archive_reason = reason
+
+    def restore(self):
+        """Restore an archived lab test type back to active status."""
+        self.is_active = True
+        self.archived_at = None
+        self.archived_by_id = None
+        self.archive_reason = None
+
+    @property
+    def is_archived(self) -> bool:
+        """Check if this lab test type is archived."""
+        return not self.is_active
+
     def __repr__(self):
         """String representation of LabTestType."""
         return (

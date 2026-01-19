@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
@@ -6,16 +6,18 @@ import {
   FlaskConical,
   TestTube,
   ShieldCheck,
-  Grid3x3,
   ClipboardList,
   FileCheck,
   Archive,
   Users,
+  UserCog,
   Settings,
   PanelLeftClose,
   PanelLeft,
+  FolderArchive,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAuthStore } from "@/store/auth"
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed"
 
@@ -28,6 +30,7 @@ interface NavItem {
 interface NavSection {
   title: string
   items: NavItem[]
+  adminOnly?: boolean
 }
 
 const navSections: NavSection[] = [
@@ -51,13 +54,15 @@ const navSections: NavSection[] = [
       { label: "Create Sample", href: "/samples", icon: <TestTube className="h-[18px] w-[18px]" /> },
       { label: "Sample Tracker", href: "/tracker", icon: <ClipboardList className="h-[18px] w-[18px]" /> },
       { label: "Release Queue", href: "/release", icon: <FileCheck className="h-[18px] w-[18px]" /> },
-      { label: "Archive", href: "/archive", icon: <Archive className="h-[18px] w-[18px]" /> },
+      { label: "History", href: "/archive", icon: <Archive className="h-[18px] w-[18px]" /> },
     ],
   },
   {
-    title: "Development",
+    title: "Admin",
+    adminOnly: true,
     items: [
-      { label: "Grid Showcase", href: "/grid-showcase", icon: <Grid3x3 className="h-[18px] w-[18px]" /> },
+      { label: "User Management", href: "/users", icon: <UserCog className="h-[18px] w-[18px]" /> },
+      { label: "Audit Trail", href: "/archived", icon: <FolderArchive className="h-[18px] w-[18px]" /> },
     ],
   },
   {
@@ -69,6 +74,7 @@ const navSections: NavSection[] = [
 ]
 
 export function Sidebar() {
+  const { user } = useAuthStore()
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
     return saved === "true"
@@ -77,6 +83,12 @@ export function Sidebar() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed))
   }, [isCollapsed])
+
+  // Filter sections based on user role
+  const isAdmin = user?.role === "admin" || user?.role === "qc_manager"
+  const filteredSections = useMemo(() => {
+    return navSections.filter((section) => !section.adminOnly || isAdmin)
+  }, [isAdmin])
 
   return (
     <aside
@@ -120,7 +132,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className={cn("flex-1 overflow-y-auto py-5", isCollapsed ? "px-2" : "px-3")}>
-        {navSections.map((section, idx) => (
+        {filteredSections.map((section, idx) => (
           <div key={idx} className={cn(idx > 0 && "mt-7")}>
             {section.title && !isCollapsed && (
               <div className="mb-2.5 px-3">

@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { Product, ProductSize, ProductWithSpecs, ProductTestSpecification, PaginatedResponse } from "@/types"
+import type { Product, ProductSize, ProductWithSpecs, ProductTestSpecification, PaginatedResponse, ArchiveRequest } from "@/types"
 
 export interface ProductFilters {
   page?: number
@@ -16,6 +16,7 @@ export interface CreateProductData {
   display_name: string
   serving_size?: string  // e.g., "30g", "2 capsules", "1 tsp"
   expiry_duration_months?: number
+  version?: string  // e.g., "v1", "v2.1"
 }
 
 export interface UpdateProductData extends Partial<CreateProductData> {}
@@ -39,6 +40,7 @@ export interface BulkImportProductRow {
   size?: string
   serving_size?: string
   expiry_duration_months?: number
+  version?: string
 }
 
 export interface BulkImportResult {
@@ -88,8 +90,24 @@ export const productsApi = {
     return response.data
   },
 
-  delete: async (id: number): Promise<void> => {
-    await api.delete(`/products/${id}`)
+  archive: async (id: number, data: ArchiveRequest): Promise<Product> => {
+    const response = await api.delete<Product>(`/products/${id}`, { data })
+    return response.data
+  },
+
+  restore: async (id: number): Promise<Product> => {
+    const response = await api.post<Product>(`/products/${id}/restore`)
+    return response.data
+  },
+
+  listArchived: async (filters: Omit<ProductFilters, 'brand'> = {}): Promise<PaginatedResponse<Product>> => {
+    const params = new URLSearchParams()
+    if (filters.page) params.append("page", filters.page.toString())
+    if (filters.page_size) params.append("page_size", filters.page_size.toString())
+    if (filters.search) params.append("search", filters.search)
+
+    const response = await api.get<PaginatedResponse<Product>>(`/products/archived?${params}`)
+    return response.data
   },
 
   // Get product with test specifications

@@ -49,6 +49,9 @@ class LabTestTypeResponse(BaseModel):
     abbreviations: Optional[str] = None
     default_specification: Optional[str] = None
     is_active: bool
+    archived_at: Optional[datetime] = None
+    archived_by_id: Optional[int] = None
+    archive_reason: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

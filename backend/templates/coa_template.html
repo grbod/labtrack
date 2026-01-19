@@ -229,15 +229,11 @@
   <!-- Header -->
   <div class="header">
     <div class="company-info">
+      {% if company_logo_url %}
+      <img src="{{ company_logo_url }}" alt="{{ company_name }}" class="company-logo" style="max-height: 100px; max-width: 250px; width: auto; height: auto; object-fit: contain; margin-bottom: 8px;" />
+      {% endif %}
       <h1>{{ company_name or 'Company Name' }}</h1>
       {% if company_address %}<p>{{ company_address }}</p>{% endif %}
-      {% if company_phone or company_email %}
-      <p>
-        {% if company_phone %}Tel: {{ company_phone }}{% endif %}
-        {% if company_phone and company_email %} | {% endif %}
-        {% if company_email %}Email: {{ company_email }}{% endif %}
-      </p>
-      {% endif %}
     </div>
     <div class="document-title">
       <h2>Certificate of Analysis</h2>
@@ -331,6 +327,15 @@
       <p>Document ID: COA-{{ reference_number }}-{{ generated_date | replace(' ', '') | replace(',', '') }}</p>
       {% if released_by %}
       <p>Released by: {{ released_by }}</p>
+      {% if released_by_title %}<p>{{ released_by_title }}</p>{% endif %}
+      {% if released_at %}<p>Date: {{ released_at }}</p>{% endif %}
+      {% if released_by_phone or released_by_email %}
+      <p>
+        {% if released_by_phone %}Tel: {{ released_by_phone }}{% endif %}
+        {% if released_by_phone and released_by_email %} | {% endif %}
+        {% if released_by_email %}{{ released_by_email }}{% endif %}
+      </p>
+      {% endif %}
       {% endif %}
     </div>
     <div class="signature-line">

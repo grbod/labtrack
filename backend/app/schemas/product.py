@@ -54,6 +54,7 @@ class ProductBase(BaseModel):
     display_name: str = Field(..., min_length=1)
     serving_size: Optional[str] = Field(None, max_length=50)  # e.g., "30g", "2 capsules"
     expiry_duration_months: int = Field(default=36, gt=0)
+    version: Optional[str] = Field(None, max_length=20)  # e.g., "v1", "v2.1"
 
 
 class ProductCreate(ProductBase):
@@ -72,6 +73,7 @@ class ProductUpdate(BaseModel):
     display_name: Optional[str] = Field(None, min_length=1)
     serving_size: Optional[str] = Field(None, max_length=50)
     expiry_duration_months: Optional[int] = Field(None, gt=0)
+    version: Optional[str] = Field(None, max_length=20)
     is_active: Optional[bool] = None
 
 
@@ -117,6 +119,11 @@ class ProductResponse(BaseModel):
     display_name: str
     serving_size: Optional[str] = None
     expiry_duration_months: int
+    version: Optional[str] = None
+    is_active: bool = True
+    archived_at: Optional[datetime] = None
+    archived_by_id: Optional[int] = None
+    archive_reason: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -149,6 +156,7 @@ class ProductBulkImportRow(BaseModel):
     display_name: str
     serving_size: Optional[str] = None
     expiry_duration_months: int = 36
+    version: Optional[str] = None
 
     @field_validator("brand", "product_name", "display_name", mode="before")
     @classmethod
@@ -165,3 +173,9 @@ class ProductBulkImportResult(BaseModel):
     imported: int
     skipped: int
     errors: List[str]
+
+
+class ArchiveRequest(BaseModel):
+    """Schema for archiving a product, lab test type, or customer."""
+
+    reason: str = Field(..., min_length=1, max_length=500)

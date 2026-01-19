@@ -1,5 +1,5 @@
 import axios from "axios"
-import type { Token, User, LoginCredentials } from "@/types"
+import type { Token, User, LoginCredentials, UserProfileUpdate } from "@/types"
 
 const API_BASE_URL = "/api/v1"
 
@@ -86,4 +86,41 @@ export const authApi = {
     })
     return response.data
   },
+
+  updateProfile: async (data: UserProfileUpdate): Promise<User> => {
+    const response = await api.put<User>("/auth/me/profile", data)
+    return response.data
+  },
+
+  uploadSignature: async (file: File): Promise<User> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.post<User>("/auth/me/signature", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    return response.data
+  },
+
+  deleteSignature: async (): Promise<User> => {
+    const response = await api.delete<User>("/auth/me/signature")
+    return response.data
+  },
+
+  verifyOverride: async (username: string, password: string): Promise<VerifyOverrideResponse> => {
+    const formData = new URLSearchParams()
+    formData.append("username", username)
+    formData.append("password", password)
+
+    const response = await api.post<VerifyOverrideResponse>("/auth/verify-override", formData, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    })
+    return response.data
+  },
+}
+
+export interface VerifyOverrideResponse {
+  valid: boolean
+  user_id: number | null
+  role: string | null
+  message: string
 }

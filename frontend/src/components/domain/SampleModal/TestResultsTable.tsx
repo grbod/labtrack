@@ -154,8 +154,9 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
 
       // Check bounds
       if (nextRowIndex < 0) {
-        // At beginning, stay on first cell
-        return
+        // At beginning, loop to last cell
+        nextRowIndex = testResults.length - 1
+        nextColIndex = EDITABLE_COLUMNS.length - 1
       }
 
       if (nextRowIndex >= testResults.length) {
@@ -229,8 +230,9 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
 
     // Check bounds
     if (nextRowIndex < 0) {
-      // At beginning, stay on first cell
-      return
+      // At beginning, loop to last cell
+      nextRowIndex = testResults.length - 1
+      nextColIndex = EDITABLE_COLUMNS.length - 1
     }
 
     if (nextRowIndex >= testResults.length) {

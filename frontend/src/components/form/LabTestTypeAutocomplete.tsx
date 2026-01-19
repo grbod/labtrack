@@ -122,12 +122,9 @@ export function LabTestTypeAutocomplete({
     whileElementsMounted: autoUpdate,
   })
 
-  const { ref: downshiftMenuRef, ...menuProps } = getMenuProps()
-  const mergedMenuRef = useMergeRefs([
-    refs.setFloating,
-    downshiftMenuRef,
-    listRef,
-  ])
+  // Merge Floating UI ref with local scroll ref, then pass to downshift
+  const floatingRef = useMergeRefs([refs.setFloating, listRef])
+  const menuProps = getMenuProps({ ref: floatingRef })
 
   // Clear local input when value is cleared externally
   useEffect(() => {
@@ -242,9 +239,8 @@ export function LabTestTypeAutocomplete({
 
       <FloatingPortal>
         <ul
-          ref={mergedMenuRef}
           {...menuProps}
-          style={floatingStyles}
+          style={{ ...floatingStyles, pointerEvents: 'auto' }}
           className={`z-[9999] bg-white border border-slate-200 rounded-lg shadow-lg max-h-[280px] overflow-y-auto ${
             !showDropdown ? 'hidden' : ''
           }`}
@@ -266,11 +262,15 @@ export function LabTestTypeAutocomplete({
                         ? 'bg-slate-100'
                         : 'hover:bg-slate-50'
                     }`}
-                    onClick={(e) => {
-                      if (isExcluded) {
-                        e.preventDefault()
-                        e.stopPropagation()
-                      }
+                    onMouseDown={(e) => {
+                      // Use mousedown to handle selection before blur events
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (isExcluded) return
+                      selectItem(labTest)
+                      onSelect(labTest)
+                      setLocalInput('')
+                      closeMenu()
                     }}
                   >
                     <div className="flex items-center justify-between">

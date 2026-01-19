@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown } from "lucide-react"
+import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown, Copy, CheckCircle2, Check } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
 
@@ -107,6 +107,28 @@ export function CreateSamplePage() {
   // Expiration date nudge factor (in days)
   const [expiryNudgeDays, setExpiryNudgeDays] = useState(0)
 
+  // Success dialog state
+  const [successData, setSuccessData] = useState<{
+    referenceNumber: string
+    brand: string
+    productName: string
+    flavorSize: string | null  // "Flavor (Size)" or just "Flavor" or "(Size)"
+    lotNumber: string
+    lotType: string
+  } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  // "Add new product" dialog state
+  const [showAddProductDialog, setShowAddProductDialog] = useState(false)
+
+  // Helper to format flavor and size for success dialog
+  const formatFlavorSize = (product: { flavor?: string | null; size?: string | null }) => {
+    const parts: string[] = []
+    if (product.flavor) parts.push(product.flavor)
+    if (product.size) parts.push(`(${product.size})`)
+    return parts.length > 0 ? parts.join(' ') : null
+  }
+
   const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
   const createMutation = useCreateLot()
   const createSublotsMutation = useCreateSublotsBulk()
@@ -145,31 +167,40 @@ export function CreateSamplePage() {
 
   // Auto-calculate exp_date when mfg_date, product, or nudge changes
   useEffect(() => {
-    if (!watchedMfgDate) {
-      setValue("exp_date", "")
-      return
-    }
-
-    // For STANDARD and parent_lot, use selectedProducts[0]
-    // For multi_sku_composite, use shortest expiry from compositeProducts
+    // For multi_sku_composite, use earliest mfg_date from composite products (no form-level mfg_date)
     if (watchedLotType === "multi_sku_composite") {
       const validProducts = compositeProducts.filter(cp => cp.product_id !== null)
       if (validProducts.length > 0 && productsData?.items) {
+        // Find earliest mfg_date from composite products
+        const earliestMfgDate = validProducts.reduce((min, cp) =>
+          cp.mfg_date < min ? cp.mfg_date : min, validProducts[0].mfg_date)
+
         // Find shortest expiry duration among selected products
         const minExpiry = validProducts.reduce((min, cp) => {
           const product = productsData.items.find(p => p.id === cp.product_id)
           return product ? Math.min(min, product.expiry_duration_months) : min
         }, Infinity)
-        if (minExpiry !== Infinity) {
-          setValue("exp_date", calculateExpiryDate(watchedMfgDate, minExpiry, expiryNudgeDays))
+
+        if (minExpiry !== Infinity && earliestMfgDate) {
+          setValue("exp_date", calculateExpiryDate(earliestMfgDate, minExpiry, expiryNudgeDays))
+        } else {
+          setValue("exp_date", "")
         }
+      } else {
+        setValue("exp_date", "")
       }
-    } else {
-      // STANDARD or parent_lot
-      if (selectedProducts.length > 0) {
-        const expiryMonths = selectedProducts[0].product.expiry_duration_months
-        setValue("exp_date", calculateExpiryDate(watchedMfgDate, expiryMonths, expiryNudgeDays))
-      }
+      return
+    }
+
+    // For STANDARD or parent_lot, use form-level mfg_date
+    if (!watchedMfgDate) {
+      setValue("exp_date", "")
+      return
+    }
+
+    if (selectedProducts.length > 0) {
+      const expiryMonths = selectedProducts[0].product.expiry_duration_months
+      setValue("exp_date", calculateExpiryDate(watchedMfgDate, expiryMonths, expiryNudgeDays))
     }
   }, [watchedMfgDate, selectedProducts, compositeProducts, watchedLotType, productsData, setValue, calculateExpiryDate, expiryNudgeDays])
 
@@ -219,7 +250,16 @@ export function CreateSamplePage() {
           })),
         })
 
-        navigate("/tracker")
+        // Show success dialog
+        const product = selectedProducts[0]?.product
+        setSuccessData({
+          referenceNumber: lot.reference_number,
+          brand: product?.brand || '',
+          productName: product?.product_name || '',
+          flavorSize: product ? formatFlavorSize(product) : null,
+          lotNumber: formData.lot_number,
+          lotType: 'Parent Lot',
+        })
       } else if (formData.lot_type === "multi_sku_composite") {
         // For multi_sku_composite: Use composite products grid data
 
@@ -261,10 +301,10 @@ export function CreateSamplePage() {
           return product ? Math.min(min, product.expiry_duration_months) : min
         }, Infinity)
         const calculatedExpDate = minExpiry !== Infinity
-          ? calculateExpiryDate(earliestMfgDate, minExpiry)
+          ? calculateExpiryDate(earliestMfgDate, minExpiry, expiryNudgeDays)
           : undefined
 
-        await createMutation.mutateAsync({
+        const compositeLot = await createMutation.mutateAsync({
           lot_number: compositeLotNumber,
           lot_type: "multi_sku_composite" as LotType,
           mfg_date: earliestMfgDate,
@@ -277,7 +317,16 @@ export function CreateSamplePage() {
           })),
         })
 
-        navigate("/tracker")
+        // Show success dialog - for composite, show product count with line breaks
+        const productNames = validProducts.map(cp => cp.product_name).join('\n')
+        setSuccessData({
+          referenceNumber: compositeLot.reference_number,
+          brand: `${validProducts.length} Products`,
+          productName: productNames,
+          flavorSize: null,
+          lotNumber: compositeLotNumber,
+          lotType: 'Multi-SKU Composite',
+        })
       } else {
         // STANDARD lot - use original logic
 
@@ -300,9 +349,19 @@ export function CreateSamplePage() {
           })),
         }
         console.log('=== STANDARD lot payload ===', JSON.stringify(payload, null, 2))
-        await createMutation.mutateAsync(payload)
-        console.log('=== Mutation succeeded, navigating ===')
-        navigate("/tracker")
+        const standardLot = await createMutation.mutateAsync(payload)
+        console.log('=== Mutation succeeded ===')
+
+        // Show success dialog
+        const stdProduct = selectedProducts[0]?.product
+        setSuccessData({
+          referenceNumber: standardLot.reference_number,
+          brand: stdProduct?.brand || '',
+          productName: stdProduct?.product_name || '',
+          flavorSize: stdProduct ? formatFlavorSize(stdProduct) : null,
+          lotNumber: formData.lot_number,
+          lotType: 'Standard',
+        })
       }
     } catch (error: any) {
       console.error('=== Submit error ===', error)
@@ -412,6 +471,7 @@ export function CreateSamplePage() {
               }
               // If first row, don't prevent default - let browser handle natural tab order
             }}
+            onNoProductsEnter={() => setShowAddProductDialog(true)}
           />
         )
       },
@@ -860,6 +920,7 @@ export function CreateSamplePage() {
                           }
                         }}
                         onBlur={() => setStandardProductTouched(true)}
+                        onNoProductsEnter={() => setShowAddProductDialog(true)}
                       />
                     </div>
                     {showError ? (
@@ -1055,6 +1116,7 @@ export function CreateSamplePage() {
                             }
                           }}
                           onBlur={() => setParentProductTouched(true)}
+                          onNoProductsEnter={() => setShowAddProductDialog(true)}
                         />
                       </div>
                       {showError ? (
@@ -1438,6 +1500,138 @@ export function CreateSamplePage() {
               className="border-slate-200 h-10"
             >
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog */}
+      <Dialog open={!!successData} onOpenChange={(open) => !open && setSuccessData(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-green-600 flex items-center gap-2 text-[18px]">
+              <CheckCircle2 className="h-5 w-5" />
+              Sample Created Successfully
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Large reference number with copy button */}
+            <div className="bg-slate-100 rounded-lg p-4 text-center">
+              <p className="text-sm text-slate-500 mb-1">Lot Reference</p>
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-2xl font-mono font-bold text-slate-900">
+                  {successData?.referenceNumber}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => {
+                    navigator.clipboard.writeText(successData?.referenceNumber || '')
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4 text-slate-500" />
+                  )}
+                </Button>
+              </div>
+              {copied && (
+                <p className="text-xs text-green-600 mt-1">Copied to clipboard!</p>
+              )}
+            </div>
+
+            {/* Additional details */}
+            <div className="text-sm space-y-2 px-1">
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500 flex-shrink-0">Product</span>
+                <div className="text-right">
+                  <span className="font-medium text-slate-900 block">
+                    {successData?.brand}
+                  </span>
+                  <span className="text-slate-700 text-[13px] whitespace-pre-line">
+                    {successData?.productName}
+                  </span>
+                  {successData?.flavorSize && (
+                    <span className="text-slate-600 text-[13px] block">
+                      {successData.flavorSize}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Lot Number</span>
+                <span className="font-medium text-slate-900">{successData?.lotNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Type</span>
+                <span className="font-medium text-slate-900">{successData?.lotType}</span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              className="border-slate-200"
+              onClick={() => {
+                setSuccessData(null)
+                setCopied(false)
+                form.reset()
+                setSelectedProducts([])
+                setStandardProductText('')
+                setParentProductText('')
+                setSubBatches([{ id: 1, mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }])
+                setNextSubBatchId(2)
+                setCompositeProducts([{ id: 1, product_id: null, product_name: '', mfg_date: new Date().toISOString().split('T')[0], batch_number: '' }])
+                setNextCompositeId(2)
+                setExpiryNudgeDays(0)
+              }}
+            >
+              Create Another
+            </Button>
+            <Button
+              className="bg-slate-900 hover:bg-slate-800 text-white"
+              onClick={() => navigate(`/tracker?highlight=${successData?.referenceNumber}`)}
+            >
+              View in Tracker
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add New Product Dialog */}
+      <Dialog open={showAddProductDialog} onOpenChange={setShowAddProductDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-slate-900 text-[18px]">Product Not Found</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              No matching product was found in your catalog. Would you like to add a new product?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowAddProductDialog(false)}
+              className="border-slate-200"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-slate-900 hover:bg-slate-800 text-white"
+              onClick={() => {
+                setShowAddProductDialog(false)
+                navigate('/products?addNew=true')
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add New Product
             </Button>
           </DialogFooter>
         </DialogContent>

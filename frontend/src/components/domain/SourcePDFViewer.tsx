@@ -12,7 +12,7 @@ interface SourcePDFViewerProps {
   lotId: number
   productId: number
   sourcePdfs: string[]
-  scrollRef?: React.RefObject<HTMLDivElement>
+  scrollRef?: React.RefObject<HTMLDivElement | null>
 }
 
 interface PdfData {

@@ -12,10 +12,21 @@ export interface User {
   username: string
   email: string | null
   full_name: string | null
+  title: string | null
+  phone: string | null
+  signature_url: string | null
   role: UserRole
   is_active: boolean
   created_at: string
   updated_at: string | null
+}
+
+// User profile update
+export interface UserProfileUpdate {
+  full_name?: string | null
+  title?: string | null
+  phone?: string | null
+  email?: string | null
 }
 
 // Auth types
@@ -47,6 +58,11 @@ export interface Product {
   display_name: string
   serving_size: string | null  // e.g., "30g", "2 capsules", "1 tsp"
   expiry_duration_months: number
+  version: string | null  // e.g., "v1", "v2.1"
+  is_active: boolean
+  archived_at: string | null
+  archived_by_id: number | null
+  archive_reason: string | null
   created_at: string
   updated_at: string | null
 }
@@ -142,6 +158,9 @@ export interface LabTestType {
   abbreviations: string | null
   default_specification: string | null
   is_active: boolean
+  archived_at: string | null
+  archived_by_id: number | null
+  archive_reason: string | null
   created_at: string
   updated_at: string | null
 }
@@ -209,6 +228,70 @@ export interface Customer {
   contact_name: string
   email: string
   is_active: boolean
+  archived_at: string | null
+  archived_by_id: number | null
+  archive_reason: string | null
   created_at: string
   updated_at: string | null
+}
+
+// Archive request type
+export interface ArchiveRequest {
+  reason: string
+}
+
+// COA Category Order types
+export interface COACategoryOrder {
+  id: number
+  category_order: string[]
+  created_at: string
+  updated_at: string | null
+}
+
+// Audit types
+export type AuditAction = 'insert' | 'update' | 'delete' | 'approve' | 'reject' | 'override'
+
+export interface AuditLogEntry {
+  id: number
+  action: AuditAction
+  timestamp: string
+  user_id: number | null
+  username: string | null
+  old_values: Record<string, unknown> | null
+  new_values: Record<string, unknown> | null
+  changes: Record<string, { from: unknown; to: unknown }>
+  reason: string | null
+  ip_address: string | null
+  table_name: string
+  record_id: number
+}
+
+export interface AuditHistoryResponse {
+  items: AuditLogEntry[]
+  total: number
+  table_name: string
+  record_id: number
+}
+
+export interface LotAuditHistoryResponse {
+  items: AuditLogEntry[]
+  total: number
+  lot_id: number
+  tables_included: string[]
+}
+
+// Archived lot types
+export interface ArchivedLot {
+  lot_id: number
+  product_id: number
+  reference_number: string
+  lot_number: string
+  product_name: string
+  brand: string
+  flavor: string | null
+  size: string | null
+  status: 'released' | 'rejected'
+  completed_at: string
+  customer_name: string | null
+  rejection_reason: string | null
 }

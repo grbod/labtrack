@@ -1,11 +1,12 @@
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical, ArrowRight, ChevronDown } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical, ChevronDown, ChevronUp } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -62,6 +63,8 @@ const labTestTypeSchema = z.object({
 })
 
 type LabTestTypeForm = z.infer<typeof labTestTypeSchema>
+type SortField = "test_name" | "test_category"
+type SortDirection = "asc" | "desc"
 
 export function LabTestTypesPage() {
   const [page, setPage] = useState(1)
@@ -70,6 +73,10 @@ export function LabTestTypesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingType, setEditingType] = useState<LabTestType | null>(null)
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false)
+
+  // Sorting state
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
 
   const { data, isLoading } = useLabTestTypes({
     page,
@@ -101,6 +108,29 @@ export function LabTestTypesPage() {
     if (watchedUnit) result += ` ${watchedUnit}`
     return result || '-'
   }
+
+  // Sort handler
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+    } else {
+      // Set new field with ascending direction
+      setSortField(field)
+      setSortDirection("asc")
+    }
+  }
+
+  // Sorted items
+  const sortedItems = useMemo(() => {
+    if (!sortField || !data?.items) return data?.items
+    return [...data.items].sort((a, b) => {
+      const aVal = a[sortField] || ""
+      const bVal = b[sortField] || ""
+      const cmp = aVal.localeCompare(bVal)
+      return sortDirection === "asc" ? cmp : -cmp
+    })
+  }, [data?.items, sortField, sortDirection])
 
   const openCreateDialog = () => {
     setEditingType(null)
@@ -178,6 +208,25 @@ export function LabTestTypesPage() {
     return colors[category] || "bg-slate-100 text-slate-600"
   }
 
+  // Sortable header component
+  const SortableHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <TableHead
+      onClick={() => handleSort(field)}
+      className="font-semibold text-slate-600 text-[13px] tracking-wide cursor-pointer hover:bg-slate-100/50 select-none"
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {sortField === field && (
+          sortDirection === "asc" ? (
+            <ChevronUp className="h-4 w-4 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-slate-500" />
+          )
+        )}
+      </div>
+    </TableHead>
+  )
+
   return (
     <div className="mx-auto max-w-7xl p-6">
       <motion.div
@@ -202,183 +251,176 @@ export function LabTestTypesPage() {
       </div>
 
       {/* Category Filter */}
-      {categories && categories.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          <Button
-            variant={categoryFilter === "" ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setCategoryFilter("")
-              setPage(1)
-            }}
-            className={categoryFilter === "" ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
-          >
-            All
-          </Button>
-          {categories.map((cat) => (
-            <Button
-              key={cat.category}
-              variant={categoryFilter === cat.category ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setCategoryFilter(cat.category)
-                setPage(1)
-              }}
-              className={categoryFilter === cat.category ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
-            >
-              {cat.category} ({cat.count})
-            </Button>
-          ))}
-        </div>
-      )}
-
-      {/* Search */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder="Search test types..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setPage(1)
-            }}
-            className="pl-10 h-11 bg-white border-slate-200 rounded-lg shadow-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-shadow"
-          />
-        </div>
-        <span className="text-[14px] font-medium text-slate-500">{data?.total ?? 0} test types</span>
-      </div>
-
-      {/* Bulk Import */}
-      <Collapsible open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
-        <CollapsibleTrigger asChild>
-          <Button
-            variant="outline"
-            className="w-full justify-between h-11 bg-white hover:bg-slate-50"
-          >
-            <span className="font-semibold text-slate-700">📊 Bulk Import Lab Test Types</span>
-            <ChevronDown
-              className={`h-4 w-4 transition-transform ${
-                isBulkImportOpen ? "rotate-180" : ""
-              }`}
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-4">
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
-            <LabTestTypeBulkImport />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* Table */}
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
-          </div>
-        ) : data?.items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
-              <FlaskConical className="h-8 w-8 text-slate-400" />
-            </div>
-            <p className="mt-5 text-[15px] font-medium text-slate-600">No lab test types found</p>
-            <p className="mt-1 text-[14px] text-slate-500">Get started by adding your first test type</p>
-            <button
-              onClick={openCreateDialog}
-              className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-            >
-              Add your first test type
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Test Name</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Category</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Method</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Unit</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Default Spec</TableHead>
-                <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.items.map((testType) => (
-                <TableRow key={testType.id} className="hover:bg-slate-50/50 transition-colors">
-                  <TableCell>
-                    <div>
-                      <span className="font-semibold text-slate-900 text-[14px]">{testType.test_name}</span>
-                    </div>
-                    {testType.description && (
-                      <p className="text-[12px] text-slate-500 truncate max-w-xs mt-0.5">{testType.description}</p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${getCategoryColor(testType.test_category)}`}>
-                      {testType.test_category}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">{testType.test_method || "-"}</TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">{testType.default_unit || "-"}</TableCell>
-                  <TableCell className="text-slate-500 text-[13px]">{testType.default_specification || "-"}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditDialog(testType)}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(testType.id)}
-                        disabled={deleteMutation.isPending}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+          {categories && categories.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant={categoryFilter === "" ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  setCategoryFilter("")
+                  setPage(1)
+                }}
+                className={categoryFilter === "" ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
+              >
+                All
+              </Button>
+              {categories.map((cat) => (
+                <Button
+                  key={cat.category}
+                  variant={categoryFilter === cat.category ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setCategoryFilter(cat.category)
+                    setPage(1)
+                  }}
+                  className={categoryFilter === cat.category ? "bg-slate-900 hover:bg-slate-800 shadow-sm h-9" : "border-slate-200 h-9"}
+                >
+                  {cat.category} ({cat.count})
+                </Button>
               ))}
-            </TableBody>
-          </Table>
-        )}
-
-        {/* Pagination */}
-        {data && data.total_pages > 1 && (
-          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
-            <p className="text-[14px] text-slate-500">
-              Page {data.page} of {data.total_pages}
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="border-slate-200 hover:bg-slate-50 h-9"
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
-                disabled={page === data.total_pages}
-                className="border-slate-200 hover:bg-slate-50 h-9"
-              >
-                Next
-              </Button>
             </div>
+          )}
+
+          {/* Search */}
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search test types..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
+                className="pl-10 h-11 bg-white border-slate-200 rounded-lg shadow-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-shadow"
+              />
+            </div>
+            <span className="text-[14px] font-medium text-slate-500">{data?.total ?? 0} test types</span>
           </div>
-        )}
-      </div>
+
+          {/* Bulk Import */}
+          <Collapsible open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full justify-between h-11 bg-white hover:bg-slate-50"
+              >
+                <span className="font-semibold text-slate-700">Bulk Import Lab Test Types</span>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${
+                    isBulkImportOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-4">
+              <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
+                <LabTestTypeBulkImport />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Table */}
+          <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
+              </div>
+            ) : data?.items.length === 0 ? (
+              <EmptyState
+                icon={FlaskConical}
+                title="No lab test types found"
+                description="Get started by adding your first test type"
+                actionLabel="Add your first test type"
+                onAction={openCreateDialog}
+              />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
+                    <SortableHeader field="test_name">Test Name</SortableHeader>
+                    <SortableHeader field="test_category">Category</SortableHeader>
+                    <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Method</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Unit</TableHead>
+                    <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Default Spec</TableHead>
+                    <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedItems?.map((testType) => (
+                    <TableRow key={testType.id} className="hover:bg-slate-50/50 transition-colors">
+                      <TableCell>
+                        <div>
+                          <span className="font-semibold text-slate-900 text-[14px]">{testType.test_name}</span>
+                        </div>
+                        {testType.description && (
+                          <p className="text-[12px] text-slate-500 truncate max-w-xs mt-0.5">{testType.description}</p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${getCategoryColor(testType.test_category)}`}>
+                          {testType.test_category}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-slate-500 text-[14px]">{testType.test_method || "-"}</TableCell>
+                      <TableCell className="text-slate-500 text-[14px]">{testType.default_unit || "-"}</TableCell>
+                      <TableCell className="text-slate-500 text-[13px]">{testType.default_specification || "-"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(testType)}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(testType.id)}
+                            disabled={deleteMutation.isPending}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+
+            {/* Pagination */}
+            {data && data.total_pages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <p className="text-[14px] text-slate-500">
+                  Page {data.page} of {data.total_pages}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="border-slate-200 hover:bg-slate-50 h-9"
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
+                    disabled={page === data.total_pages}
+                    className="border-slate-200 hover:bg-slate-50 h-9"
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

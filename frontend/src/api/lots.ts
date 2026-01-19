@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { Lot, LotWithProducts, LotWithProductSpecs, LotType, LotStatus, PaginatedResponse } from "@/types"
+import type { Lot, LotWithProducts, LotWithProductSpecs, LotType, LotStatus, PaginatedResponse, ArchivedLot } from "@/types"
 
 export interface LotFilters {
   page?: number
@@ -8,6 +8,15 @@ export interface LotFilters {
   status?: LotStatus
   exclude_statuses?: LotStatus[]
   lot_type?: LotType
+}
+
+export interface ArchivedLotFilters {
+  page?: number
+  page_size?: number
+  search?: string
+  status?: 'released' | 'rejected'
+  date_from?: string
+  date_to?: string
 }
 
 export interface ProductReference {
@@ -104,8 +113,9 @@ export const lotsApi = {
     return response.data
   },
 
-  submitForReview: async (id: number): Promise<Lot> => {
-    const response = await api.post<Lot>(`/lots/${id}/submit-for-review`)
+  submitForReview: async (id: number, overrideUserId?: number): Promise<Lot> => {
+    const params = overrideUserId ? { override_user_id: overrideUserId } : {}
+    const response = await api.post<Lot>(`/lots/${id}/submit-for-review`, null, { params })
     return response.data
   },
 
@@ -131,6 +141,20 @@ export const lotsApi = {
 
   createSublotsBulk: async (lotId: number, sublots: SublotData[]): Promise<Sublot[]> => {
     const response = await api.post<Sublot[]>(`/lots/${lotId}/sublots/bulk`, { sublots })
+    return response.data
+  },
+
+  /** List archived (completed) lots for historical view */
+  listArchived: async (filters: ArchivedLotFilters = {}): Promise<PaginatedResponse<ArchivedLot>> => {
+    const params = new URLSearchParams()
+    if (filters.page) params.append("page", filters.page.toString())
+    if (filters.page_size) params.append("page_size", filters.page_size.toString())
+    if (filters.search) params.append("search", filters.search)
+    if (filters.status) params.append("status", filters.status)
+    if (filters.date_from) params.append("date_from", filters.date_from)
+    if (filters.date_to) params.append("date_to", filters.date_to)
+
+    const response = await api.get<PaginatedResponse<ArchivedLot>>(`/lots/archived?${params}`)
     return response.data
   },
 }

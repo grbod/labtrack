@@ -69,11 +69,38 @@ export function useUpdateProduct() {
   })
 }
 
+export function useArchiveProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      productsApi.archive(id, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ["archivedProducts"] })
+    },
+  })
+}
+
+export function useRestoreProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => productsApi.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ["archivedProducts"] })
+    },
+  })
+}
+
+// Deprecated - use useArchiveProduct instead
 export function useDeleteProduct() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: number) => productsApi.delete(id),
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      productsApi.archive(id, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
     },

@@ -97,6 +97,13 @@ export function COAPreviewDocument({
         style={{ borderBottom: "2px solid #1e293b" }}
       >
         <div>
+          {data.company_logo_url && (
+            <img
+              src={data.company_logo_url}
+              alt={data.company_name || "Company Logo"}
+              style={{ maxHeight: "60px", maxWidth: "200px", objectFit: "contain", marginBottom: "8px" }}
+            />
+          )}
           <h1
             className="font-bold text-slate-900"
             style={{ fontSize: "18pt", marginBottom: "4px" }}
@@ -469,33 +476,42 @@ export function COAPreviewDocument({
         </h3>
         <div className="flex justify-between">
           <div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                Released By:
-              </span>
-              <span
-                className="border-b border-slate-400 inline-block"
-                style={{ width: "150px" }}
-              >
-                {data.released_by && (
-                  <span className="text-slate-900" style={{ fontSize: "9pt" }}>
-                    {data.released_by}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline gap-2">
+                <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+                  Released By:
+                </span>
+                <span
+                  className="border-b border-slate-400 inline-block"
+                  style={{ width: "150px" }}
+                >
+                  {data.released_by && (
+                    <span className="text-slate-900" style={{ fontSize: "9pt" }}>
+                      {data.released_by}
+                    </span>
+                  )}
+                </span>
+                <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+                  Date:
+                </span>
+                <span
+                  className="border-b border-slate-400 inline-block"
+                  style={{ width: "100px" }}
+                >
+                  {data.released_by && (
+                    <span className="text-slate-900" style={{ fontSize: "9pt" }}>
+                      {data.generated_date}
+                    </span>
+                  )}
+                </span>
+              </div>
+              {data.released_by_title && (
+                <div style={{ paddingLeft: "70px" }}>
+                  <span className="text-slate-600 italic" style={{ fontSize: "9pt" }}>
+                    {data.released_by_title}
                   </span>
-                )}
-              </span>
-              <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                Date:
-              </span>
-              <span
-                className="border-b border-slate-400 inline-block"
-                style={{ width: "100px" }}
-              >
-                {data.released_by && (
-                  <span className="text-slate-900" style={{ fontSize: "9pt" }}>
-                    {data.generated_date}
-                  </span>
-                )}
-              </span>
+                </div>
+              )}
             </div>
             <div className="flex items-baseline gap-2 mt-3">
               <span className="text-slate-600" style={{ fontSize: "9pt" }}>

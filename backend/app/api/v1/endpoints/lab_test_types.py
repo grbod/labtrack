@@ -16,6 +16,7 @@ from app.schemas.lab_test_type import (
     LabTestTypeBulkImportRow,
     LabTestTypeBulkImportResult,
 )
+from app.schemas.product import ArchiveRequest
 
 router = APIRouter()
 
@@ -185,13 +186,14 @@ async def update_lab_test_type(
     return LabTestTypeResponse.model_validate(test_type)
 
 
-@router.delete("/{test_type_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_lab_test_type(
+@router.delete("/{test_type_id}", response_model=LabTestTypeResponse)
+async def archive_lab_test_type(
     test_type_id: int,
+    archive_request: ArchiveRequest,
     db: DbSession,
     current_user: AdminUser,
-) -> None:
-    """Delete a lab test type (admin only). Soft delete by setting is_active=False."""
+) -> LabTestTypeResponse:
+    """Archive a lab test type (soft delete, admin only). Requires a reason."""
     test_type = db.query(LabTestType).filter(LabTestType.id == test_type_id).first()
     if not test_type:
         raise HTTPException(
@@ -199,16 +201,92 @@ async def delete_lab_test_type(
             detail="Lab test type not found",
         )
 
-    # Check if test type is in use
-    if test_type.product_specifications:
+    if not test_type.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete - test type is used by {len(test_type.product_specifications)} products",
+            detail="Lab test type is already archived",
         )
 
-    # Soft delete
-    test_type.is_active = False
+    # Check if test type is in use - warn but allow archiving
+    # (archived tests won't be available for new products but existing specs remain)
+
+    # Archive (soft delete)
+    test_type.archive(user_id=current_user.id, reason=archive_request.reason)
     db.commit()
+    db.refresh(test_type)
+
+    return LabTestTypeResponse.model_validate(test_type)
+
+
+@router.post("/{test_type_id}/restore", response_model=LabTestTypeResponse)
+async def restore_lab_test_type(
+    test_type_id: int,
+    db: DbSession,
+    current_user: AdminUser,
+) -> LabTestTypeResponse:
+    """Restore an archived lab test type (admin only)."""
+    test_type = db.query(LabTestType).filter(LabTestType.id == test_type_id).first()
+    if not test_type:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lab test type not found",
+        )
+
+    if test_type.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lab test type is not archived",
+        )
+
+    # Restore
+    test_type.restore()
+    db.commit()
+    db.refresh(test_type)
+
+    return LabTestTypeResponse.model_validate(test_type)
+
+
+@router.get("/archived", response_model=LabTestTypeListResponse)
+async def list_archived_lab_test_types(
+    db: DbSession,
+    current_user: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: Optional[str] = None,
+) -> LabTestTypeListResponse:
+    """List archived lab test types (admin only)."""
+    query = db.query(LabTestType).filter(LabTestType.is_active == False)
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (LabTestType.test_name.ilike(search_term))
+            | (LabTestType.description.ilike(search_term))
+            | (LabTestType.test_method.ilike(search_term))
+        )
+
+    # Get total count
+    total = query.count()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    test_types = (
+        query.order_by(LabTestType.archived_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+    return LabTestTypeListResponse(
+        items=[LabTestTypeResponse.model_validate(t) for t in test_types],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/bulk-import", response_model=LabTestTypeBulkImportResult)

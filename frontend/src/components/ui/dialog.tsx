@@ -2,36 +2,9 @@
 
 import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { motion } from "framer-motion"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-
-/**
- * Smooth modal animation configuration
- * Enterprise-style: gentle fade + scale with easeOut
- * Timing: 1.75x standard duration for gradual feel
- */
-const overlayVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { duration: 0.35, ease: "easeOut" as const },
-  },
-}
-
-const contentVariants = {
-  hidden: { opacity: 0, scale: 0.96, y: 10 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    y: 0,
-    transition: {
-      duration: 0.44,
-      ease: [0.25, 0.1, 0.25, 1] as const,
-    },
-  },
-}
 
 function Dialog({
   ...props
@@ -61,18 +34,14 @@ function DialogOverlay({
   className,
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
-    <DialogPrimitive.Overlay asChild>
-      <motion.div
-        data-slot="dialog-overlay"
-        variants={overlayVariants}
-        initial="hidden"
-        animate="visible"
-        className={cn(
-          "fixed inset-0 z-50 bg-black/50",
-          className
-        )}
-      />
-    </DialogPrimitive.Overlay>
+    <DialogPrimitive.Overlay
+      data-slot="dialog-overlay"
+      className={cn(
+        "fixed inset-0 z-50 bg-black/60",
+        "animate-in fade-in-0 duration-300",
+        className
+      )}
+    />
   )
 }
 
@@ -80,34 +49,33 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
-      <DialogPrimitive.Content asChild>
-        <motion.div
-          data-slot="dialog-content"
-          variants={contentVariants}
-          initial="hidden"
-          animate="visible"
-          className={cn(
-            "bg-background fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
-            className
-          )}
-        >
-          {children}
-          {showCloseButton && (
-            <DialogPrimitive.Close
-              data-slot="dialog-close"
-              className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-            >
-              <X />
-              <span className="sr-only">Close</span>
-            </DialogPrimitive.Close>
-          )}
-        </motion.div>
+      <DialogPrimitive.Content
+        data-slot="dialog-content"
+        className={cn(
+          "bg-background fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
+          // Add CSS animation instead of framer-motion
+          "animate-in fade-in-0 zoom-in-95 duration-300",
+          className
+        )}
+        {...props}
+      >
+        {children}
+        {showCloseButton && (
+          <DialogPrimitive.Close
+            data-slot="dialog-close"
+            className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+          >
+            <X />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        )}
       </DialogPrimitive.Content>
     </DialogPortal>
   )
@@ -129,6 +97,8 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="dialog-footer"
       className={cn(
         "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        // z-10 + relative ensures footer sits above SimpleBar's invisible wrapper overlay
+        "relative z-10",
         className
       )}
       {...props}

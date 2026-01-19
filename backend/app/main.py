@@ -1,9 +1,11 @@
 """FastAPI application entry point."""
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.config import settings
@@ -45,6 +47,12 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
+
+# Mount uploads directory for static file serving (logos, etc.)
+uploads_path = settings.upload_path
+if not os.path.exists(uploads_path):
+    os.makedirs(uploads_path, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
 
 @app.get("/api/health")

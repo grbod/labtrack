@@ -21,6 +21,7 @@ from app.schemas.product import (
     ProductSizeUpdate,
     ProductSizeResponse,
     ProductSizeSimple,
+    ArchiveRequest,
 )
 
 router = APIRouter()
@@ -38,6 +39,11 @@ def build_product_response(product: Product) -> ProductResponse:
         display_name=product.display_name,
         serving_size=product.serving_size,
         expiry_duration_months=product.expiry_duration_months,
+        version=product.version,
+        is_active=product.is_active,
+        archived_at=product.archived_at,
+        archived_by_id=product.archived_by_id,
+        archive_reason=product.archive_reason,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -51,19 +57,26 @@ async def list_products(
     page_size: int = Query(50, ge=1, le=100),
     search: Optional[str] = None,
     brand: Optional[str] = None,
+    include_archived: bool = Query(False, description="Include archived products"),
 ) -> ProductListResponse:
     """List all products with pagination and filtering."""
     query = db.query(Product)
 
-    # Apply filters
+    # Filter out archived products by default
+    if not include_archived:
+        query = query.filter(Product.is_active == True)
+
+    # Apply filters - split search into keywords and match ALL keywords (AND logic)
     if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            (Product.brand.ilike(search_term))
-            | (Product.product_name.ilike(search_term))
-            | (Product.display_name.ilike(search_term))
-            | (Product.flavor.ilike(search_term))
-        )
+        keywords = search.strip().split()
+        for keyword in keywords:
+            search_term = f"%{keyword}%"
+            query = query.filter(
+                (Product.brand.ilike(search_term))
+                | (Product.product_name.ilike(search_term))
+                | (Product.display_name.ilike(search_term))
+                | (Product.flavor.ilike(search_term))
+            )
 
     if brand:
         query = query.filter(Product.brand == brand)
@@ -131,6 +144,11 @@ async def get_product(
         display_name=product.display_name,
         serving_size=product.serving_size,
         expiry_duration_months=product.expiry_duration_months,
+        version=product.version,
+        is_active=product.is_active,
+        archived_at=product.archived_at,
+        archived_by_id=product.archived_by_id,
+        archive_reason=product.archive_reason,
         created_at=product.created_at,
         updated_at=product.updated_at,
         test_specifications=[
@@ -226,13 +244,14 @@ async def update_product(
     return build_product_response(product)
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_product(
+@router.delete("/{product_id}", response_model=ProductResponse)
+async def archive_product(
     product_id: int,
+    archive_request: ArchiveRequest,
     db: DbSession,
     current_user: AdminUser,
-) -> None:
-    """Delete a product (admin only)."""
+) -> ProductResponse:
+    """Archive a product (soft delete, admin only). Requires a reason."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(
@@ -240,9 +259,92 @@ async def delete_product(
             detail="Product not found",
         )
 
-    # Delete product
-    db.delete(product)
+    if not product.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product is already archived",
+        )
+
+    # Archive product (soft delete)
+    product.archive(user_id=current_user.id, reason=archive_request.reason)
     db.commit()
+    db.refresh(product)
+
+    return build_product_response(product)
+
+
+@router.post("/{product_id}/restore", response_model=ProductResponse)
+async def restore_product(
+    product_id: int,
+    db: DbSession,
+    current_user: AdminUser,
+) -> ProductResponse:
+    """Restore an archived product (admin only)."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    if product.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product is not archived",
+        )
+
+    # Restore product
+    product.restore()
+    db.commit()
+    db.refresh(product)
+
+    return build_product_response(product)
+
+
+@router.get("/archived", response_model=ProductListResponse)
+async def list_archived_products(
+    db: DbSession,
+    current_user: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: Optional[str] = None,
+) -> ProductListResponse:
+    """List archived products (admin only)."""
+    query = db.query(Product).filter(Product.is_active == False)
+
+    # Apply search filter - split search into keywords and match ALL keywords (AND logic)
+    if search:
+        keywords = search.strip().split()
+        for keyword in keywords:
+            search_term = f"%{keyword}%"
+            query = query.filter(
+                (Product.brand.ilike(search_term))
+                | (Product.product_name.ilike(search_term))
+                | (Product.display_name.ilike(search_term))
+                | (Product.flavor.ilike(search_term))
+            )
+
+    # Get total count
+    total = query.count()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    products = (
+        query.order_by(Product.archived_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+    return ProductListResponse(
+        items=[build_product_response(p) for p in products],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 # Product Size endpoints

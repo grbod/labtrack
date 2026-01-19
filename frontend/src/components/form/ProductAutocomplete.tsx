@@ -25,6 +25,8 @@ interface ProductAutocompleteProps {
   error?: boolean
   onNextCell?: () => void
   onPrevCell?: () => void
+  /** Called when user presses Enter while "No products found" is showing */
+  onNoProductsEnter?: () => void
 }
 
 export function ProductAutocomplete({
@@ -37,6 +39,7 @@ export function ProductAutocomplete({
   error = false,
   onNextCell,
   onPrevCell,
+  onNoProductsEnter,
 }: ProductAutocompleteProps) {
   const listRef = useRef<HTMLUListElement>(null)
 
@@ -177,6 +180,12 @@ export function ProductAutocomplete({
           // Enter key - move forward
           setTimeout(() => onNextCell(), 10)
         }
+      } else if (e.key === 'Enter' && isOpen && filteredProducts.length === 0 && localInput.trim()) {
+        // Enter pressed while "No products found" is showing
+        e.preventDefault()
+        if (onNoProductsEnter) {
+          onNoProductsEnter()
+        }
       } else if (e.key === 'Tab') {
         // Dropdown closed - handle Tab navigation
         if (e.shiftKey && onPrevCell) {
@@ -243,7 +252,12 @@ export function ProductAutocomplete({
             isLoading ? (
               <li className="px-4 py-3 text-sm text-slate-500">Loading...</li>
             ) : filteredProducts.length === 0 ? (
-              <li className="px-4 py-3 text-sm text-slate-500">No products found</li>
+              <li className="px-4 py-3 text-sm text-slate-500">
+                No products found
+                {onNoProductsEnter && (
+                  <span className="block text-xs text-slate-400 mt-0.5">Press Enter to add new product</span>
+                )}
+              </li>
             ) : (
               filteredProducts.map((product, index) => (
                 <li

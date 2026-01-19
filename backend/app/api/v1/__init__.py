@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, products, lab_test_types, lots, test_results, uploads, settings, customers, release, archive
+from app.api.v1.endpoints import auth, users, products, lab_test_types, lots, test_results, uploads, settings, customers, release, archive, audit
 
 api_router = APIRouter()
 
@@ -17,3 +17,4 @@ api_router.include_router(settings.router, prefix="/settings", tags=["Settings"]
 api_router.include_router(customers.router, prefix="/customers", tags=["Customers"])
 api_router.include_router(release.router, prefix="/release", tags=["COA Release"])
 api_router.include_router(archive.router, prefix="/archive", tags=["Archive"])
+api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])

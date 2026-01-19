@@ -4,12 +4,45 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.dependencies import DbSession, AdminUser
+from app.dependencies import DbSession, AdminUser, CurrentUser
 from app.core.security import get_password_hash
-from app.schemas.auth import UserCreate, UserUpdate, UserResponse
+from app.schemas.auth import UserCreate, UserUpdate, UserResponse, UserProfileUpdate
 from app.models import User
 
 router = APIRouter()
+
+
+# Profile endpoints (available to all authenticated users)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: CurrentUser,
+) -> UserResponse:
+    """Get the current user's profile."""
+    return UserResponse.model_validate(current_user)
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_current_user_profile(
+    profile_in: UserProfileUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> UserResponse:
+    """Update the current user's profile (full_name, title, phone, email)."""
+    # Update only the profile fields
+    update_data = profile_in.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(current_user, field, value)
+
+    db.commit()
+    db.refresh(current_user)
+
+    return UserResponse.model_validate(current_user)
+
+
+# Admin endpoints (admin only)
 
 
 @router.get("", response_model=List[UserResponse])

@@ -10,12 +10,14 @@ import { ProductsPage } from "@/pages/Products"
 import { LabTestTypesPage } from "@/pages/LabTestTypes"
 import { CreateSamplePage } from "@/pages/CreateSample"
 import { SampleTrackerPage } from "@/pages/SampleTracker"
-import { GridShowcasePage } from "@/pages/GridShowcase"
 import { SettingsPage } from "@/pages/Settings"
 import { CustomersPage } from "@/pages/Customers"
 import { ReleaseQueuePage } from "@/pages/ReleaseQueue"
 import { ReleasePage } from "@/pages/Release"
 import { ArchivePage } from "@/pages/Archive"
+import { ArchivedItemsPage } from "@/pages/ArchivedItems"
+import { ArchiveLotPage } from "@/pages/ArchiveLot"
+import { UserManagementPage } from "@/pages/UserManagement"
 
 // Create a client
 const queryClient = new QueryClient({
@@ -51,12 +53,14 @@ function AppRoutes() {
         <Route path="/lab-tests" element={<LabTestTypesPage />} />
         <Route path="/samples" element={<CreateSamplePage />} />
         <Route path="/tracker" element={<SampleTrackerPage />} />
-        <Route path="/grid-showcase" element={<GridShowcasePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/release" element={<ReleaseQueuePage />} />
         <Route path="/release/:lotId/:productId" element={<ReleasePage />} />
         <Route path="/archive" element={<ArchivePage />} />
+        <Route path="/archived" element={<ArchivedItemsPage />} />
+        <Route path="/archived/lot/:lotId/:productId" element={<ArchiveLotPage />} />
+        <Route path="/users" element={<UserManagementPage />} />
       </Route>
 
       {/* Catch all */}

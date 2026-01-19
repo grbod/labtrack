@@ -9,7 +9,8 @@ from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.models import Lot, LotProduct, Product, Sublot, ProductTestSpecification, TestResult
-from app.models.enums import LotType, LotStatus
+from app.models.enums import LotType, LotStatus, AuditAction
+from app.services.audit_service import AuditService
 from app.schemas.lot import (
     LotCreate,
     LotUpdate,
@@ -192,6 +193,127 @@ async def get_status_counts(
         .all()
     )
     return {status.value: count for status, count in counts}
+
+
+@router.get("/archived")
+async def list_archived_lots(
+    db: DbSession,
+    current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> dict:
+    """
+    List completed (archived) lots for historical view.
+
+    Returns lots with status RELEASED or REJECTED, including product info
+    and customer data where applicable.
+    """
+    from app.models.coa_release import COARelease
+    from app.models.customer import Customer
+
+    # Base query for completed lots (RELEASED or REJECTED)
+    completed_statuses = [LotStatus.RELEASED, LotStatus.REJECTED]
+
+    query = (
+        db.query(Lot)
+        .options(
+            joinedload(Lot.lot_products).joinedload(LotProduct.product),
+            joinedload(Lot.coa_releases).joinedload(COARelease.customer),
+        )
+        .filter(Lot.status.in_(completed_statuses))
+    )
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (Lot.lot_number.ilike(search_term))
+            | (Lot.reference_number.ilike(search_term))
+        )
+
+    # Apply status filter (released vs rejected)
+    if status_filter:
+        if status_filter.lower() == "released":
+            query = query.filter(Lot.status == LotStatus.RELEASED)
+        elif status_filter.lower() == "rejected":
+            query = query.filter(Lot.status == LotStatus.REJECTED)
+
+    # Apply date filters on updated_at (completion date)
+    if date_from:
+        query = query.filter(Lot.updated_at >= date_from)
+    if date_to:
+        query = query.filter(Lot.updated_at <= date_to)
+
+    # Get total count
+    count_query = db.query(func.count(Lot.id)).filter(Lot.status.in_(completed_statuses))
+    if search:
+        search_term = f"%{search}%"
+        count_query = count_query.filter(
+            (Lot.lot_number.ilike(search_term))
+            | (Lot.reference_number.ilike(search_term))
+        )
+    if status_filter:
+        if status_filter.lower() == "released":
+            count_query = count_query.filter(Lot.status == LotStatus.RELEASED)
+        elif status_filter.lower() == "rejected":
+            count_query = count_query.filter(Lot.status == LotStatus.REJECTED)
+    if date_from:
+        count_query = count_query.filter(Lot.updated_at >= date_from)
+    if date_to:
+        count_query = count_query.filter(Lot.updated_at <= date_to)
+    total = count_query.scalar()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    lots = (
+        query.order_by(Lot.updated_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+    # Build response items - one entry per lot-product pair
+    items = []
+    for lot in lots:
+        # Get customer from COA release if available
+        customer_name = None
+        if lot.coa_releases:
+            for release in lot.coa_releases:
+                if release.customer:
+                    customer_name = release.customer.company_name
+                    break
+
+        # Create an entry for each product in the lot
+        for lp in lot.lot_products:
+            if lp.product:
+                items.append({
+                    "lot_id": lot.id,
+                    "product_id": lp.product.id,
+                    "reference_number": lot.reference_number,
+                    "lot_number": lot.lot_number,
+                    "product_name": lp.product.product_name,
+                    "brand": lp.product.brand,
+                    "flavor": lp.product.flavor,
+                    "size": lp.product.size,
+                    "status": lot.status.value,
+                    "completed_at": lot.updated_at.isoformat() if lot.updated_at else lot.created_at.isoformat(),
+                    "customer_name": customer_name,
+                    "rejection_reason": lot.rejection_reason if lot.status == LotStatus.REJECTED else None,
+                })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
 
 
 @router.get("/{lot_id}", response_model=LotWithProductsResponse)
@@ -408,6 +530,7 @@ async def submit_for_review(
     lot_id: int,
     db: DbSession,
     current_user: CurrentUser,
+    override_user_id: Optional[int] = Query(None, description="User ID who authorized the override (when submitting without PDF)"),
 ) -> LotResponse:
     """Submit a lot for QC review (moves from under_review to awaiting_release)."""
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
@@ -427,6 +550,19 @@ async def submit_for_review(
     lot.status = LotStatus.AWAITING_RELEASE
     db.commit()
     db.refresh(lot)
+
+    # Log override if used
+    if override_user_id:
+        audit_service = AuditService()
+        audit_service.log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot.id,
+            action=AuditAction.OVERRIDE,
+            user_id=override_user_id,
+            new_values={"submitted_by": current_user.id, "lot_reference": lot.reference_number},
+            reason="Submitted for review without required PDF attachment (admin/QC override)",
+        )
 
     return LotResponse.model_validate(lot)
 

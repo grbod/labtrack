@@ -6,11 +6,6 @@ interface PdfUploadDropzoneProps {
   isDragging: boolean
   /** Whether upload is in progress */
   isUploading: boolean
-  /** Drag event handlers */
-  onDragEnter: (e: React.DragEvent) => void
-  onDragLeave: (e: React.DragEvent) => void
-  onDragOver: (e: React.DragEvent) => void
-  onDrop: (e: React.DragEvent) => void
 }
 
 /**
@@ -20,10 +15,6 @@ interface PdfUploadDropzoneProps {
 export function PdfUploadDropzone({
   isDragging,
   isUploading,
-  onDragEnter,
-  onDragLeave,
-  onDragOver,
-  onDrop,
 }: PdfUploadDropzoneProps) {
   // Only show when dragging or uploading
   if (!isDragging && !isUploading) {
@@ -33,15 +24,11 @@ export function PdfUploadDropzone({
   return (
     <div
       className={cn(
-        "absolute inset-0 z-50 flex items-center justify-center rounded-lg",
+        "absolute inset-0 z-50 flex items-center justify-center rounded-lg pointer-events-auto",
         "bg-blue-50/95 backdrop-blur-sm",
         "border-2 border-dashed",
         isDragging ? "border-blue-400" : "border-transparent"
       )}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
     >
       <div className="text-center">
         {isUploading ? (

@@ -15,7 +15,7 @@ interface COAPreviewProps {
   productId: number
   isGenerating?: boolean
   hasError?: boolean
-  scrollRef?: React.RefObject<HTMLDivElement>
+  scrollRef?: React.RefObject<HTMLDivElement | null>
 }
 
 export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef }: COAPreviewProps) {

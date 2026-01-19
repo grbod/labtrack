@@ -1,8 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog"
+import { useDropzone } from "react-dropzone"
+import { useNavigate } from "react-router-dom"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, Lock, AlertTriangle, FileText, Upload, X } from "lucide-react"
+import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2 } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import SimpleBar from "simplebar-react"
 import "simplebar-react/dist/simplebar.min.css"
@@ -11,12 +15,13 @@ import { SampleModalHeader } from "./SampleModalHeader"
 import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTable"
 import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
-import { PdfUploadDropzone } from "./PdfUploadDropzone"
-
-import { useLotWithSpecs, lotKeys, useUpdateLotStatus, useSubmitForReview } from "@/hooks/useLots"
-import { useTestResults, useUpdateTestResult, useCreateTestResult } from "@/hooks/useTestResults"
+import { useLotWithSpecs, lotKeys, useSubmitForReview } from "@/hooks/useLots"
+import { useTestResults, useUpdateTestResult, useCreateTestResult, useDeleteTestResult } from "@/hooks/useTestResults"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import { useUploadPdf } from "@/hooks/useUploads"
+import { uploadsApi } from "@/api/uploads"
+import { authApi } from "@/api/client"
+import { useLabInfo } from "@/hooks/useLabInfo"
 import { useAuthStore } from "@/store/auth"
 import { calculatePassFail } from "@/lib/spec-validation"
 
@@ -40,6 +45,8 @@ interface SampleModalProps {
   prevDisabled?: boolean
   /** Whether next navigation is disabled */
   nextDisabled?: boolean
+  /** Callback when sample is successfully submitted for approval */
+  onSubmitSuccess?: () => void
 }
 
 /**
@@ -60,22 +67,35 @@ export function SampleModal({
   onNavigate,
   prevDisabled = false,
   nextDisabled = false,
+  onSubmitSuccess,
 }: SampleModalProps) {
   const queryClient = useQueryClient()
-  const { user } = useAuthStore()
+  const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement>(null)
   const tableRef = useRef<TestResultsTableHandle>(null)
   const saveButtonRef = useRef<HTMLButtonElement>(null)
 
+  // Auth store for role-based UI
+  const { user } = useAuthStore()
+  const canGoToRelease = user?.role === "admin" || user?.role === "qc_manager"
+
   // State
   const [filter, setFilter] = useState<TestFilterStatus>("all")
-  const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [savingRowId, setSavingRowId] = useState<number | null>(null)
-  const [rejectionReason, setRejectionReason] = useState("")
-  const [showRejectDialog, setShowRejectDialog] = useState(false)
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false)
+
+  // Success dialog state after submit for approval
+  const [showSubmitSuccessDialog, setShowSubmitSuccessDialog] = useState(false)
+  const [submittedLotRef, setSubmittedLotRef] = useState<string | null>(null)
+
+  // Override modal state
+  const [showOverrideModal, setShowOverrideModal] = useState(false)
+  const [overrideUsername, setOverrideUsername] = useState("")
+  const [overridePassword, setOverridePassword] = useState("")
+  const [overrideError, setOverrideError] = useState<string | null>(null)
+  const [isVerifyingOverride, setIsVerifyingOverride] = useState(false)
 
   // Fetch lot with specs
   const { data: lotWithSpecs } = useLotWithSpecs(lot?.id ?? 0)
@@ -91,18 +111,17 @@ export function SampleModal({
   // Mutations
   const updateTestResultMutation = useUpdateTestResult()
   const createTestResultMutation = useCreateTestResult()
+  const deleteTestResultMutation = useDeleteTestResult()
   const uploadMutation = useUploadPdf()
-  const updateStatusMutation = useUpdateLotStatus()
   const submitForReviewMutation = useSubmitForReview()
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Lab info for PDF requirement setting
+  const { labInfo } = useLabInfo()
 
   // Derived state - use lotWithSpecs status if available (fresh data), fallback to lot prop
   const currentStatus = lotWithSpecs?.status ?? lot?.status
   const isLocked = currentStatus === "approved" || currentStatus === "released"
-  const isQCManagerOrAdmin = user?.role === "qc_manager" || user?.role === "admin"
   const canSubmitForReview = currentStatus === "under_review"
-  const canApproveReject =
-    isQCManagerOrAdmin && currentStatus === "awaiting_release"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -341,50 +360,28 @@ export function SampleModal({
     [lot, createTestResultMutation]
   )
 
-  // Drag and drop handlers
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.dataTransfer.types.includes("Files")) {
-      setIsDragging(true)
-    }
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const rect = e.currentTarget.getBoundingClientRect()
-    if (
-      e.clientX < rect.left ||
-      e.clientX >= rect.right ||
-      e.clientY < rect.top ||
-      e.clientY >= rect.bottom
-    ) {
-      setIsDragging(false)
-    }
-  }, [])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
-
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragging(false)
-
-      const files = Array.from(e.dataTransfer.files)
-      const pdfFile = files.find((f) => f.type === "application/pdf")
-
-      if (!pdfFile) {
-        setUploadError("Only PDF files are allowed")
-        return
+  // Handle deleting an ad-hoc test
+  const handleDeleteResult = useCallback(
+    async (id: number) => {
+      try {
+        await deleteTestResultMutation.mutateAsync(id)
+        toast.success("Test removed")
+      } catch (error) {
+        toast.error("Failed to remove test")
       }
+    },
+    [deleteTestResultMutation]
+  )
 
-      if (pdfFile.size > 10 * 1024 * 1024) {
-        setUploadError("File size must be less than 10MB")
+  // Dropzone handler using react-dropzone
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      if (acceptedFiles.length === 0) return
+
+      // Check file sizes
+      const oversizedFiles = acceptedFiles.filter(f => f.size > 10 * 1024 * 1024)
+      if (oversizedFiles.length > 0) {
+        setUploadError(`${oversizedFiles.length} file(s) exceed 10MB limit`)
         return
       }
 
@@ -392,10 +389,17 @@ export function SampleModal({
       setUploadError(null)
 
       try {
-        await uploadMutation.mutateAsync({ file: pdfFile, lotId: lot?.id })
-        toast.success("PDF uploaded successfully")
+        // Upload all files
+        await Promise.all(
+          acceptedFiles.map(file => uploadMutation.mutateAsync({ file, lotId: lot?.id }))
+        )
+        toast.success(
+          acceptedFiles.length === 1
+            ? "PDF uploaded successfully"
+            : `${acceptedFiles.length} PDFs uploaded successfully`
+        )
       } catch (error) {
-        setUploadError("Failed to upload file")
+        setUploadError("Failed to upload file(s)")
       } finally {
         setIsUploading(false)
       }
@@ -403,79 +407,102 @@ export function SampleModal({
     [uploadMutation, lot?.id]
   )
 
-  // Handle file input change
-  const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (!file) return
+  const onDropRejected = useCallback(() => {
+    setUploadError("Only PDF files are allowed")
+  }, [])
 
-      if (file.type !== "application/pdf") {
-        setUploadError("Only PDF files are allowed")
-        return
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        setUploadError("File size must be less than 10MB")
-        return
-      }
-
-      setIsUploading(true)
-      setUploadError(null)
-
-      try {
-        await uploadMutation.mutateAsync({ file, lotId: lot?.id })
-        toast.success("PDF uploaded successfully")
-      } catch (error) {
-        setUploadError("Failed to upload file")
-      } finally {
-        setIsUploading(false)
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ""
-        }
-      }
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    open: openFileDialog,
+  } = useDropzone({
+    onDrop,
+    onDropRejected,
+    accept: {
+      'application/pdf': ['.pdf']
     },
-    [uploadMutation, lot?.id]
-  )
+    multiple: true,
+    noKeyboard: true,
+    disabled: isLocked,
+  })
 
-  // Handle approve
-  const handleApprove = useCallback(async () => {
+  // Get attached PDFs from lot record
+  const attachedPdfs: string[] = lotWithSpecs?.attached_pdfs || []
+
+  // Internal function to actually perform the submission
+  const performSubmission = useCallback(async (overrideUserId?: number) => {
     if (!lot) return
     try {
-      await updateStatusMutation.mutateAsync({ id: lot.id, status: "approved" })
-      toast.success("Sample approved! COA ready for release")
-    } catch (error) {
-      toast.error("Failed to approve")
-    }
-  }, [lot, updateStatusMutation])
+      await submitForReviewMutation.mutateAsync({ id: lot.id, overrideUserId })
 
-  // Handle reject
-  const handleReject = useCallback(async () => {
-    if (!lot || !rejectionReason.trim()) return
-    try {
-      await updateStatusMutation.mutateAsync({
-        id: lot.id,
-        status: "rejected",
-        rejectionReason: rejectionReason.trim(),
-      })
-      setShowRejectDialog(false)
-      setRejectionReason("")
-      toast.success("Sample rejected")
+      // Show success dialog instead of toast
+      setSubmittedLotRef(lot.reference_number)
+      setShowSubmitSuccessDialog(true)
     } catch (error) {
-      toast.error("Failed to reject")
+      console.error("Submit for review error:", error)
+      toast.error("Failed to submit for review")
     }
-  }, [lot, rejectionReason, updateStatusMutation])
+  }, [lot, submitForReviewMutation])
 
   // Handle submit for review (moves from under_review to awaiting_release)
   const handleSubmitForReview = useCallback(async () => {
-    if (!lot) return
-    try {
-      await submitForReviewMutation.mutateAsync(lot.id)
-      toast.success("Sample submitted for approval")
-      onClose()
-    } catch (error) {
-      toast.error("Failed to submit for review")
+    console.log("Submit for review clicked", {
+      lotId: lot?.id,
+      status: currentStatus,
+      labInfoLoaded: !!labInfo,
+      requirePdf: labInfo?.require_pdf_for_submission,
+      attachedPdfsCount: attachedPdfs.length,
+    })
+    if (!lot) {
+      console.error("No lot available")
+      return
     }
-  }, [lot, submitForReviewMutation, onClose])
+
+    // Check if PDF is required and none attached
+    // Use explicit check that labInfo is loaded and require_pdf is true
+    if (labInfo && labInfo.require_pdf_for_submission && attachedPdfs.length === 0) {
+      console.log("Showing override modal - PDF required but none attached")
+      // Show override modal
+      setShowOverrideModal(true)
+      setOverrideUsername("")
+      setOverridePassword("")
+      setOverrideError(null)
+      return
+    }
+
+    // No PDF required or PDFs are attached - submit directly
+    console.log("Proceeding with submission")
+    await performSubmission()
+  }, [lot, currentStatus, labInfo, attachedPdfs.length, performSubmission])
+
+  // Handle override verification and submission
+  const handleOverrideSubmit = useCallback(async () => {
+    if (!overrideUsername || !overridePassword) {
+      setOverrideError("Please enter username and password")
+      return
+    }
+
+    setIsVerifyingOverride(true)
+    setOverrideError(null)
+
+    try {
+      const result = await authApi.verifyOverride(overrideUsername, overridePassword)
+
+      if (!result.valid) {
+        setOverrideError(result.message)
+        return
+      }
+
+      // Override verified - submit with override user ID
+      setShowOverrideModal(false)
+      await performSubmission(result.user_id ?? undefined)
+    } catch {
+      setOverrideError("Failed to verify credentials")
+    } finally {
+      setIsVerifyingOverride(false)
+    }
+  }, [overrideUsername, overridePassword, performSubmission])
 
   // Handle modal close attempt (check for unsaved changes)
   const handleCloseAttempt = useCallback(() => {
@@ -495,17 +522,11 @@ export function SampleModal({
 
   if (!lot) return null
 
-  // Get attached PDFs from lot record
-  const attachedPdfs: string[] = lotWithSpecs?.attached_pdfs || []
-
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleCloseAttempt()}>
       <DialogContent
         className="sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
         showCloseButton={false}
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
         onKeyDown={(e) => {
           // Handle Escape key with unsaved changes check
           if (e.key === "Escape") {
@@ -514,15 +535,6 @@ export function SampleModal({
           }
         }}
       >
-        {/* Drag-drop overlay */}
-        <PdfUploadDropzone
-          isDragging={isDragging}
-          isUploading={isUploading}
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        />
 
         {/* Lock banner for approved/released */}
         {isLocked && (
@@ -599,6 +611,7 @@ export function SampleModal({
                 labTestTypes={labTestTypesData?.items || []}
                 onUpdateResult={handleUpdateResult}
                 onAddTest={handleAddTest}
+                onDeleteResult={handleDeleteResult}
                 disabled={isLocked}
                 savingRowId={savingRowId}
               />
@@ -614,20 +627,13 @@ export function SampleModal({
                       variant="outline"
                       size="sm"
                       className="text-xs"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={openFileDialog}
                       disabled={isUploading}
                     >
                       <Upload className="h-3.5 w-3.5 mr-1.5" />
                       Upload PDF
                     </Button>
                   )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
                 </div>
 
                 {uploadError && (
@@ -637,21 +643,51 @@ export function SampleModal({
                   </div>
                 )}
 
-                {attachedPdfs.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                {/* Visible drop zone */}
+                {!isLocked && (
+                  <div
+                    {...getRootProps()}
+                    className={`
+                      mb-3 flex flex-col items-center justify-center
+                      rounded-lg border-2 border-dashed p-6
+                      cursor-pointer transition-colors
+                      ${isDragActive
+                        ? "border-blue-400 bg-blue-50"
+                        : "border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50"
+                      }
+                    `}
+                  >
+                    <input {...getInputProps()} />
+                    <Upload className={`h-8 w-8 mb-2 ${isDragActive ? "text-blue-500" : "text-slate-400"}`} />
+                    <p className={`text-sm font-medium ${isDragActive ? "text-blue-600" : "text-slate-600"}`}>
+                      {isDragActive ? "Drop PDF here" : "Drag and drop PDF here"}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      or click to browse
+                    </p>
+                  </div>
+                )}
+
+                {attachedPdfs.length > 0 && (
+                  <div className="flex flex-col gap-2">
                     {attachedPdfs.map((pdf, idx) => (
-                      <div
+                      <button
                         key={idx}
-                        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5"
+                        type="button"
+                        onClick={() => uploadsApi.openPdf(pdf)}
+                        className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 hover:bg-slate-100 hover:border-slate-300 transition-colors group text-left"
                       >
-                        <FileText className="h-4 w-4 text-slate-400" />
-                        <span className="text-sm text-slate-600">{pdf}</span>
-                      </div>
+                        <FileText className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                        <span className="text-sm text-slate-600 truncate flex-1">{pdf}</span>
+                        <ExternalLink className="h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 flex-shrink-0" />
+                      </button>
                     ))}
                   </div>
-                ) : (
+                )}
+
+                {isLocked && attachedPdfs.length === 0 && (
                   <p className="text-sm text-slate-400">
-                    No PDFs attached. Drag and drop or click upload.
+                    No PDFs attached.
                   </p>
                 )}
               </div>
@@ -659,45 +695,6 @@ export function SampleModal({
           )}
           </div>
         </SimpleBar>
-
-        {/* Rejection dialog */}
-        {showRejectDialog && (
-          <div className="mx-6 mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm font-medium text-red-800 mb-2">
-              Please provide a rejection reason:
-            </p>
-            <textarea
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Enter reason for rejection..."
-              className="w-full h-24 px-3 py-2 text-sm border border-red-200 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-            <div className="flex justify-end gap-2 mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setShowRejectDialog(false)
-                  setRejectionReason("")
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleReject}
-                disabled={!rejectionReason.trim() || updateStatusMutation.isPending}
-              >
-                {updateStatusMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Confirm Rejection"
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
 
         {/* Unsaved changes warning dialog */}
         {showUnsavedWarning && (
@@ -732,12 +729,151 @@ export function SampleModal({
           </div>
         )}
 
+        {/* Override modal for submitting without PDF */}
+        {showOverrideModal && (
+          <div className="mx-6 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-3 mb-4">
+              <ShieldAlert className="h-5 w-5 flex-shrink-0 text-amber-600" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-amber-800">
+                  Lab PDF required for submission
+                </p>
+                <p className="mt-1 text-sm text-amber-700">
+                  No lab PDF is attached to this sample. An Admin or QC Manager override is required to continue.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="override-username" className="text-sm font-medium text-slate-700">
+                  Username
+                </Label>
+                <Input
+                  id="override-username"
+                  type="text"
+                  value={overrideUsername}
+                  onChange={(e) => setOverrideUsername(e.target.value)}
+                  placeholder="Enter admin/QC username"
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="override-password" className="text-sm font-medium text-slate-700">
+                  Password
+                </Label>
+                <Input
+                  id="override-password"
+                  type="password"
+                  value={overridePassword}
+                  onChange={(e) => setOverridePassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="h-9"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleOverrideSubmit()
+                    }
+                  }}
+                />
+              </div>
+
+              {overrideError && (
+                <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded px-3 py-2">
+                  <X className="h-4 w-4 flex-shrink-0" />
+                  {overrideError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowOverrideModal(false)}
+                disabled={isVerifyingOverride}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleOverrideSubmit}
+                disabled={isVerifyingOverride || !overrideUsername || !overridePassword}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                {isVerifyingOverride ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : null}
+                Override & Submit
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Success Dialog - Nested Dialog for submit approval */}
+        <Dialog open={showSubmitSuccessDialog} onOpenChange={setShowSubmitSuccessDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-emerald-600 flex items-center gap-2 text-[18px]">
+                <CheckCircle2 className="h-5 w-5" />
+                Moved to Final QA Approval
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="py-4">
+              <p className="text-sm text-slate-600">
+                Sample <span className="font-mono font-semibold text-slate-900">{submittedLotRef}</span> has been submitted for final approval.
+              </p>
+            </div>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              {canGoToRelease && (
+                <Button
+                  type="button"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={() => {
+                    setShowSubmitSuccessDialog(false)
+                    onClose()
+                    navigate("/release")
+                  }}
+                >
+                  Go to Release Queue
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowSubmitSuccessDialog(false)
+                  if (onSubmitSuccess) {
+                    onSubmitSuccess()
+                  } else {
+                    onClose()
+                  }
+                }}
+              >
+                Continue Reviewing
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowSubmitSuccessDialog(false)
+                  onClose()
+                }}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
           <div className="flex w-full items-center justify-end gap-2">
             {/* Submit for Approval action (available to any authenticated user for under_review status) */}
             {canSubmitForReview && (
               <Button
+                type="button"
                 onClick={handleSubmitForReview}
                 disabled={submitForReviewMutation.isPending}
                 className="bg-blue-600 hover:bg-blue-700"
@@ -749,32 +885,9 @@ export function SampleModal({
               </Button>
             )}
 
-            {/* QC actions (for awaiting_release and needs_attention statuses) */}
-            {canApproveReject && !showRejectDialog && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowRejectDialog(true)}
-                  className="text-red-600 border-red-200 hover:bg-red-50"
-                >
-                  Reject
-                </Button>
-                <Button
-                  onClick={handleApprove}
-                  disabled={updateStatusMutation.isPending}
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                >
-                  {updateStatusMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : null}
-                  Approve
-                </Button>
-              </>
-            )}
-
             {/* Save/Close button */}
-            <Button ref={saveButtonRef} onClick={handleCloseAttempt}>
-              Save
+            <Button type="button" ref={saveButtonRef} onClick={handleCloseAttempt}>
+              Save & Close
             </Button>
           </div>
         </DialogFooter>

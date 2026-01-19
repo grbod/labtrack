@@ -72,10 +72,14 @@ class ArchiveItem(BaseModel):
     """Archived COA summary for list view."""
 
     id: int
+    lot_id: int
+    product_id: int
     lot_number: Optional[str] = None
     reference_number: Optional[str] = None
     product_name: Optional[str] = None
     brand: Optional[str] = None
+    flavor: Optional[str] = None
+    size: Optional[str] = None
     customer_name: Optional[str] = None
     released_at: Optional[datetime] = None
     released_by: Optional[str] = None
@@ -89,10 +93,14 @@ class ArchiveItem(BaseModel):
         """Create archive item from COARelease model."""
         return cls(
             id=release.id,
+            lot_id=release.lot_id,
+            product_id=release.product_id,
             lot_number=release.lot.lot_number if release.lot else None,
             reference_number=release.lot.reference_number if release.lot else None,
             product_name=release.product.product_name if release.product else None,
             brand=release.product.brand if release.product else None,
+            flavor=release.product.flavor if release.product else None,
+            size=release.product.size if release.product else None,
             customer_name=release.customer.company_name if release.customer else None,
             released_at=release.released_at,
             released_by=release.released_by.username if release.released_by else None,

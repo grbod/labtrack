@@ -1,17 +1,15 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react"
+import { useState, useRef, useMemo, useCallback, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { motion } from "framer-motion"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, Package, ArrowRight, Check, X, ChevronDown } from "lucide-react"
+import { Plus, Pencil, Archive, Search, Loader2, Package, Check, X, Trash2 } from "lucide-react"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
 import { TestSpecsTooltip } from "@/components/domain/TestSpecsTooltip"
 import { LabTestTypeAutocomplete } from "@/components/form/LabTestTypeAutocomplete"
 import { generateDisplayName } from "@/lib/product-utils"
 
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Popover,
   PopoverContent,
@@ -34,17 +32,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { ProductBulkImport } from "@/components/bulk-import/ProductBulkImport"
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
-  useDeleteProduct,
+  useArchiveProduct,
   useCreateSize,
   useUpdateSize,
   useDeleteSize,
@@ -53,9 +51,11 @@ import {
   useUpdateTestSpec,
   useDeleteTestSpec,
 } from "@/hooks/useProducts"
+import { useAuthStore } from "@/store/auth"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import type { Product, ProductSize, ProductTestSpecification, LabTestType } from "@/types"
-import type { CreateProductData } from "@/api/products"
 
 // SizeChips component for inline size management
 interface SizeChipsProps {
@@ -210,17 +210,6 @@ function SizeChips({ sizes, productId, onAddSize, onEditSize, onDeleteSize }: Si
   )
 }
 
-const productSchema = z.object({
-  brand: z.string().min(1, "Brand is required"),
-  product_name: z.string().min(1, "Product name is required"),
-  flavor: z.string().optional(),
-  version: z.string().optional(),
-  serving_size: z.string().optional(),
-  expiry_duration_months: z.number().int().positive(),
-})
-
-type ProductForm = z.infer<typeof productSchema>
-
 // Type for test spec table rows (existing specs + add row)
 interface TestSpecRow {
   id: number | 'new'
@@ -234,12 +223,44 @@ interface TestSpecRow {
   isAddRow?: boolean
 }
 
+// Inline editing values type
+interface InlineEditValues {
+  brand: string
+  product_name: string
+  flavor: string
+  serving_size: string
+  expiry_duration_months: number
+  version: string
+}
+
 export function ProductsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false)
+
+  // Inline editing state
+  const [editingProductId, setEditingProductId] = useState<number | null>(null)
+  const [editValues, setEditValues] = useState<InlineEditValues | null>(null)
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({})
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
+  // Inline add row state
+  const [showAddRow, setShowAddRow] = useState(false)
+  const [addRowValues, setAddRowValues] = useState<InlineEditValues>({
+    brand: "",
+    product_name: "",
+    flavor: "",
+    serving_size: "",
+    expiry_duration_months: 36,
+    version: "",
+  })
+  const [addRowErrors, setAddRowErrors] = useState<Record<string, string>>({})
+  const [isSavingAdd, setIsSavingAdd] = useState(false)
+
+  // Refs for focus management
+  const editRowRef = useRef<HTMLTableRowElement>(null)
+  const addRowRef = useRef<HTMLTableRowElement>(null)
+  const addRowBrandInputRef = useRef<HTMLInputElement>(null)
 
   // Test specs dialog state
   const [isTestSpecsDialogOpen, setIsTestSpecsDialogOpen] = useState(false)
@@ -256,10 +277,17 @@ export function ProductsPage() {
   const addRowRequiredRef = useRef<HTMLInputElement>(null)
   const addRowTestTypeRef = useRef<{ focus: () => void } | null>(null)
 
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === "admin" || user?.role === "qc_manager"
+
   const { data, isLoading } = useProducts({ page, page_size: 50, search: search || undefined })
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
-  const deleteMutation = useDeleteProduct()
+  const archiveMutation = useArchiveProduct()
+
+  // Archive dialog state
+  const [archiveDialogProduct, setArchiveDialogProduct] = useState<Product | null>(null)
+  const [archiveReason, setArchiveReason] = useState("")
 
   // Size mutation hooks
   const createSizeMutation = useCreateSize()
@@ -273,96 +301,206 @@ export function ProductsPage() {
   const updateTestSpecMutation = useUpdateTestSpec()
   const deleteTestSpecMutation = useDeleteTestSpec()
 
-  const form = useForm<ProductForm>({
-    resolver: zodResolver(productSchema),
-    defaultValues: {
-      expiry_duration_months: 36,
-    },
-  })
+  // Handle ?addNew=true URL param (from Create Sample page)
+  useEffect(() => {
+    if (searchParams.get('addNew') === 'true' && !isLoading) {
+      // Show the add row
+      setShowAddRow(true)
+      // Clear the URL param
+      setSearchParams({}, { replace: true })
+      // Scroll to bottom and focus Brand input after render
+      setTimeout(() => {
+        addRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        addRowBrandInputRef.current?.focus()
+      }, 150)
+    }
+  }, [searchParams, setSearchParams, isLoading])
 
-  const { register, handleSubmit, reset, formState: { errors }, watch } = form
-
-  // Watch fields for live display name preview
-  const watchedBrand = watch("brand", "")
-  const watchedProductName = watch("product_name", "")
-  const watchedFlavor = watch("flavor", "")
-  const watchedVersion = watch("version", "")
-
-  const previewDisplayName = generateDisplayName(
-    watchedBrand,
-    watchedProductName,
-    watchedFlavor,
-    undefined, // Size is now managed separately via chips
-    watchedVersion
-  )
-
-  const openCreateDialog = () => {
-    setEditingProduct(null)
-    reset({
-      brand: "",
-      product_name: "",
-      flavor: "",
-      version: "",
-      serving_size: "",
-      expiry_duration_months: 36,
-    })
-    setIsDialogOpen(true)
-  }
-
-  // Extract version from existing display name (if it ends with (VX))
-  const extractVersion = (displayName: string): string => {
-    const match = displayName.match(/\(V(\d+)\)$/)
-    return match ? match[1] : ""
-  }
-
-  const openEditDialog = (product: Product) => {
-    setEditingProduct(product)
-    reset({
+  // Inline editing handlers
+  const startEditing = (product: Product) => {
+    setEditingProductId(product.id)
+    setEditValues({
       brand: product.brand,
       product_name: product.product_name,
       flavor: product.flavor || "",
-      version: extractVersion(product.display_name),
       serving_size: product.serving_size || "",
       expiry_duration_months: product.expiry_duration_months,
+      version: product.version || "",
     })
-    setIsDialogOpen(true)
+    setEditErrors({})
   }
 
-  const onSubmit = async (formData: ProductForm) => {
-    // Auto-generate display name from fields (size is managed separately via chips)
-    const displayName = generateDisplayName(
-      formData.brand,
-      formData.product_name,
-      formData.flavor,
-      undefined, // Size is managed separately
-      formData.version
-    )
+  const cancelEditing = () => {
+    setEditingProductId(null)
+    setEditValues(null)
+    setEditErrors({})
+  }
 
-    const data: CreateProductData = {
-      brand: formData.brand,
-      product_name: formData.product_name,
-      display_name: displayName,
-      flavor: formData.flavor || undefined,
-      // Note: size is now managed via inline chips, not in the edit dialog
-      serving_size: formData.serving_size || undefined,
-      expiry_duration_months: formData.expiry_duration_months,
+  const validateEditValues = (values: InlineEditValues): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!values.brand.trim()) errors.brand = "Required"
+    if (!values.product_name.trim()) errors.product_name = "Required"
+    if (values.expiry_duration_months <= 0) errors.expiry_duration_months = "Must be > 0"
+    return errors
+  }
+
+  const saveEditing = async () => {
+    if (!editingProductId || !editValues) return
+
+    const errors = validateEditValues(editValues)
+    if (Object.keys(errors).length > 0) {
+      setEditErrors(errors)
+      return
     }
 
+    setIsSavingEdit(true)
     try {
-      if (editingProduct) {
-        await updateMutation.mutateAsync({ id: editingProduct.id, data })
-      } else {
-        await createMutation.mutateAsync(data)
-      }
-      setIsDialogOpen(false)
+      const displayName = generateDisplayName(
+        editValues.brand,
+        editValues.product_name,
+        editValues.flavor,
+        undefined,
+        editValues.version
+      )
+
+      await updateMutation.mutateAsync({
+        id: editingProductId,
+        data: {
+          brand: editValues.brand,
+          product_name: editValues.product_name,
+          flavor: editValues.flavor || undefined,
+          serving_size: editValues.serving_size || undefined,
+          expiry_duration_months: editValues.expiry_duration_months,
+          version: editValues.version || undefined,
+          display_name: displayName,
+        },
+      })
+      setEditingProductId(null)
+      setEditValues(null)
+      setEditErrors({})
     } catch {
       // Error handled by mutation
+    } finally {
+      setIsSavingEdit(false)
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this product?")) {
-      await deleteMutation.mutateAsync(id)
+  // Handle blur - auto-save when clicking outside
+  const handleEditRowBlur = (e: React.FocusEvent) => {
+    // Check if the new focus target is still within the edit row
+    const relatedTarget = e.relatedTarget as HTMLElement
+    if (editRowRef.current && !editRowRef.current.contains(relatedTarget)) {
+      saveEditing()
+    }
+  }
+
+  // Inline add row handlers
+  const resetAddRow = () => {
+    setAddRowValues({
+      brand: "",
+      product_name: "",
+      flavor: "",
+      serving_size: "",
+      expiry_duration_months: 36,
+      version: "",
+    })
+    setAddRowErrors({})
+  }
+
+  const cancelAddRow = () => {
+    setShowAddRow(false)
+    resetAddRow()
+  }
+
+  const saveAddRow = async () => {
+    const errors = validateEditValues(addRowValues)
+    if (Object.keys(errors).length > 0) {
+      setAddRowErrors(errors)
+      return
+    }
+
+    setIsSavingAdd(true)
+    try {
+      const displayName = generateDisplayName(
+        addRowValues.brand,
+        addRowValues.product_name,
+        addRowValues.flavor,
+        undefined,
+        addRowValues.version
+      )
+
+      await createMutation.mutateAsync({
+        brand: addRowValues.brand,
+        product_name: addRowValues.product_name,
+        flavor: addRowValues.flavor || undefined,
+        serving_size: addRowValues.serving_size || undefined,
+        expiry_duration_months: addRowValues.expiry_duration_months,
+        version: addRowValues.version || undefined,
+        display_name: displayName,
+      })
+      resetAddRow()
+      setShowAddRow(false)
+    } catch {
+      // Error handled by mutation
+    } finally {
+      setIsSavingAdd(false)
+    }
+  }
+
+  // Handle blur on add row - auto-save when clicking outside
+  const handleAddRowBlur = (e: React.FocusEvent) => {
+    const relatedTarget = e.relatedTarget as HTMLElement
+    if (addRowRef.current && !addRowRef.current.contains(relatedTarget)) {
+      // Only auto-save if there's something to save
+      if (addRowValues.brand.trim() || addRowValues.product_name.trim()) {
+        saveAddRow()
+      } else {
+        cancelAddRow()
+      }
+    }
+  }
+
+  // Keyboard navigation for edit row
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEditing()
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      saveEditing()
+    }
+    // Tab is handled natively by browser
+  }
+
+  // Keyboard navigation for add row
+  const handleAddKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelAddRow()
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      saveAddRow()
+    }
+    // Tab is handled natively by browser
+  }
+
+  const openArchiveDialog = (product: Product) => {
+    setArchiveDialogProduct(product)
+    setArchiveReason("")
+  }
+
+  const handleArchive = async () => {
+    if (!archiveDialogProduct || !archiveReason.trim()) return
+
+    try {
+      await archiveMutation.mutateAsync({
+        id: archiveDialogProduct.id,
+        reason: archiveReason.trim(),
+      })
+      setArchiveDialogProduct(null)
+      setArchiveReason("")
+    } catch {
+      // Error handled by mutation
     }
   }
 
@@ -425,14 +563,18 @@ export function ProductsPage() {
 
   // Create new test spec from inline add row
   const handleInlineCreateTestSpec = useCallback(async () => {
-    if (!selectedProductForSpecs || !addRowTestType || !addRowSpecification.trim()) return
+    if (!selectedProductForSpecs || !addRowTestType) return
+
+    // Use user-entered specification, or fall back to default from test type
+    const effectiveSpec = addRowSpecification.trim() || addRowTestType.default_specification || ''
+    if (!effectiveSpec) return
 
     try {
       await createTestSpecMutation.mutateAsync({
         productId: selectedProductForSpecs.id,
         data: {
           lab_test_type_id: addRowTestType.id,
-          specification: addRowSpecification,
+          specification: effectiveSpec,
           is_required: addRowRequired,
         },
       })
@@ -468,11 +610,9 @@ export function ProductsPage() {
     })
   }
 
-  const isMutating = createMutation.isPending || updateMutation.isPending
-
-  // Build table data: existing specs + add row
+  // Build table data: existing specs only (add row rendered separately)
   const testSpecTableData = useMemo<TestSpecRow[]>(() => {
-    const existingRows: TestSpecRow[] = (testSpecs || []).map((spec) => ({
+    return (testSpecs || []).map((spec) => ({
       id: spec.id,
       lab_test_type_id: spec.lab_test_type_id,
       test_name: spec.test_name,
@@ -483,24 +623,9 @@ export function ProductsPage() {
       is_required: spec.is_required,
       isAddRow: false,
     }))
+  }, [testSpecs])
 
-    // Add empty "add" row at the bottom
-    const addRow: TestSpecRow = {
-      id: 'new',
-      lab_test_type_id: addRowTestType?.id ?? null,
-      test_name: addRowTestType?.test_name ?? '',
-      test_method: addRowTestType?.test_method ?? null,
-      test_category: addRowTestType?.test_category ?? null,
-      test_unit: addRowTestType?.default_unit ?? null,
-      specification: addRowSpecification,
-      is_required: addRowRequired,
-      isAddRow: true,
-    }
-
-    return [...existingRows, addRow]
-  }, [testSpecs, addRowTestType, addRowSpecification, addRowRequired])
-
-  // TanStack Table columns for Test Specifications
+  // TanStack Table columns for Test Specifications (existing rows only)
   const testSpecColumnHelper = createColumnHelper<TestSpecRow>()
   const testSpecColumns = useMemo(() => [
     testSpecColumnHelper.accessor('test_name', {
@@ -508,24 +633,6 @@ export function ProductsPage() {
       size: 220,
       cell: (info) => {
         const row = info.row.original
-
-        if (row.isAddRow) {
-          // Add row - show autocomplete
-          return (
-            <LabTestTypeAutocomplete
-              labTestTypes={labTestTypes?.items || []}
-              excludeIds={testSpecs?.map(s => s.lab_test_type_id) || []}
-              value={addRowTestType}
-              onSelect={handleAddRowSelectTestType}
-              onClear={handleAddRowClearTestType}
-              placeholder="Search tests..."
-              inputRef={addRowTestTypeRef}
-              onTab={() => addRowSpecInputRef.current?.focus()}
-            />
-          )
-        }
-
-        // Existing row - display test name
         return (
           <div>
             <p className="font-semibold text-slate-900 text-[14px]">{row.test_name}</p>
@@ -541,7 +648,7 @@ export function ProductsPage() {
       size: 130,
       cell: (info) => {
         const row = info.row.original
-        if ((row.isAddRow && !row.lab_test_type_id) || !row.test_category) {
+        if (!row.test_category) {
           return <span className="text-slate-400 text-[12px] italic">—</span>
         }
         return (
@@ -558,31 +665,6 @@ export function ProductsPage() {
         const row = info.row.original
         const isEditing = editingSpecCell?.rowId === Number(row.id) && editingSpecCell?.columnId === 'specification'
 
-        if (row.isAddRow) {
-          // Add row - show input (always editable)
-          return (
-            <input
-              ref={addRowSpecInputRef}
-              type="text"
-              value={addRowSpecification}
-              onChange={(e) => setAddRowSpecification(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && addRowTestType && addRowSpecification.trim()) {
-                  e.preventDefault()
-                  handleInlineCreateTestSpec()
-                } else if (e.key === 'Tab' && !e.shiftKey) {
-                  e.preventDefault()
-                  addRowRequiredRef.current?.focus()
-                }
-              }}
-              placeholder="e.g., < 5000 CFU/g"
-              className="w-full px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              disabled={!addRowTestType}
-            />
-          )
-        }
-
-        // Existing row - show inline editable
         if (isEditing) {
           return (
             <input
@@ -629,34 +711,6 @@ export function ProductsPage() {
       size: 100,
       cell: (info) => {
         const row = info.row.original
-
-        if (row.isAddRow) {
-          return (
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                ref={addRowRequiredRef}
-                type="checkbox"
-                checked={addRowRequired}
-                onChange={(e) => setAddRowRequired(e.target.checked)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Tab' && !e.shiftKey) {
-                    e.preventDefault()
-                    // Auto-save if valid, then focus back to test type
-                    if (addRowTestType && addRowSpecification.trim()) {
-                      handleInlineCreateTestSpec()
-                    }
-                  }
-                }}
-                disabled={!addRowTestType}
-                className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
-              />
-              <span className={`text-[12px] ${addRowTestType ? 'text-slate-700' : 'text-slate-400'}`}>
-                Required
-              </span>
-            </label>
-          )
-        }
-
         return (
           <button
             onClick={() => handleToggleRequired(row as unknown as ProductTestSpecification)}
@@ -683,25 +737,6 @@ export function ProductsPage() {
       size: 50,
       cell: (info) => {
         const row = info.row.original
-
-        if (row.isAddRow) {
-          // Show add button for add row
-          return (
-            <button
-              onClick={handleInlineCreateTestSpec}
-              disabled={!addRowTestType || !addRowSpecification.trim() || createTestSpecMutation.isPending}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Add test"
-            >
-              {createTestSpecMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-            </button>
-          )
-        }
-
         return (
           <button
             onClick={() => handleDeleteTestSpec(row.id as number)}
@@ -715,11 +750,9 @@ export function ProductsPage() {
       },
     }),
   ], [
-    addRowTestType, addRowSpecification, addRowRequired, editingSpecCell,
-    labTestTypes, testSpecs, selectedProductForSpecs,
-    handleAddRowSelectTestType, handleAddRowClearTestType, handleInlineCreateTestSpec,
+    editingSpecCell, selectedProductForSpecs,
     handleToggleRequired, handleDeleteTestSpec,
-    updateTestSpecMutation, createTestSpecMutation, deleteTestSpecMutation
+    updateTestSpecMutation, deleteTestSpecMutation
   ])
 
   const testSpecTable = useReactTable({
@@ -743,13 +776,6 @@ export function ProductsPage() {
           <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">Products</h1>
           <p className="mt-1.5 text-[15px] text-slate-500">Manage your product catalog</p>
         </div>
-        <Button
-          onClick={openCreateDialog}
-          className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10 px-4"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add Product
-        </Button>
       </div>
 
       {/* Search */}
@@ -771,28 +797,6 @@ export function ProductsPage() {
         </span>
       </div>
 
-      {/* Bulk Import */}
-      <Collapsible open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
-        <CollapsibleTrigger asChild>
-          <Button
-            variant="outline"
-            className="w-full justify-between h-11 bg-white hover:bg-slate-50"
-          >
-            <span className="font-semibold text-slate-700">📊 Bulk Import Products</span>
-            <ChevronDown
-              className={`h-4 w-4 transition-transform ${
-                isBulkImportOpen ? "rotate-180" : ""
-              }`}
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-4">
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
-            <ProductBulkImport />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
       {/* Table */}
       <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
         {isLoading ? (
@@ -800,20 +804,13 @@ export function ProductsPage() {
             <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
           </div>
         ) : data?.items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
-              <Package className="h-8 w-8 text-slate-400" />
-            </div>
-            <p className="mt-5 text-[15px] font-medium text-slate-600">No products found</p>
-            <p className="mt-1 text-[14px] text-slate-500">Get started by adding your first product</p>
-            <button
-              onClick={openCreateDialog}
-              className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-            >
-              Add your first product
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
+          <EmptyState
+            icon={Package}
+            title="No products found"
+            description="Get started by adding your first product"
+            actionLabel="Add your first product"
+            onAction={() => setShowAddRow(true)}
+          />
         ) : (
           <Table>
             <TableHeader>
@@ -822,64 +819,286 @@ export function ProductsPage() {
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Product Name</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Flavor</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Sizes</TableHead>
-                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Serving</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Serving Size</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Expiry</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Version</TableHead>
                 <TableHead className="w-[120px] font-semibold text-slate-600 text-[13px] tracking-wide text-center">Specifications</TableHead>
                 <TableHead className="w-[100px] font-semibold text-slate-600 text-[13px] tracking-wide">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data?.items.map((product) => (
-                <TableRow key={product.id} className="hover:bg-slate-50/50 transition-colors">
-                  <TableCell className="font-semibold text-slate-900 text-[14px]">{product.brand}</TableCell>
-                  <TableCell className="text-slate-700 text-[14px]">{product.product_name}</TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">{product.flavor || "-"}</TableCell>
+              {data?.items.map((product) => {
+                const isEditing = editingProductId === product.id
+
+                if (isEditing && editValues) {
+                  // Editing row
+                  return (
+                    <TableRow
+                      key={product.id}
+                      ref={editRowRef}
+                      onBlur={handleEditRowBlur}
+                      onKeyDown={handleEditKeyDown}
+                      className="bg-amber-50/50 transition-colors"
+                    >
+                      <TableCell>
+                        <Input
+                          value={editValues.brand}
+                          onChange={(e) => setEditValues({ ...editValues, brand: e.target.value })}
+                          className={`h-8 text-[14px] ${editErrors.brand ? 'border-red-500' : ''}`}
+                          placeholder="Brand"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={editValues.product_name}
+                          onChange={(e) => setEditValues({ ...editValues, product_name: e.target.value })}
+                          className={`h-8 text-[14px] ${editErrors.product_name ? 'border-red-500' : ''}`}
+                          placeholder="Product Name"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={editValues.flavor}
+                          onChange={(e) => setEditValues({ ...editValues, flavor: e.target.value })}
+                          className="h-8 text-[14px]"
+                          placeholder="Flavor"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <SizeChips
+                          sizes={product.sizes}
+                          productId={product.id}
+                          onAddSize={handleAddSize}
+                          onEditSize={handleEditSize}
+                          onDeleteSize={handleDeleteSize}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={editValues.serving_size}
+                          onChange={(e) => setEditValues({ ...editValues, serving_size: e.target.value })}
+                          className="h-8 text-[14px]"
+                          placeholder="Serving"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={editValues.expiry_duration_months}
+                          onChange={(e) => setEditValues({ ...editValues, expiry_duration_months: parseInt(e.target.value) || 0 })}
+                          className={`h-8 w-16 text-[14px] ${editErrors.expiry_duration_months ? 'border-red-500' : ''}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={editValues.version}
+                          onChange={(e) => setEditValues({ ...editValues, version: e.target.value })}
+                          className="h-8 w-16 text-[14px]"
+                          placeholder="v1"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <TestSpecsTooltip
+                          productId={product.id}
+                          onClick={() => openTestSpecsDialog(product)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-0.5">
+                          {isSavingEdit ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={saveEditing}
+                                className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
+                              >
+                                <Check className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={cancelEditing}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                }
+
+                // Normal display row
+                return (
+                  <TableRow key={product.id} className="hover:bg-slate-50/50 transition-colors">
+                    <TableCell className="font-semibold text-slate-900 text-[14px]">{product.brand}</TableCell>
+                    <TableCell className="text-slate-700 text-[14px]">{product.product_name}</TableCell>
+                    <TableCell className="text-slate-500 text-[14px]">{product.flavor || "-"}</TableCell>
+                    <TableCell>
+                      <SizeChips
+                        sizes={product.sizes}
+                        productId={product.id}
+                        onAddSize={handleAddSize}
+                        onEditSize={handleEditSize}
+                        onDeleteSize={handleDeleteSize}
+                      />
+                    </TableCell>
+                    <TableCell className="text-slate-500 text-[14px]">
+                      {product.serving_size || "-"}
+                    </TableCell>
+                    <TableCell className="text-slate-500 text-[14px]">
+                      {product.expiry_duration_months} mo
+                    </TableCell>
+                    <TableCell className="text-slate-500 text-[14px]">
+                      {product.version || "-"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <TestSpecsTooltip
+                        productId={product.id}
+                        onClick={() => openTestSpecsDialog(product)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => startEditing(product)}
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openArchiveDialog(product)}
+                            disabled={archiveMutation.isPending}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                            title="Archive product"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+
+              {/* Add Row */}
+              {showAddRow && (
+                <TableRow
+                  ref={addRowRef}
+                  onBlur={handleAddRowBlur}
+                  onKeyDown={handleAddKeyDown}
+                  className="bg-blue-50/50 transition-colors"
+                >
                   <TableCell>
-                    <SizeChips
-                      sizes={product.sizes}
-                      productId={product.id}
-                      onAddSize={handleAddSize}
-                      onEditSize={handleEditSize}
-                      onDeleteSize={handleDeleteSize}
+                    <Input
+                      ref={addRowBrandInputRef}
+                      value={addRowValues.brand}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, brand: e.target.value })}
+                      className={`h-8 text-[14px] ${addRowErrors.brand ? 'border-red-500' : ''}`}
+                      placeholder="Brand *"
+                      autoFocus
                     />
                   </TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">
-                    {product.serving_size || "-"}
+                  <TableCell>
+                    <Input
+                      value={addRowValues.product_name}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, product_name: e.target.value })}
+                      className={`h-8 text-[14px] ${addRowErrors.product_name ? 'border-red-500' : ''}`}
+                      placeholder="Product Name *"
+                    />
                   </TableCell>
-                  <TableCell className="text-slate-500 text-[14px]">
-                    {product.expiry_duration_months} mo
+                  <TableCell>
+                    <Input
+                      value={addRowValues.flavor}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, flavor: e.target.value })}
+                      className="h-8 text-[14px]"
+                      placeholder="Flavor"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-slate-400 text-[12px]">-</span>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={addRowValues.serving_size}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, serving_size: e.target.value })}
+                      className="h-8 text-[14px]"
+                      placeholder="Serving"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      value={addRowValues.expiry_duration_months}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, expiry_duration_months: parseInt(e.target.value) || 0 })}
+                      className="h-8 w-16 text-[14px]"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={addRowValues.version}
+                      onChange={(e) => setAddRowValues({ ...addRowValues, version: e.target.value })}
+                      className="h-8 w-16 text-[14px]"
+                      placeholder="v1"
+                    />
                   </TableCell>
                   <TableCell className="text-center">
-                    <TestSpecsTooltip
-                      productId={product.id}
-                      onClick={() => openTestSpecsDialog(product)}
-                    />
+                    <span className="text-slate-400 text-[12px]">-</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditDialog(product)}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(product.id)}
-                        disabled={deleteMutation.isPending}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {isSavingAdd ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={saveAddRow}
+                            className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={cancelAddRow}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
+        )}
+
+        {/* Add Product Button at Footer */}
+        {!showAddRow && (
+          <div className="border-t border-slate-100 px-5 py-3">
+            <Button
+              variant="ghost"
+              onClick={() => setShowAddRow(true)}
+              className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 h-9 px-3"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Product
+            </Button>
+          </div>
         )}
 
         {/* Pagination */}
@@ -912,128 +1131,9 @@ export function ProductsPage() {
         )}
       </div>
 
-      {/* Add/Edit Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-[18px] font-bold text-slate-900">
-              {editingProduct ? "Edit Product" : "Add Product"}
-            </DialogTitle>
-            <DialogDescription className="text-[14px] text-slate-500">
-              {editingProduct
-                ? "Update product information"
-                : "Add a new product to the catalog"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="brand" className="text-[13px] font-semibold text-slate-700">Brand *</Label>
-                <Input
-                  id="brand"
-                  {...register("brand")}
-                  aria-invalid={!!errors.brand}
-                  className="border-slate-200 h-10"
-                />
-                {errors.brand && (
-                  <p className="text-[13px] text-red-600">{errors.brand.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="product_name" className="text-[13px] font-semibold text-slate-700">Product Name *</Label>
-                <Input
-                  id="product_name"
-                  {...register("product_name")}
-                  aria-invalid={!!errors.product_name}
-                  className="border-slate-200 h-10"
-                />
-                {errors.product_name && (
-                  <p className="text-[13px] text-red-600">{errors.product_name.message}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-[1fr_80px] gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="flavor" className="text-[13px] font-semibold text-slate-700">Flavor</Label>
-                <Input id="flavor" {...register("flavor")} className="border-slate-200 h-10" />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="version" className="text-[13px] font-semibold text-slate-700">Version</Label>
-                <Input
-                  id="version"
-                  {...register("version")}
-                  placeholder="1, 2..."
-                  className="border-slate-200 h-10"
-                />
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-400">
-              Sizes are managed in the product table using the inline chips
-            </p>
-
-            {/* Display Name Preview */}
-            <div className="space-y-1.5">
-              <Label className="text-[13px] font-semibold text-slate-500">Display Name (auto-generated)</Label>
-              <div className="h-10 px-3 flex items-center rounded-lg border border-slate-300 bg-slate-100 text-[14px] text-slate-500 cursor-not-allowed">
-                {previewDisplayName || <span className="text-slate-400 italic">Enter brand and product name...</span>}
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Generated from Brand - Product Name - Flavor (Version)
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="serving_size" className="text-[13px] font-semibold text-slate-700">Serving Size</Label>
-                <Input
-                  id="serving_size"
-                  {...register("serving_size")}
-                  placeholder="e.g., 30g, 2 capsules, 1 tsp"
-                  className="border-slate-200 h-10"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="expiry_duration_months" className="text-[13px] font-semibold text-slate-700">Expiry (months)</Label>
-                <Input
-                  id="expiry_duration_months"
-                  type="number"
-                  {...register("expiry_duration_months", { valueAsNumber: true })}
-                  className="border-slate-200 h-10"
-                />
-              </div>
-            </div>
-
-            <DialogFooter className="pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDialogOpen(false)}
-                className="border-slate-200 h-10"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isMutating}
-                className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
-              >
-                {isMutating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {editingProduct ? "Save Changes" : "Add Product"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       {/* Test Specifications Dialog */}
       <Dialog open={isTestSpecsDialogOpen} onOpenChange={setIsTestSpecsDialogOpen}>
-        <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto p-8">
           <DialogHeader>
             <DialogTitle className="text-[18px] font-bold text-slate-900">Test Specifications</DialogTitle>
             <DialogDescription className="text-[14px] text-slate-500">
@@ -1065,31 +1165,127 @@ export function ProductsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {testSpecTable.getRowModel().rows.map((row) => {
-                    const isAddRow = row.original.isAddRow
-                    return (
-                      <tr
-                        key={row.id}
-                        className={`border-b border-slate-100 transition-colors ${
-                          isAddRow ? 'bg-slate-50/50' : 'hover:bg-slate-50/50'
-                        }`}
-                      >
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-2">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    )
-                  })}
+                  {testSpecTable.getRowModel().rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors"
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-2">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {/* Add row - rendered separately with direct state access */}
+                  <tr className="bg-emerald-50/60 border-b border-emerald-100 border-dashed">
+                    <td style={{ width: 220 }} className="px-3 py-2">
+                      <LabTestTypeAutocomplete
+                        labTestTypes={labTestTypes?.items || []}
+                        excludeIds={testSpecs?.map(s => s.lab_test_type_id) || []}
+                        value={addRowTestType}
+                        onSelect={handleAddRowSelectTestType}
+                        onClear={handleAddRowClearTestType}
+                        placeholder="Search tests..."
+                        inputRef={addRowTestTypeRef}
+                        onTab={() => addRowSpecInputRef.current?.focus()}
+                      />
+                    </td>
+                    <td style={{ width: 130 }} className="px-3 py-2">
+                      {addRowTestType?.test_category ? (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide bg-blue-100 text-blue-700">
+                          {addRowTestType.test_category}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-[12px] italic">—</span>
+                      )}
+                    </td>
+                    <td style={{ width: 180 }} className="px-3 py-2">
+                      <input
+                        ref={addRowSpecInputRef}
+                        type="text"
+                        value={addRowSpecification}
+                        onChange={(e) => setAddRowSpecification(e.target.value)}
+                        onKeyDown={(e) => {
+                          const effectiveSpec = addRowSpecification.trim() || addRowTestType?.default_specification || ''
+                          if (e.key === 'Enter' && addRowTestType && effectiveSpec) {
+                            e.preventDefault()
+                            handleInlineCreateTestSpec()
+                          } else if (e.key === 'Tab' && !e.shiftKey) {
+                            e.preventDefault()
+                            addRowRequiredRef.current?.focus()
+                          }
+                        }}
+                        placeholder="e.g., < 5000 CFU/g"
+                        className="w-full px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        disabled={!addRowTestType}
+                      />
+                    </td>
+                    <td style={{ width: 100 }} className="px-3 py-2">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          ref={addRowRequiredRef}
+                          type="checkbox"
+                          checked={addRowRequired}
+                          onChange={(e) => setAddRowRequired(e.target.checked)}
+                          disabled={!addRowTestType}
+                          className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 h-4 w-4"
+                        />
+                        <span className={`text-[12px] ${addRowTestType ? 'text-slate-700' : 'text-slate-400'}`}>
+                          Required
+                        </span>
+                      </label>
+                    </td>
+                    <td style={{ width: 50 }} className="px-3 py-2">
+                      {(() => {
+                        const effectiveSpec = addRowSpecification.trim() || addRowTestType?.default_specification || ''
+                        const isReady = !!addRowTestType && !!effectiveSpec
+                        const tooltipText = !addRowTestType
+                          ? "Select a test type first"
+                          : !effectiveSpec
+                            ? "Enter a specification to add"
+                            : "Add test"
+                        return (
+                          <TooltipProvider delayDuration={0}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={handleInlineCreateTestSpec}
+                                  disabled={!isReady || createTestSpecMutation.isPending}
+                                  className={`p-1.5 rounded-lg transition-colors ${
+                                    isReady
+                                      ? 'text-emerald-600 bg-emerald-100 hover:bg-emerald-200'
+                                      : 'text-slate-300 hover:text-slate-400 disabled:cursor-not-allowed'
+                                  }`}
+                                >
+                                  {createTestSpecMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Plus className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="text-xs">
+                                {tooltipText}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )
+                      })()}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
 
             {testSpecs?.length === 0 && !addRowTestType && (
-              <p className="text-center text-[13px] text-slate-400 py-2">
-                Use the row above to add your first test specification
-              </p>
+              <div className="flex items-center justify-center gap-2 py-3 text-emerald-600">
+                <Plus className="h-4 w-4" />
+                <p className="text-[13px] font-medium">
+                  Use the row above to add your first test specification
+                </p>
+              </div>
             )}
           </div>
 
@@ -1124,6 +1320,60 @@ export function ProductsPage() {
             >
               {createTestSpecMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save & Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Archive Confirmation Dialog */}
+      <Dialog open={!!archiveDialogProduct} onOpenChange={() => setArchiveDialogProduct(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-bold text-slate-900">
+              Archive Product
+            </DialogTitle>
+            <DialogDescription className="text-slate-500">
+              You are archiving "{archiveDialogProduct?.display_name}". This product will no longer be available for new samples.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="archiveReason" className="text-sm font-medium text-slate-700">
+                Reason for archiving <span className="text-red-500">*</span>
+              </Label>
+              <Textarea
+                id="archiveReason"
+                value={archiveReason}
+                onChange={(e) => setArchiveReason(e.target.value)}
+                placeholder="e.g., Discontinued by manufacturer, replaced by new version..."
+                className="min-h-[80px] resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setArchiveDialogProduct(null)}
+              disabled={archiveMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleArchive}
+              disabled={archiveMutation.isPending || !archiveReason.trim()}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {archiveMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Archiving...
+                </>
+              ) : (
+                <>
+                  <Archive className="mr-2 h-4 w-4" />
+                  Archive Product
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

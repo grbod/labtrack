@@ -11,6 +11,9 @@ import {
   Mail,
   RotateCcw,
   Info,
+  ListOrdered,
+  UserCircle,
+  Trash2,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -19,13 +22,19 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 
 import { useAuthStore } from "@/store/auth"
 import { useSettings, PAGE_SIZE_OPTIONS } from "@/hooks/useSettings"
 import { emailTemplateApi } from "@/api/emailTemplate"
+import { authApi } from "@/api/client"
+import { useLabInfo } from "@/hooks/useLabInfo"
+import { COACategoryOrderEditor } from "@/components/domain/COACategoryOrderEditor"
+import { ImageCropper } from "@/components/ui/image-cropper"
 import type { EmailTemplateVariable } from "@/types/emailTemplate"
+import type { User } from "@/types"
 
-type SettingsTab = "display" | "system" | "email"
+type SettingsTab = "display" | "system" | "user" | "email" | "coa-style"
 
 export function SettingsPage() {
   const { user } = useAuthStore()
@@ -44,11 +53,42 @@ export function SettingsPage() {
   const [recentlyCompletedDays, setRecentlyCompletedDays] = useState(systemSettings.settings.recentlyCompletedDays)
   const [companyName, setCompanyName] = useState(systemSettings.settings.labInfo.companyName)
   const [address, setAddress] = useState(systemSettings.settings.labInfo.address)
-  const [phone, setPhone] = useState(systemSettings.settings.labInfo.phone)
-  const [email, setEmail] = useState(systemSettings.settings.labInfo.email)
+  const [city, setCity] = useState("")
+  const [state, setState] = useState("")
+  const [zipCode, setZipCode] = useState("")
+  const [requirePdfForSubmission, setRequirePdfForSubmission] = useState(true)
+  const [labInfoDirty, setLabInfoDirty] = useState(false)
 
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Lab info from backend
+  const {
+    labInfo,
+    isLoading: labInfoLoading,
+    updateMutation: updateLabInfoMutation,
+    uploadLogoMutation,
+    deleteLogoMutation,
+  } = useLabInfo()
+  const logoInputRef = useRef<HTMLInputElement>(null)
+
+  // Image cropper state for logo
+  const [cropperOpen, setCropperOpen] = useState(false)
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+
+  // User profile state
+  const [userFullName, setUserFullName] = useState(user?.full_name || "")
+  const [userTitle, setUserTitle] = useState(user?.title || "")
+  const [userPhone, setUserPhone] = useState(user?.phone || "")
+  const [userEmail, setUserEmail] = useState(user?.email || "")
+  const [isUserSaving, setIsUserSaving] = useState(false)
+  const [userSaveSuccess, setUserSaveSuccess] = useState(false)
+  const signatureInputRef = useRef<HTMLInputElement>(null)
+
+  // Signature cropper state
+  const [signatureCropperOpen, setSignatureCropperOpen] = useState(false)
+  const [signatureToCrop, setSignatureToCrop] = useState<string | null>(null)
 
   // Email template state
   const [emailSubject, setEmailSubject] = useState("")
@@ -105,16 +145,35 @@ export function SettingsPage() {
     }
   }, [emailTemplate])
 
-  // Sync local state when settings change
+  // Sync local state when system settings change (for thresholds)
   useEffect(() => {
     setStaleWarningDays(systemSettings.settings.staleWarningDays)
     setStaleCriticalDays(systemSettings.settings.staleCriticalDays)
     setRecentlyCompletedDays(systemSettings.settings.recentlyCompletedDays)
-    setCompanyName(systemSettings.settings.labInfo.companyName)
-    setAddress(systemSettings.settings.labInfo.address)
-    setPhone(systemSettings.settings.labInfo.phone)
-    setEmail(systemSettings.settings.labInfo.email)
   }, [systemSettings.settings])
+
+  // Sync local state when lab info loads from backend
+  useEffect(() => {
+    if (labInfo) {
+      setCompanyName(labInfo.company_name)
+      setAddress(labInfo.address)
+      setCity(labInfo.city)
+      setState(labInfo.state)
+      setZipCode(labInfo.zip_code)
+      setRequirePdfForSubmission(labInfo.require_pdf_for_submission)
+      setLabInfoDirty(false) // Reset dirty flag when data syncs from API
+    }
+  }, [labInfo])
+
+  // Sync user profile state when user changes
+  useEffect(() => {
+    if (user) {
+      setUserFullName(user.full_name || "")
+      setUserTitle(user.title || "")
+      setUserPhone(user.phone || "")
+      setUserEmail(user.email || "")
+    }
+  }, [user])
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = parseInt(e.target.value, 10)
@@ -125,30 +184,98 @@ export function SettingsPage() {
     setIsSaving(true)
     setSaveSuccess(false)
 
-    // Validate thresholds
-    const warning = Math.max(1, staleWarningDays)
-    const critical = Math.max(warning + 1, staleCriticalDays)
-    const recentlyCompleted = Math.max(1, recentlyCompletedDays)
+    try {
+      // Validate thresholds
+      const warning = Math.max(1, staleWarningDays)
+      const critical = Math.max(warning + 1, staleCriticalDays)
+      const recentlyCompleted = Math.max(1, recentlyCompletedDays)
 
-    systemSettings.updateSettings({
-      staleWarningDays: warning,
-      staleCriticalDays: critical,
-      recentlyCompletedDays: recentlyCompleted,
-      labInfo: {
-        companyName,
+      // Save thresholds to localStorage
+      systemSettings.updateSettings({
+        staleWarningDays: warning,
+        staleCriticalDays: critical,
+        recentlyCompletedDays: recentlyCompleted,
+      })
+
+      // Save lab info to backend API (phone/email are per-user, not company-wide)
+      await updateLabInfoMutation.mutateAsync({
+        company_name: companyName,
         address,
-        phone,
-        email,
-        logoUrl: systemSettings.settings.labInfo.logoUrl,
-      },
-    })
+        city,
+        state,
+        zip_code: zipCode,
+        require_pdf_for_submission: requirePdfForSubmission,
+      })
 
-    // Simulate async save (will be real API call later)
-    await new Promise((resolve) => setTimeout(resolve, 300))
+      setLabInfoDirty(false) // Reset dirty flag on successful save
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 2000)
+    } catch (error) {
+      console.error("Failed to save settings:", error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
-    setIsSaving(false)
-    setSaveSuccess(true)
-    setTimeout(() => setSaveSuccess(false), 2000)
+  // Logo upload handler - opens cropper
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"]
+    if (!allowedTypes.includes(file.type)) {
+      alert("Please upload a JPG, PNG, or WebP image")
+      return
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Image must be less than 2MB")
+      return
+    }
+
+    // Create object URL for cropper
+    const imageUrl = URL.createObjectURL(file)
+    setImageToCrop(imageUrl)
+    setCropperOpen(true)
+
+    // Reset file input
+    if (logoInputRef.current) {
+      logoInputRef.current.value = ""
+    }
+  }
+
+  // Handle cropped image upload
+  const handleCropComplete = async (croppedBlob: Blob) => {
+    // Convert blob to File for upload
+    const file = new File([croppedBlob], "logo.png", { type: "image/png" })
+
+    setIsUploadingLogo(true)
+    try {
+      await uploadLogoMutation.mutateAsync(file)
+      // Success! Dialog will close via onOpenChange(false) in ImageCropper
+      // URL cleanup happens in onOpenChange callback when dialog closes
+    } catch (error: any) {
+      console.error("Logo upload failed:", error?.response?.data || error)
+      const message = error?.response?.data?.detail
+        || error?.response?.statusText
+        || error?.message
+        || "Unknown error"
+      alert(`Failed to upload logo: ${message}\n\nStatus: ${error?.response?.status || 'N/A'}`)
+      throw error // Re-throw so ImageCropper doesn't close the dialog
+    } finally {
+      setIsUploadingLogo(false)
+    }
+  }
+
+  // Logo delete handler
+  const handleDeleteLogo = async () => {
+    try {
+      await deleteLogoMutation.mutateAsync()
+    } catch {
+      // Error handled by mutation
+    }
   }
 
   const handleSaveEmailTemplate = () => {
@@ -160,6 +287,78 @@ export function SettingsPage() {
 
   const handleResetEmailTemplate = () => {
     resetTemplateMutation.mutate()
+  }
+
+  // User profile handlers
+  const handleSaveUserProfile = async () => {
+    setIsUserSaving(true)
+    setUserSaveSuccess(false)
+    try {
+      const updatedUser = await authApi.updateProfile({
+        full_name: userFullName || null,
+        title: userTitle || null,
+        phone: userPhone || null,
+        email: userEmail || null,
+      })
+      // Update auth store with new user data
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
+      setUserSaveSuccess(true)
+      setTimeout(() => setUserSaveSuccess(false), 2000)
+    } catch {
+      // Error handled by toast or notification
+    } finally {
+      setIsUserSaving(false)
+    }
+  }
+
+  // Signature upload handler - opens cropper
+  const handleSignatureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"]
+    if (!allowedTypes.includes(file.type)) {
+      alert("Please upload a JPG, PNG, or WebP image")
+      return
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Image must be less than 2MB")
+      return
+    }
+
+    const imageUrl = URL.createObjectURL(file)
+    setSignatureToCrop(imageUrl)
+    setSignatureCropperOpen(true)
+
+    if (signatureInputRef.current) {
+      signatureInputRef.current.value = ""
+    }
+  }
+
+  // Handle cropped signature upload
+  const handleSignatureCropComplete = async (croppedBlob: Blob) => {
+    const file = new File([croppedBlob], "signature.png", { type: "image/png" })
+
+    try {
+      await authApi.uploadSignature(file)
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
+      // Success! Dialog will close via onOpenChange(false) in ImageCropper
+      // URL cleanup happens in onOpenChange callback when dialog closes
+    } catch (error) {
+      console.error("Signature upload failed:", error)
+      throw error // Re-throw so ImageCropper doesn't close the dialog
+    }
+  }
+
+  // Signature delete handler
+  const handleDeleteSignature = async () => {
+    try {
+      await authApi.deleteSignature()
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
+    } catch {
+      // Error handled
+    }
   }
 
   const insertVariable = useCallback((variable: string, target: "subject" | "body") => {
@@ -194,10 +393,13 @@ export function SettingsPage() {
     staleWarningDays !== systemSettings.settings.staleWarningDays ||
     staleCriticalDays !== systemSettings.settings.staleCriticalDays ||
     recentlyCompletedDays !== systemSettings.settings.recentlyCompletedDays ||
-    companyName !== systemSettings.settings.labInfo.companyName ||
-    address !== systemSettings.settings.labInfo.address ||
-    phone !== systemSettings.settings.labInfo.phone ||
-    email !== systemSettings.settings.labInfo.email
+    labInfoDirty
+
+  const hasUserProfileChanges =
+    (user && userFullName !== (user.full_name || "")) ||
+    (user && userTitle !== (user.title || "")) ||
+    (user && userPhone !== (user.phone || "")) ||
+    (user && userEmail !== (user.email || ""))
 
   const hasEmailChanges =
     emailTemplate &&
@@ -208,7 +410,9 @@ export function SettingsPage() {
   // Tab items
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { id: "display", label: "Display", icon: <Eye className="h-4 w-4" /> },
+    { id: "user", label: "User Profile", icon: <UserCircle className="h-4 w-4" /> },
     { id: "system", label: "System", icon: <SettingsIcon className="h-4 w-4" />, adminOnly: true },
+    { id: "coa-style", label: "COA Style", icon: <ListOrdered className="h-4 w-4" />, adminOnly: true },
     { id: "email", label: "Customer Email", icon: <Mail className="h-4 w-4" />, adminOnly: true },
   ]
 
@@ -292,6 +496,174 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* User Profile Tab */}
+      {activeTab === "user" && (
+        <Card className="border-slate-200/60 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100">
+                <UserCircle className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <CardTitle className="text-[16px] font-semibold text-slate-900">
+                  User Profile
+                </CardTitle>
+                <CardDescription className="text-[13px] text-slate-500">
+                  Your personal information and signature for COA documents
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="userFullName"
+                  className="text-[13px] font-semibold text-slate-700"
+                >
+                  Full Name
+                </Label>
+                <Input
+                  id="userFullName"
+                  value={userFullName}
+                  onChange={(e) => setUserFullName(e.target.value)}
+                  placeholder="Enter your full name"
+                  className="h-10 border-slate-200"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="userTitle"
+                  className="text-[13px] font-semibold text-slate-700"
+                >
+                  Title
+                </Label>
+                <Input
+                  id="userTitle"
+                  value={userTitle}
+                  onChange={(e) => setUserTitle(e.target.value)}
+                  placeholder="e.g., Quality Manager"
+                  className="h-10 border-slate-200"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="userPhone"
+                  className="text-[13px] font-semibold text-slate-700"
+                >
+                  Phone
+                </Label>
+                <Input
+                  id="userPhone"
+                  type="tel"
+                  value={userPhone}
+                  onChange={(e) => setUserPhone(e.target.value)}
+                  placeholder="Enter phone number"
+                  className="h-10 border-slate-200"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="userEmailField"
+                  className="text-[13px] font-semibold text-slate-700"
+                >
+                  Email
+                </Label>
+                <Input
+                  id="userEmailField"
+                  type="email"
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="Enter email address"
+                  className="h-10 border-slate-200"
+                />
+              </div>
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label className="text-[13px] font-semibold text-slate-700">
+                  Signature
+                </Label>
+                <div className="flex items-center gap-3">
+                  {user?.signature_url && (
+                    <img
+                      src={user.signature_url}
+                      alt="Your signature"
+                      className="h-16 w-auto object-contain border rounded bg-white p-1"
+                    />
+                  )}
+                  <input
+                    ref={signatureInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleSignatureUpload}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => signatureInputRef.current?.click()}
+                    className="gap-2"
+                  >
+                    <Upload className="h-4 w-4" />
+                    {user?.signature_url ? "Change Signature" : "Upload Signature"}
+                  </Button>
+                  {user?.signature_url && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDeleteSignature}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[12px] text-slate-500">
+                  Recommended: PNG with transparent background. Will appear on released COAs.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-6 mt-4 border-t border-slate-200">
+              <Button
+                onClick={handleSaveUserProfile}
+                disabled={isUserSaving || !hasUserProfileChanges}
+                className="gap-2"
+              >
+                {isUserSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                Save Changes
+              </Button>
+              {userSaveSuccess && (
+                <span className="text-[13px] text-green-600">Changes saved!</span>
+              )}
+              {!hasUserProfileChanges && !userSaveSuccess && (
+                <span className="text-[13px] text-slate-400">No unsaved changes</span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Signature Cropper Modal */}
+      {signatureToCrop && (
+        <ImageCropper
+          open={signatureCropperOpen}
+          onOpenChange={(open) => {
+            setSignatureCropperOpen(open)
+            if (!open && signatureToCrop) {
+              URL.revokeObjectURL(signatureToCrop)
+              setSignatureToCrop(null)
+            }
+          }}
+          imageSrc={signatureToCrop}
+          onCropComplete={handleSignatureCropComplete}
+          title="Crop Signature"
+        />
       )}
 
       {/* System Settings Tab */}
@@ -404,7 +776,10 @@ export function SettingsPage() {
                   <Input
                     id="companyName"
                     value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
+                    onChange={(e) => {
+                      setCompanyName(e.target.value)
+                      setLabInfoDirty(true)
+                    }}
                     placeholder="Enter company name"
                     className="h-10 border-slate-200"
                   />
@@ -414,66 +789,151 @@ export function SettingsPage() {
                     htmlFor="address"
                     className="text-[13px] font-semibold text-slate-700"
                   >
-                    Address
+                    Street Address
                   </Label>
                   <Input
                     id="address"
                     value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Enter full address"
+                    onChange={(e) => {
+                      setAddress(e.target.value)
+                      setLabInfoDirty(true)
+                    }}
+                    placeholder="Enter street address"
                     className="h-10 border-slate-200"
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label
-                    htmlFor="phone"
+                    htmlFor="city"
                     className="text-[13px] font-semibold text-slate-700"
                   >
-                    Phone
+                    City
                   </Label>
                   <Input
-                    id="phone"
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Enter phone number"
+                    id="city"
+                    value={city}
+                    onChange={(e) => {
+                      setCity(e.target.value)
+                      setLabInfoDirty(true)
+                    }}
+                    placeholder="City"
                     className="h-10 border-slate-200"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="email"
-                    className="text-[13px] font-semibold text-slate-700"
-                  >
-                    Email
-                  </Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter email address"
-                    className="h-10 border-slate-200"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="state"
+                      className="text-[13px] font-semibold text-slate-700"
+                    >
+                      State
+                    </Label>
+                    <Input
+                      id="state"
+                      value={state}
+                      onChange={(e) => {
+                        setState(e.target.value)
+                        setLabInfoDirty(true)
+                      }}
+                      placeholder="FL"
+                      className="h-10 border-slate-200"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="zipCode"
+                      className="text-[13px] font-semibold text-slate-700"
+                    >
+                      ZIP Code
+                    </Label>
+                    <Input
+                      id="zipCode"
+                      value={zipCode}
+                      onChange={(e) => {
+                        setZipCode(e.target.value)
+                        setLabInfoDirty(true)
+                      }}
+                      placeholder="12345"
+                      className="h-10 border-slate-200"
+                    />
+                  </div>
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label className="text-[13px] font-semibold text-slate-700">
                     Company Logo
                   </Label>
                   <div className="flex items-center gap-3">
+                    {labInfo?.logo_url && (
+                      <img
+                        src={labInfo.logo_url}
+                        alt="Company logo"
+                        className="h-10 w-auto object-contain border rounded"
+                      />
+                    )}
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
                     <Button
                       type="button"
                       variant="outline"
-                      disabled
-                      className="h-10 border-slate-200 text-slate-500"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={uploadLogoMutation.isPending || isUploadingLogo}
+                      className="h-10 border-slate-200"
                     >
-                      <Upload className="h-4 w-4 mr-2" />
-                      Upload Logo
+                      {(uploadLogoMutation.isPending || isUploadingLogo) ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      {labInfo?.logo_url ? "Change Logo" : "Upload Logo"}
                     </Button>
-                    <span className="text-[12px] text-slate-400">
-                      Coming soon - Logo upload will be available in a future update
-                    </span>
+                    {labInfo?.logo_url && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleDeleteLogo}
+                        disabled={deleteLogoMutation.isPending}
+                        className="h-10 text-red-500 hover:text-red-600 hover:bg-red-50"
+                      >
+                        {deleteLogoMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Remove"
+                        )}
+                      </Button>
+                    )}
                   </div>
+                  <p className="text-[11px] text-slate-500">
+                    Recommended: PNG or JPG, max 2MB. Will appear above company name on COAs.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Submission Settings */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <h3 className="text-[14px] font-semibold text-slate-900">Submission Settings</h3>
+              <div className="flex items-start gap-3">
+                <Switch
+                  id="requirePdf"
+                  checked={requirePdfForSubmission}
+                  onCheckedChange={(checked) => {
+                    setRequirePdfForSubmission(checked)
+                    setLabInfoDirty(true)
+                  }}
+                  className="mt-0.5"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="requirePdf" className="text-[13px] font-semibold text-slate-700">
+                    Require PDF for Submission
+                  </Label>
+                  <p className="text-[11px] text-slate-500">
+                    When enabled, at least one lab PDF must be attached before submitting for approval. Admin or QC Manager can override.
+                  </p>
                 </div>
               </div>
             </div>
@@ -484,7 +944,11 @@ export function SettingsPage() {
                 <Button
                   onClick={handleSaveSystemSettings}
                   disabled={isSaving || !hasSystemChanges}
-                  className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10 px-5"
+                  className={`${
+                    hasSystemChanges
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-slate-400"
+                  } text-white shadow-sm h-10 px-5`}
                 >
                   {isSaving ? (
                     <>
@@ -510,6 +974,30 @@ export function SettingsPage() {
                 )}
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* COA Style Tab */}
+      {activeTab === "coa-style" && canEditSystemSettings && (
+        <Card className="border-slate-200/60 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100">
+                <ListOrdered className="h-5 w-5 text-indigo-600" />
+              </div>
+              <div>
+                <CardTitle className="text-[16px] font-semibold text-slate-900">
+                  COA Display Order
+                </CardTitle>
+                <CardDescription className="text-[13px] text-slate-500">
+                  Configure how test categories are ordered on generated COA documents
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <COACategoryOrderEditor />
           </CardContent>
         </Card>
       )}
@@ -645,7 +1133,11 @@ export function SettingsPage() {
                       <Button
                         onClick={handleSaveEmailTemplate}
                         disabled={updateTemplateMutation.isPending || !hasEmailChanges}
-                        className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10 px-5"
+                        className={`${
+                          hasEmailChanges
+                            ? "bg-blue-600 hover:bg-blue-700"
+                            : "bg-slate-400"
+                        } text-white shadow-sm h-10 px-5`}
                       >
                         {updateTemplateMutation.isPending ? (
                           <>
@@ -730,6 +1222,23 @@ export function SettingsPage() {
         </div>
       )}
       </div>
+
+      {/* Image Cropper Modal */}
+      {imageToCrop && (
+        <ImageCropper
+          open={cropperOpen}
+          onOpenChange={(open) => {
+            setCropperOpen(open)
+            if (!open && imageToCrop) {
+              URL.revokeObjectURL(imageToCrop)
+              setImageToCrop(null)
+            }
+          }}
+          imageSrc={imageToCrop}
+          onCropComplete={handleCropComplete}
+          title="Crop Logo"
+        />
+      )}
     </div>
   )
 }

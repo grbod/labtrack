@@ -57,6 +57,7 @@ class AuditAction(str, enum.Enum):
     DELETE = "delete"
     APPROVE = "approve"
     REJECT = "reject"
+    OVERRIDE = "override"
 
 
 class COAReleaseStatus(str, enum.Enum):

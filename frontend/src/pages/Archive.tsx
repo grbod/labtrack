@@ -117,7 +117,7 @@ export function ArchivePage() {
       {/* Header */}
       <div>
         <h1 className="text-[26px] font-bold text-slate-900 tracking-tight">
-          Archive
+          History
         </h1>
         <p className="mt-1.5 text-[15px] text-slate-500">
           Search and download released COAs

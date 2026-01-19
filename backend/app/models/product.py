@@ -1,6 +1,7 @@
 """Product model for standardized product catalog."""
 
-from sqlalchemy import Column, String, Text, Index, Integer
+from datetime import datetime
+from sqlalchemy import Column, String, Text, Index, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, validates
 from app.models.base import BaseModel
 
@@ -28,6 +29,13 @@ class Product(BaseModel):
     display_name = Column(Text, nullable=False)
     serving_size = Column(String(50), nullable=True)  # e.g., "30g", "2 capsules", "1 tsp"
     expiry_duration_months = Column(Integer, nullable=False, default=36)  # Default 3 years
+    version = Column(String(20), nullable=True)  # e.g., "v1", "v2.1"
+
+    # Archive fields for soft delete
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    archived_at = Column(DateTime, nullable=True)
+    archived_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    archive_reason = Column(String(500), nullable=True)
 
     # Relationships
     lot_products = relationship(
@@ -45,6 +53,7 @@ class Product(BaseModel):
         cascade="all, delete-orphan",
         order_by="ProductSize.id"
     )
+    archived_by = relationship("User", foreign_keys=[archived_by_id])
 
     # Indexes for performance
     __table_args__ = (
@@ -65,9 +74,9 @@ class Product(BaseModel):
         """Clean optional string fields."""
         return value.strip() if value else None
 
-    @validates("serving_size")
-    def validate_serving_size(self, key, value):
-        """Clean serving size string if provided."""
+    @validates("serving_size", "version")
+    def validate_optional_string_fields(self, key, value):
+        """Clean optional string fields if provided."""
         return value.strip() if value else None
 
     @validates("expiry_duration_months")
@@ -135,3 +144,28 @@ class Product(BaseModel):
             return f"{months} month{'s' if months != 1 else ''}"
         else:
             return f"{years} year{'s' if years != 1 else ''}, {months} month{'s' if months != 1 else ''}"
+
+    def archive(self, user_id: int, reason: str):
+        """
+        Archive this product (soft delete).
+
+        Args:
+            user_id: ID of the user performing the archive
+            reason: Reason for archiving (required)
+        """
+        self.is_active = False
+        self.archived_at = datetime.utcnow()
+        self.archived_by_id = user_id
+        self.archive_reason = reason
+
+    def restore(self):
+        """Restore an archived product back to active status."""
+        self.is_active = True
+        self.archived_at = None
+        self.archived_by_id = None
+        self.archive_reason = None
+
+    @property
+    def is_archived(self) -> bool:
+        """Check if this product is archived."""
+        return not self.is_active

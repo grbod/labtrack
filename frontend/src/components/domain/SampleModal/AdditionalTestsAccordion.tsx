@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { ChevronDown, Plus, X } from "lucide-react"
+import { ChevronDown, Plus, X, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { TestResultsTable } from "./TestResultsTable"
+import { PassFailBadge } from "./PassFailBadge"
 import type { TestResultRow, LabTestType } from "@/types"
 
 interface AdditionalTestsAccordionProps {
@@ -20,6 +21,8 @@ interface AdditionalTestsAccordionProps {
   onUpdateResult: (id: number, field: string, value: string) => Promise<void>
   /** Callback when a new test is added */
   onAddTest: (testName: string, labTestTypeId: number) => Promise<void>
+  /** Callback when a test is deleted */
+  onDeleteResult?: (id: number) => Promise<void>
   /** Whether the accordion is disabled */
   disabled?: boolean
   /** ID of the row currently being saved */
@@ -35,6 +38,7 @@ export function AdditionalTestsAccordion({
   labTestTypes,
   onUpdateResult,
   onAddTest,
+  onDeleteResult,
   disabled = false,
   savingRowId,
 }: AdditionalTestsAccordionProps) {
@@ -86,15 +90,37 @@ export function AdditionalTestsAccordion({
 
       <CollapsibleContent>
         <div className="border border-t-0 border-slate-200 rounded-b-lg overflow-hidden">
-          {/* Additional tests table */}
+          {/* Additional tests table with delete buttons */}
           {additionalTests.length > 0 && (
-            <TestResultsTable
-              testResults={additionalTests}
-              productSpecs={[]}
-              onUpdateResult={onUpdateResult}
-              disabled={disabled}
-              savingRowId={savingRowId}
-            />
+            <div className="relative">
+              <TestResultsTable
+                testResults={additionalTests}
+                productSpecs={[]}
+                onUpdateResult={onUpdateResult}
+                disabled={disabled}
+                savingRowId={savingRowId}
+              />
+              {/* Delete buttons overlay - positioned at the end of each row */}
+              {!disabled && onDeleteResult && (
+                <div className="absolute top-0 right-0 flex flex-col" style={{ marginTop: '41px' }}>
+                  {additionalTests.map((test) => (
+                    <div
+                      key={test.id}
+                      className="h-[41px] flex items-center pr-2"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onDeleteResult(test.id)}
+                        className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        title="Remove test"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Add test row */}

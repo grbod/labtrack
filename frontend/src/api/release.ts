@@ -30,6 +30,28 @@ export const releaseApi = {
     return `/api/v1/release/${lotId}/${productId}/preview`
   },
 
+  /** Download COA PDF as blob (with auth token) */
+  downloadCoaBlob: async (lotId: number, productId: number): Promise<{ blob: Blob; filename: string }> => {
+    const response = await api.get(`/release/${lotId}/${productId}/download`, {
+      responseType: "blob",
+    })
+
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers["content-disposition"]
+    let filename = `COA_${lotId}_${productId}.pdf`
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="?([^";\n]+)"?/)
+      if (match?.[1]) filename = match[1]
+    }
+
+    return { blob: response.data, filename }
+  },
+
+  /** Regenerate COA PDF for a lot/product (forces fresh generation) */
+  regenerateCoa: async (lotId: number, productId: number): Promise<void> => {
+    await api.post(`/release/${lotId}/${productId}/regenerate`)
+  },
+
   /** Get COA preview data for frontend rendering */
   getPreviewData: async (lotId: number, productId: number): Promise<COAPreviewData> => {
     const response = await api.get<COAPreviewData>(`/release/${lotId}/${productId}/preview-data`)
@@ -104,6 +126,19 @@ export const releaseApi = {
     return `/api/v1/release/${lotId}/${productId}/download`
   },
 
+  /** Get recently released COAs within a given number of days */
+  getRecentlyReleased: async (days: number): Promise<ArchiveItem[]> => {
+    const dateFrom = new Date()
+    dateFrom.setDate(dateFrom.getDate() - days)
+    const dateFromStr = dateFrom.toISOString().split("T")[0]
+
+    const params = new URLSearchParams()
+    params.append("date_from", dateFromStr)
+    params.append("page_size", "100") // Get up to 100 recent items
+
+    const response = await api.get<PaginatedResponse<ArchiveItem>>(`/archive?${params}`)
+    return response.data.items
+  },
 }
 
 export const customerApi = {

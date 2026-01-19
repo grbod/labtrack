@@ -10,6 +10,20 @@ export interface UploadResponse {
 
 export const uploadsApi = {
   /**
+   * Fetch a PDF as a blob (with auth) and open in new window
+   */
+  openPdf: async (filename: string): Promise<void> => {
+    const response = await api.get(`/uploads/${encodeURIComponent(filename)}`, {
+      responseType: "blob",
+    })
+    const blob = new Blob([response.data], { type: "application/pdf" })
+    const url = URL.createObjectURL(blob)
+    window.open(url, "_blank")
+    // Clean up the URL after a delay to allow the new tab to load
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+  },
+
+  /**
    * Upload a PDF file and associate it with a lot
    * Returns metadata including the filename
    */

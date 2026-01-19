@@ -3,9 +3,10 @@ import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, Users, ArrowRight, RotateCcw } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, Users, RotateCcw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -177,20 +178,13 @@ export function CustomersPage() {
             <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
           </div>
         ) : data?.items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
-              <Users className="h-8 w-8 text-slate-400" />
-            </div>
-            <p className="mt-5 text-[15px] font-medium text-slate-600">No customers found</p>
-            <p className="mt-1 text-[14px] text-slate-500">Get started by adding your first customer</p>
-            <button
-              onClick={openCreateDialog}
-              className="mt-4 inline-flex items-center gap-1.5 text-[14px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-            >
-              Add your first customer
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="No customers found"
+            description="Get started by adding your first customer"
+            actionLabel="Add your first customer"
+            onAction={openCreateDialog}
+          />
         ) : (
           <Table>
             <TableHeader>

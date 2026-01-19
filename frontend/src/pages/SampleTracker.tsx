@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "react-router-dom"
 import { ClipboardList, Loader2 } from "lucide-react"
 
 import { useLots } from "@/hooks/useLots"
@@ -9,6 +10,19 @@ import { SampleModal } from "@/components/domain/SampleModal"
 import type { Lot } from "@/types"
 
 export function SampleTrackerPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const highlightRef = searchParams.get('highlight')
+
+  // Clear highlight param from URL after animation completes (2s)
+  useEffect(() => {
+    if (highlightRef) {
+      const timer = setTimeout(() => {
+        setSearchParams({}, { replace: true })
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [highlightRef, setSearchParams])
+
   const [selectedLot, setSelectedLot] = useState<Lot | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
@@ -30,6 +44,30 @@ export function SampleTrackerPage() {
   const handleCloseModal = () => {
     setIsModalOpen(false)
     setSelectedLot(null)
+  }
+
+  // After submission, navigate to next under_review sample or close
+  const handleSubmitSuccess = () => {
+    if (!selectedLot || !lotsData?.items) {
+      handleCloseModal()
+      return
+    }
+
+    // Find next under_review sample (excluding the one just submitted)
+    const currentIndex = lotsData.items.findIndex(l => l.id === selectedLot.id)
+    const items = lotsData.items
+
+    // Look forward first, then wrap around
+    for (let i = 1; i < items.length; i++) {
+      const idx = (currentIndex + i) % items.length
+      if (items[idx].status === "under_review") {
+        setSelectedLot(items[idx])
+        return
+      }
+    }
+
+    // No more under_review samples - close modal
+    handleCloseModal()
   }
 
   const handleNavigate = (direction: "prev" | "next") => {
@@ -77,6 +115,7 @@ export function SampleTrackerPage() {
             onCardClick={handleCardClick}
             staleWarningDays={systemSettings.staleWarningDays}
             staleCriticalDays={systemSettings.staleCriticalDays}
+            highlightRef={highlightRef}
           />
         )}
       </div>
@@ -113,6 +152,7 @@ export function SampleTrackerPage() {
         onNavigate={handleNavigate}
         prevDisabled={prevDisabled}
         nextDisabled={nextDisabled ?? false}
+        onSubmitSuccess={handleSubmitSuccess}
       />
       </div>
     </div>

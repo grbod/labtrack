@@ -29,8 +29,8 @@ const cardVariants = {
 }
 
 /**
- * Kanban column configuration
- * Maps each column to its status with color theming
+ * Kanban column configuration with inline Tailwind classes.
+ * Note: Classes are hardcoded to ensure Tailwind v4 detects them at build time.
  */
 interface KanbanColumnConfig {
   id: LotStatus
@@ -43,7 +43,6 @@ interface KanbanColumnConfig {
 
 // Sample Tracker only shows active workflow columns
 // Approved/released items appear in Release Queue, rejected in Archive
-// Color scheme: sky=waiting, amber=in-progress, red=attention, violet=review
 // NOTE: Drag-and-drop is DISABLED - status is auto-calculated based on test results
 const KANBAN_COLUMNS: KanbanColumnConfig[] = [
   {
@@ -87,6 +86,8 @@ interface KanbanBoardProps {
   onCardClick: (lot: Lot) => void
   staleWarningDays?: number
   staleCriticalDays?: number
+  /** Reference number to highlight (from URL param after creating a sample) */
+  highlightRef?: string | null
 }
 
 /**
@@ -133,14 +134,20 @@ interface KanbanCardProps {
   staleness: { level: StalenessLevel; daysOld: number }
   onClick: () => void
   index: number // For staggered animation
+  isHighlighted?: boolean
 }
 
-function KanbanCardContent({ lot, staleness, onClick }: Omit<KanbanCardProps, 'index'>) {
+function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<KanbanCardProps, 'index'>) {
   const borderClass = {
     critical: "border-red-400 border-l-4",
     warning: "border-orange-400 border-l-4",
     normal: "border-slate-200",
   }[staleness.level]
+
+  // Glow animation styles for highlighted cards
+  const glowStyle = isHighlighted ? {
+    animation: 'glow-fade 2s ease-in-out forwards',
+  } : undefined
 
   // Get days badge configuration based on staleness
   const getDaysBadge = () => {
@@ -166,6 +173,7 @@ function KanbanCardContent({ lot, staleness, onClick }: Omit<KanbanCardProps, 'i
         "hover:border-slate-300 hover:shadow",
         borderClass
       )}
+      style={glowStyle}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -239,7 +247,10 @@ function KanbanCardContent({ lot, staleness, onClick }: Omit<KanbanCardProps, 'i
               const failed = lot.tests_failed ?? 0
               if (failed > 0) return "bg-red-100 text-red-700"
               if (total === 0) return "bg-slate-100 text-slate-500"
-              if (entered === total) return "bg-emerald-100 text-emerald-700"
+              // Darker green when user added extra tests (entered > required)
+              if (entered > total && total > 0) return "bg-emerald-200 text-emerald-800"
+              // Regular green when exactly matching required tests
+              if (entered === total && total > 0) return "bg-emerald-100 text-emerald-700"
               if (entered > 0) return "bg-amber-100 text-amber-700"
               return "bg-slate-100 text-slate-500"
             })()
@@ -252,7 +263,7 @@ function KanbanCardContent({ lot, staleness, onClick }: Omit<KanbanCardProps, 'i
   )
 }
 
-function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
+function KanbanCard({ lot, staleness, onClick, index, isHighlighted }: KanbanCardProps) {
   return (
     <motion.div
       variants={cardVariants}
@@ -267,6 +278,7 @@ function KanbanCard({ lot, staleness, onClick, index }: KanbanCardProps) {
         lot={lot}
         staleness={staleness}
         onClick={onClick}
+        isHighlighted={isHighlighted}
       />
     </motion.div>
   )
@@ -279,10 +291,17 @@ interface KanbanColumnProps {
   config: KanbanColumnConfig
   lots: Array<Lot & { staleness: { level: StalenessLevel; daysOld: number } }>
   onCardClick: (lot: Lot) => void
+  highlightRef?: string | null
 }
 
-function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
+function KanbanColumn({ config, lots, onCardClick, highlightRef }: KanbanColumnProps) {
+  // Auto-expand if highlighted card would be hidden in collapsed view
+  const highlightedIndex = highlightRef
+    ? lots.findIndex(lot => lot.reference_number === highlightRef)
+    : -1
+  const shouldAutoExpand = highlightedIndex >= CARDS_PER_COLUMN
+
+  const [isExpanded, setIsExpanded] = useState(shouldAutoExpand)
 
   const displayedLots = isExpanded ? lots : lots.slice(0, CARDS_PER_COLUMN)
   const hiddenCount = lots.length - CARDS_PER_COLUMN
@@ -326,6 +345,7 @@ function KanbanColumn({ config, lots, onCardClick }: KanbanColumnProps) {
                   staleness={lot.staleness}
                   onClick={() => onCardClick(lot)}
                   index={index}
+                  isHighlighted={lot.reference_number === highlightRef}
                 />
               ))}
             </AnimatePresence>
@@ -380,6 +400,7 @@ export function KanbanBoard({
   onCardClick,
   staleWarningDays = 7,
   staleCriticalDays = 12,
+  highlightRef,
 }: KanbanBoardProps) {
 
   /**
@@ -431,6 +452,7 @@ export function KanbanBoard({
           config={column}
           lots={columnData[column.id] || []}
           onCardClick={onCardClick}
+          highlightRef={highlightRef}
         />
       ))}
     </div>

@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { Customer, PaginatedResponse } from "@/types"
+import type { Customer, PaginatedResponse, ArchiveRequest } from "@/types"
 
 export interface CustomerFilters {
   page?: number
@@ -47,10 +47,27 @@ export const customersApi = {
     return response.data
   },
 
-  deactivate: async (id: number): Promise<void> => {
-    await api.delete(`/customers/${id}`)
+  archive: async (id: number, data: ArchiveRequest): Promise<Customer> => {
+    const response = await api.delete<Customer>(`/customers/${id}`, { data })
+    return response.data
   },
 
+  restore: async (id: number): Promise<Customer> => {
+    const response = await api.post<Customer>(`/customers/${id}/restore`)
+    return response.data
+  },
+
+  listArchived: async (filters: Omit<CustomerFilters, 'include_inactive'> = {}): Promise<PaginatedResponse<Customer>> => {
+    const params = new URLSearchParams()
+    if (filters.page) params.append("page", filters.page.toString())
+    if (filters.page_size) params.append("page_size", filters.page_size.toString())
+    if (filters.search) params.append("search", filters.search)
+
+    const response = await api.get<PaginatedResponse<Customer>>(`/customers/archived?${params}`)
+    return response.data
+  },
+
+  // Deprecated - use restore instead
   activate: async (id: number): Promise<Customer> => {
     const response = await api.post<Customer>(`/customers/${id}/activate`)
     return response.data

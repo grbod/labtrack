@@ -51,6 +51,8 @@ export function SmartResultInput({
 }: SmartResultInputProps) {
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
   const [localValue, setLocalValue] = useState(value)
+  const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const tabPressedRef = useRef(false)
 
   // Register input ref with parent when it changes
   useEffect(() => {
@@ -172,6 +174,11 @@ export function SmartResultInput({
     )
   }, [autocompleteOptions, localValue])
 
+  // Reset highlighted index when filtered options change
+  useEffect(() => {
+    setHighlightedIndex(0)
+  }, [filteredOptions.length])
+
   // Editing mode
   switch (inputType) {
     case 'dropdown':
@@ -212,6 +219,11 @@ export function SmartResultInput({
             onBlur={() => {
               // Delay blur to allow click on options
               setTimeout(() => {
+                // Skip if Tab triggered this blur - Tab navigation handles it
+                if (tabPressedRef.current) {
+                  tabPressedRef.current = false
+                  return
+                }
                 if (localValue !== value) {
                   onChange(localValue)
                 }
@@ -220,16 +232,37 @@ export function SmartResultInput({
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
+                // If dropdown is showing, just close it by resetting to original value
+                // If dropdown is already closed, end editing (which closes modal via parent)
                 setLocalValue(value)
-                onEndEdit()
+                if (filteredOptions.length === 0) {
+                  onEndEdit()
+                }
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                if (filteredOptions.length > 0) {
+                  setHighlightedIndex(prev =>
+                    prev < filteredOptions.length - 1 ? prev + 1 : 0
+                  )
+                }
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                if (filteredOptions.length > 0) {
+                  setHighlightedIndex(prev =>
+                    prev > 0 ? prev - 1 : filteredOptions.length - 1
+                  )
+                }
               } else if (e.key === 'Tab') {
                 e.preventDefault()
                 e.stopPropagation()
-                // Auto-select first match if available
-                const finalValue = filteredOptions.length > 0 ? filteredOptions[0].value : localValue
+                // Select highlighted option if available
+                const finalValue = filteredOptions.length > 0
+                  ? filteredOptions[highlightedIndex]?.value ?? localValue
+                  : localValue
                 if (finalValue !== value) {
                   onChange(finalValue)
                 }
+                tabPressedRef.current = true
                 if (onTab) {
                   onTab(e.shiftKey)
                 } else {
@@ -237,12 +270,17 @@ export function SmartResultInput({
                 }
               } else if (e.key === 'Enter') {
                 e.preventDefault()
-                // Auto-select first match if available
-                const finalValue = filteredOptions.length > 0 ? filteredOptions[0].value : localValue
+                // Select highlighted option if available
+                const finalValue = filteredOptions.length > 0
+                  ? filteredOptions[highlightedIndex]?.value ?? localValue
+                  : localValue
                 if (finalValue !== value) {
                   onChange(finalValue)
                 }
-                if (onEnter) {
+                // Enter moves to next column (same as Tab forward)
+                if (onTab) {
+                  onTab(false)
+                } else if (onEnter) {
                   onEnter()
                 } else {
                   onEndEdit()
@@ -254,7 +292,8 @@ export function SmartResultInput({
           />
           {filteredOptions.length > 0 && (
             <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
-              {filteredOptions.map((opt) => {
+              {filteredOptions.map((opt, index) => {
+                const isHighlighted = index === highlightedIndex
                 const isSelected = localValue.toLowerCase() === opt.value.toLowerCase()
                 return (
                   <button
@@ -268,7 +307,7 @@ export function SmartResultInput({
                     }}
                     className={cn(
                       "w-full px-3 py-1.5 text-left text-sm flex items-center justify-between",
-                      isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                      isHighlighted ? "bg-blue-100" : isSelected ? "bg-blue-50" : "hover:bg-slate-50",
                       opt.passes ? "text-slate-900" : "text-slate-500"
                     )}
                   >

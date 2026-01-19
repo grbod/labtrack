@@ -56,10 +56,21 @@ class UserUpdate(BaseModel):
     """Schema for updating a user."""
 
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=200)
+    title: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, max_length=50)
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     password: Optional[str] = Field(None, min_length=6)
+
+
+class UserProfileUpdate(BaseModel):
+    """Schema for updating user profile (for COA signing)."""
+
+    full_name: Optional[str] = Field(None, max_length=200)
+    title: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, max_length=50)
+    email: Optional[EmailStr] = None
 
 
 class UserResponse(BaseModel):
@@ -69,9 +80,21 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str] = None
     full_name: Optional[str] = None
+    title: Optional[str] = None
+    phone: Optional[str] = None
+    signature_url: Optional[str] = None
     role: UserRole
-    is_active: bool = Field(validation_alias="active")
+    is_active: bool = Field(alias="active")
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class VerifyOverrideResponse(BaseModel):
+    """Response for override credential verification."""
+
+    valid: bool
+    user_id: Optional[int] = None
+    role: Optional[str] = None
+    message: str

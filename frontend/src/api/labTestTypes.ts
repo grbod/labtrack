@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { LabTestType, LabTestTypeCategoryCount, PaginatedResponse } from "@/types"
+import type { LabTestType, LabTestTypeCategoryCount, PaginatedResponse, ArchiveRequest } from "@/types"
 
 export interface LabTestTypeFilters {
   page?: number
@@ -73,8 +73,24 @@ export const labTestTypesApi = {
     return response.data
   },
 
-  delete: async (id: number): Promise<void> => {
-    await api.delete(`/lab-test-types/${id}`)
+  archive: async (id: number, data: ArchiveRequest): Promise<LabTestType> => {
+    const response = await api.delete<LabTestType>(`/lab-test-types/${id}`, { data })
+    return response.data
+  },
+
+  restore: async (id: number): Promise<LabTestType> => {
+    const response = await api.post<LabTestType>(`/lab-test-types/${id}/restore`)
+    return response.data
+  },
+
+  listArchived: async (filters: Omit<LabTestTypeFilters, 'category' | 'is_active'> = {}): Promise<PaginatedResponse<LabTestType>> => {
+    const params = new URLSearchParams()
+    if (filters.page) params.append("page", filters.page.toString())
+    if (filters.page_size) params.append("page_size", filters.page_size.toString())
+    if (filters.search) params.append("search", filters.search)
+
+    const response = await api.get<PaginatedResponse<LabTestType>>(`/lab-test-types/archived?${params}`)
+    return response.data
   },
 
   bulkImport: async (rows: BulkImportLabTestTypeRow[]): Promise<BulkImportResult> => {

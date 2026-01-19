@@ -12,6 +12,7 @@ from app.schemas.customer import (
     CustomerResponse,
     CustomerListResponse,
 )
+from app.schemas.product import ArchiveRequest
 
 router = APIRouter()
 
@@ -154,13 +155,14 @@ async def update_customer(
     return CustomerResponse.model_validate(customer)
 
 
-@router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_customer(
+@router.delete("/{customer_id}", response_model=CustomerResponse)
+async def archive_customer(
     customer_id: int,
+    archive_request: ArchiveRequest,
     db: DbSession,
     current_user: AdminUser,
-) -> None:
-    """Deactivate a customer (soft delete, admin only)."""
+) -> CustomerResponse:
+    """Archive a customer (soft delete, admin only). Requires a reason."""
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(
@@ -168,18 +170,56 @@ async def deactivate_customer(
             detail="Customer not found",
         )
 
-    # Soft delete - deactivate
-    customer.is_active = False
+    if not customer.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Customer is already archived",
+        )
+
+    # Archive (soft delete)
+    customer.archive(user_id=current_user.id, reason=archive_request.reason)
     db.commit()
+    db.refresh(customer)
+
+    return CustomerResponse.model_validate(customer)
 
 
+@router.post("/{customer_id}/restore", response_model=CustomerResponse)
+async def restore_customer(
+    customer_id: int,
+    db: DbSession,
+    current_user: AdminUser,
+) -> CustomerResponse:
+    """Restore an archived customer (admin only)."""
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
+
+    if customer.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Customer is not archived",
+        )
+
+    # Restore
+    customer.restore()
+    db.commit()
+    db.refresh(customer)
+
+    return CustomerResponse.model_validate(customer)
+
+
+# Keep the old activate endpoint for backward compatibility
 @router.post("/{customer_id}/activate", response_model=CustomerResponse)
 async def activate_customer(
     customer_id: int,
     db: DbSession,
     current_user: AdminUser,
 ) -> CustomerResponse:
-    """Reactivate a deactivated customer (admin only)."""
+    """Reactivate an archived customer (admin only). Deprecated - use /restore instead."""
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(
@@ -187,8 +227,52 @@ async def activate_customer(
             detail="Customer not found",
         )
 
-    customer.is_active = True
+    # Use restore method
+    customer.restore()
     db.commit()
     db.refresh(customer)
 
     return CustomerResponse.model_validate(customer)
+
+
+@router.get("/archived", response_model=CustomerListResponse)
+async def list_archived_customers(
+    db: DbSession,
+    current_user: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: Optional[str] = None,
+) -> CustomerListResponse:
+    """List archived customers (admin only)."""
+    query = db.query(Customer).filter(Customer.is_active == False)
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (Customer.company_name.ilike(search_term))
+            | (Customer.contact_name.ilike(search_term))
+            | (Customer.email.ilike(search_term))
+        )
+
+    # Get total count
+    total = query.count()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    customers = (
+        query.order_by(Customer.archived_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+
+    return CustomerListResponse(
+        items=[CustomerResponse.model_validate(c) for c in customers],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )

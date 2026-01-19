@@ -12,19 +12,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import type { LotWithProductSpecs, LotStatus } from "@/types"
-
-/** Status label configuration - colors match Kanban board columns */
-const STATUS_CONFIG: Record<LotStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
-  awaiting_results: { label: "Awaiting Results", variant: "outline", className: "bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-100" },
-  partial_results: { label: "Partial Results", variant: "outline", className: "bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-100" },
-  needs_attention: { label: "Needs Attention", variant: "outline", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-100" },
-  under_review: { label: "Under Review", variant: "outline", className: "bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-100" },
-  awaiting_release: { label: "Awaiting Release", variant: "outline", className: "bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-100" },
-  approved: { label: "Approved", variant: "outline", className: "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100" },
-  released: { label: "Released", variant: "outline", className: "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-100" },
-  rejected: { label: "Rejected", variant: "outline", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-100" },
-}
+import { getStatusLabel, getStatusBgClasses } from "@/lib/status-config"
+import type { LotWithProductSpecs } from "@/types"
 
 interface SampleModalHeaderProps {
   /** Lot with product specs */
@@ -57,7 +46,6 @@ export function SampleModalHeader({
 
   const isMultiSku = lot.lot_type === "multi_sku_composite"
   const primaryProduct = lot.products[0]
-  const statusConfig = STATUS_CONFIG[lot.status] || { label: lot.status, variant: "secondary" as const }
 
   return (
     <DialogHeader className="flex-shrink-0 border-b border-slate-200 pb-4">
@@ -66,6 +54,7 @@ export function SampleModalHeader({
         <Button
           variant="ghost"
           size="icon"
+          tabIndex={-1}
           onClick={() => onNavigate("prev")}
           disabled={prevDisabled}
           className="text-slate-400 hover:text-slate-600 disabled:opacity-30"
@@ -129,9 +118,9 @@ export function SampleModalHeader({
             <span className="text-slate-300">|</span>
             <span className="text-slate-600">{lot.reference_number}</span>
             <span className="text-slate-300">|</span>
-            <Badge variant={statusConfig.variant} className={statusConfig.className}>
+            <Badge variant="outline" className={getStatusBgClasses(lot.status)}>
               {isLocked && <Lock className="h-3 w-3 mr-1" />}
-              {statusConfig.label}
+              {getStatusLabel(lot.status)}
             </Badge>
           </div>
         </div>
@@ -141,6 +130,7 @@ export function SampleModalHeader({
           <Button
             variant="ghost"
             size="icon"
+            tabIndex={-1}
             onClick={() => onNavigate("next")}
             disabled={nextDisabled}
             className="text-slate-400 hover:text-slate-600 disabled:opacity-30"
@@ -151,6 +141,7 @@ export function SampleModalHeader({
           <Button
             variant="ghost"
             size="icon"
+            tabIndex={-1}
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600"
             aria-label="Close modal"

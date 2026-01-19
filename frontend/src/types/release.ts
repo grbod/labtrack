@@ -156,6 +156,7 @@ export interface COAPreviewData {
   company_address: string | null
   company_phone: string | null
   company_email: string | null
+  company_logo_url: string | null
 
   // Product info
   product_name: string
@@ -176,4 +177,5 @@ export interface COAPreviewData {
   // Generation info
   generated_date: string
   released_by: string | null
+  released_by_title: string | null
 }

@@ -29,6 +29,12 @@ class User(BaseModel):
     # In production, use proper password hashing like bcrypt
     password_hash = Column(String(255), nullable=True)
 
+    # Profile fields for COA signing
+    full_name = Column(String(200), nullable=True)
+    title = Column(String(100), nullable=True)
+    phone = Column(String(50), nullable=True)
+    signature_path = Column(String(500), nullable=True)
+
     # Relationships
     audit_logs = relationship(
         "AuditLog", back_populates="user", cascade="all, delete-orphan"

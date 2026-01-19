@@ -13,6 +13,7 @@ from app.models.coa_release import COARelease
 from app.models.lot import Lot
 from app.services.coa_generation_service import coa_generation_service
 from app.services.release_service import ReleaseService
+from app.services.lab_info_service import lab_info_service
 from app.schemas.release import (
     COAReleaseResponse,
     COAReleaseWithSourcePdfs,
@@ -37,19 +38,21 @@ router = APIRouter()
 release_service = ReleaseService()
 
 
-@router.get("/{release_id}/preview")
-async def preview_coa(
-    release_id: int,
+def _get_coa_pdf_response(
     db: DbSession,
-    current_user: CurrentUser,
+    release_id: int,
+    inline: bool = True,
 ) -> FileResponse:
     """
-    Generate and return COA PDF for preview.
+    Helper to get COA PDF as FileResponse.
 
-    This endpoint will:
-    1. Check if a valid PDF already exists
-    2. If not, generate a new PDF
-    3. Return the PDF file for viewing
+    Args:
+        db: Database session
+        release_id: ID of the COARelease
+        inline: If True, display inline (preview). If False, force download.
+
+    Returns:
+        FileResponse with the PDF
     """
     # Verify the release exists
     coa_release = (
@@ -76,13 +79,16 @@ async def preview_coa(
                 detail="PDF file generation failed",
             )
 
-        # Return PDF for inline viewing
+        # Return PDF with appropriate disposition
+        disposition = "inline" if inline else "attachment"
+        filename = f"COA_{coa_release.lot.lot_number}.pdf"
+
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"COA_{coa_release.lot.lot_number}.pdf",
+            filename=filename,
             headers={
-                "Content-Disposition": f"inline; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
+                "Content-Disposition": f"{disposition}; filename=\"{filename}\""
             }
         )
 
@@ -97,10 +103,21 @@ async def preview_coa(
             detail=str(e),
         )
     except Exception as e:
+        action = "generate" if inline else "download"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate COA PDF: {str(e)}",
+            detail=f"Failed to {action} COA PDF: {str(e)}",
         )
+
+
+@router.get("/{release_id}/preview")
+async def preview_coa(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileResponse:
+    """Generate and return COA PDF for inline preview."""
+    return _get_coa_pdf_response(db, release_id, inline=True)
 
 
 @router.get("/{release_id}/download")
@@ -109,61 +126,8 @@ async def download_coa(
     db: DbSession,
     current_user: CurrentUser,
 ) -> FileResponse:
-    """
-    Download the COA PDF.
-
-    Similar to preview, but forces download instead of inline display.
-    """
-    # Verify the release exists
-    coa_release = (
-        db.query(COARelease)
-        .options(joinedload(COARelease.lot))
-        .filter(COARelease.id == release_id)
-        .first()
-    )
-
-    if not coa_release:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="COA Release not found",
-        )
-
-    try:
-        # Get or generate the PDF
-        pdf_path = coa_generation_service.get_or_generate_pdf(db, release_id)
-
-        # Verify file exists
-        if not Path(pdf_path).exists():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="PDF file generation failed",
-            )
-
-        # Return PDF for download
-        return FileResponse(
-            path=pdf_path,
-            media_type="application/pdf",
-            filename=f"COA_{coa_release.lot.lot_number}.pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
-            }
-        )
-
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-    except RuntimeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to download COA PDF: {str(e)}",
-        )
+    """Download the COA PDF as an attachment."""
+    return _get_coa_pdf_response(db, release_id, inline=False)
 
 
 @router.get("/{release_id}/preview-html", response_class=HTMLResponse)
@@ -688,6 +652,59 @@ async def download_coa_by_lot_product(
     )
 
 
+@router.post("/{lot_id}/{product_id}/regenerate")
+async def regenerate_coa_by_lot_product(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> dict:
+    """
+    Force regeneration of the COA PDF for a lot+product pair.
+
+    This will regenerate the PDF with current data, even if one already exists.
+    Useful for fixing PDFs that were generated with incomplete data.
+    """
+    from app.models.enums import COAReleaseStatus
+
+    # Get the COARelease
+    coa_release = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.product_id == product_id,
+            COARelease.status == COAReleaseStatus.RELEASED
+        )
+        .first()
+    )
+
+    if not coa_release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Released COA not found for this lot+product",
+        )
+
+    try:
+        pdf_path = coa_generation_service.generate(db, coa_release.id)
+        coa_release.coa_file_path = pdf_path
+        db.commit()
+        return {
+            "status": "success",
+            "message": "COA PDF regenerated successfully",
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to regenerate COA PDF: {str(e)}",
+        )
+
+
 @router.get("/{lot_id}/{product_id}/preview-data", response_model=COAPreviewData)
 async def get_preview_data_by_lot_product(
     lot_id: int,
@@ -730,7 +747,7 @@ async def get_preview_data_by_lot_product(
             detail="Product not associated with this lot",
         )
 
-    # Get all test results for this lot that have values
+    # Get all test results for this lot that have values (no ordering in SQL, we'll sort in Python)
     test_results = (
         db.query(TestResult)
         .filter(
@@ -738,9 +755,39 @@ async def get_preview_data_by_lot_product(
             TestResult.result_value.isnot(None),
             TestResult.result_value != "",
         )
-        .order_by(TestResult.test_type)
         .all()
     )
+
+    # Get category order configuration and sort tests
+    from app.services.coa_category_order_service import coa_category_order_service
+    from app.models.lab_test_type import LabTestType
+
+    category_order = coa_category_order_service.get_ordered_categories(db)
+
+    # Build a lookup for test_type -> category from LabTestType
+    test_type_names = [r.test_type for r in test_results]
+    lab_test_types = (
+        db.query(LabTestType)
+        .filter(LabTestType.test_name.in_(test_type_names))
+        .all()
+    ) if test_type_names else []
+    category_lookup = {lt.test_name.lower(): lt.test_category for lt in lab_test_types}
+
+    def get_category(test_type: str) -> str:
+        """Get category for a test type, defaulting to 'Other' if not found."""
+        return category_lookup.get(test_type.lower(), "Other")
+
+    def sort_key(result: TestResult) -> tuple:
+        """Sort key: category order index, then category name, then test name alphabetically."""
+        category = get_category(result.test_type)
+        try:
+            cat_index = category_order.index(category)
+        except ValueError:
+            cat_index = len(category_order)  # Unconfigured categories at end
+        return (cat_index, category, result.test_type.lower())
+
+    # Sort test results by category order, then alphabetically within category
+    test_results.sort(key=sort_key)
 
     # Get product test specifications for fallback
     from app.models.product_test_spec import ProductTestSpecification
@@ -793,12 +840,16 @@ async def get_preview_data_by_lot_product(
         if coa_release.released_by:
             released_by = coa_release.released_by.username
 
+    # Get lab info from database
+    lab_info = lab_info_service.get_or_create_default(db)
+
     return COAPreviewData(
-        # Company info from settings
-        company_name=settings.company_name,
-        company_address=settings.company_address,
-        company_phone=settings.company_phone,
-        company_email=settings.company_email,
+        # Company info from database
+        company_name=lab_info.company_name,
+        company_address=lab_info.full_address,
+        company_phone=lab_info.phone,
+        company_email=lab_info.email,
+        company_logo_url=lab_info_service.get_logo_url(lab_info.logo_path),
 
         # Product info
         product_name=product.display_name,

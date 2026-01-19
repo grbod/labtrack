@@ -8,6 +8,7 @@ import {
   Clock,
   Building2,
 } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -20,8 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { CustomerQuickAdd } from "./CustomerQuickAdd"
-import { useCustomers, useEmailHistory, useSendEmail } from "@/hooks/useRelease"
-import { releaseApi } from "@/api/release"
+import { useCustomers, useEmailHistory, useSendEmail, useDownloadCoa } from "@/hooks/useRelease"
 import type { ReleaseDetails, Customer, SaveDraftData } from "@/types/release"
 
 interface ReleaseActionsProps {
@@ -30,6 +30,7 @@ interface ReleaseActionsProps {
   productId: number
   onSaveDraft: (data: SaveDraftData) => void
   onApprove: (customerId?: number, notes?: string) => Promise<void>
+  onDone: () => void
   isSaving?: boolean
   isApproving?: boolean
 }
@@ -40,6 +41,7 @@ export function ReleaseActions({
   productId,
   onSaveDraft,
   onApprove,
+  onDone,
   isSaving,
   isApproving,
 }: ReleaseActionsProps) {
@@ -49,12 +51,14 @@ export function ReleaseActions({
   const [notes, setNotes] = useState(release.draft_data?.notes ?? release.notes ?? "")
   const [showCustomerAdd, setShowCustomerAdd] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false)
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
 
   const { data: customers = [] } = useCustomers()
   const { data: emailHistory = [] } = useEmailHistory(lotId, productId)
   const sendEmail = useSendEmail()
+  const downloadCoa = useDownloadCoa()
 
   // Debounced auto-save
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -102,8 +106,37 @@ export function ReleaseActions({
   }
 
   const handleApproveConfirm = async () => {
-    await onApprove(customerId ?? undefined, notes || undefined)
-    setShowApproveConfirm(false)
+    try {
+      await onApprove(customerId ?? undefined, notes || undefined)
+      setShowApproveConfirm(false)
+      setShowSuccessDialog(true) // Show success dialog instead of navigating
+    } catch (error: unknown) {
+      console.error("Failed to approve release:", error)
+      setShowApproveConfirm(false)
+      // Extract error message from axios error response
+      let message = "Failed to approve release"
+      if (error && typeof error === "object") {
+        const axiosError = error as { response?: { data?: { detail?: string }, status?: number } }
+        if (axiosError.response?.data?.detail) {
+          message = axiosError.response.data.detail
+        } else if (axiosError.response?.status === 403) {
+          message = "You don't have permission to approve releases. QC Manager or Admin role required."
+        } else if (axiosError.response?.status === 400) {
+          message = "Cannot approve: lot may not be in the correct status"
+        }
+      }
+      toast.error(message)
+    }
+  }
+
+  const handleSuccessDone = () => {
+    setShowSuccessDialog(false)
+    onDone()
+  }
+
+  const handleSuccessEmailClick = () => {
+    setShowSuccessDialog(false)
+    setShowEmailDialog(true)
   }
 
   const handleSendEmail = async () => {
@@ -119,6 +152,16 @@ export function ReleaseActions({
       setShowEmailDialog(false)
     } catch (error) {
       console.error("Failed to send email:", error)
+    }
+  }
+
+  const handleDownload = async () => {
+    try {
+      await downloadCoa.mutateAsync({ lotId, productId })
+      toast.success("COA downloaded successfully")
+    } catch (error) {
+      console.error("Failed to download COA:", error)
+      toast.error("Failed to download COA")
     }
   }
 
@@ -247,6 +290,7 @@ export function ReleaseActions({
       <div className="space-y-2 pt-2">
         {!isReleased && (
           <Button
+            type="button"
             className="w-full bg-emerald-600 hover:bg-emerald-700"
             onClick={handleApproveClick}
             disabled={isApproving}
@@ -260,38 +304,35 @@ export function ReleaseActions({
           </Button>
         )}
 
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="flex-1"
-            disabled={!isReleased}
-            asChild={isReleased}
-          >
-            {isReleased ? (
-              <a
-                href={releaseApi.getDownloadUrl(lotId, productId)}
-                download
-              >
+        {isReleased && (
+          <div className="space-y-2">
+            <p className="text-center text-[13px] text-emerald-600 font-medium py-2">
+              <CheckCircle2 className="h-4 w-4 inline mr-1" />
+              COA Released
+            </p>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleDownload}
+              disabled={downloadCoa.isPending}
+            >
+              {downloadCoa.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
                 <Download className="h-4 w-4" />
-                Download
-              </a>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                Download
-              </>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => setShowEmailDialog(true)}
-            disabled={!isReleased}
-          >
-            <Mail className="h-4 w-4" />
-            Email
-          </Button>
-        </div>
+              )}
+              Download PDF
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => setShowEmailDialog(true)}
+            >
+              <Mail className="h-4 w-4" />
+              Email PDF
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Email History */}
@@ -336,16 +377,83 @@ export function ReleaseActions({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowApproveConfirm(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setShowApproveConfirm(false)
+              }}
+            >
               Cancel
             </Button>
             <Button
+              type="button"
               className="bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleApproveConfirm}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                handleApproveConfirm()
+              }}
               disabled={isApproving}
             >
               {isApproving && <Loader2 className="h-4 w-4 animate-spin" />}
               Approve & Release
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog */}
+      <Dialog
+        open={showSuccessDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowSuccessDialog(false)
+            onDone()
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <div className="flex flex-col items-center text-center py-4">
+            <div className="rounded-full bg-emerald-100 p-3 mb-4">
+              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+            </div>
+            <DialogTitle className="text-xl">COA Released Successfully</DialogTitle>
+            <p className="text-slate-500 text-sm mt-2">
+              {release.product.product_name} - Lot {release.lot.lot_number}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              className="w-full bg-emerald-600 hover:bg-emerald-700"
+              onClick={handleDownload}
+              disabled={downloadCoa.isPending}
+            >
+              {downloadCoa.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Download PDF
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleSuccessEmailClick}
+            >
+              <Mail className="h-4 w-4" />
+              Email PDF
+            </Button>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={handleSuccessDone}
+            >
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -357,17 +465,37 @@ export function ReleaseActions({
           <DialogHeader>
             <DialogTitle>Send COA via Email</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Label htmlFor="emailRecipient">Recipient Email</Label>
-            <Input
-              id="emailRecipient"
-              type="email"
-              value={emailRecipient}
-              onChange={(e) => setEmailRecipient(e.target.value)}
-              placeholder="Enter recipient email"
-              className="mt-2"
-              autoFocus
-            />
+          <div className="py-2">
+            <div className="rounded-lg bg-slate-50 p-3 mb-4">
+              <div className="space-y-1.5">
+                <div>
+                  <p className="text-[11px] text-slate-500">Product</p>
+                  <p className="text-[13px] font-medium text-slate-900">
+                    {release.product.product_name}
+                    {release.product.flavor && ` - ${release.product.flavor}`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-500">Lot Number</p>
+                  <p className="text-[13px] font-mono font-medium text-slate-900">
+                    {release.lot.lot_number}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="emailRecipient" className="text-[12px]">
+                Recipient Email
+              </Label>
+              <Input
+                id="emailRecipient"
+                type="email"
+                value={emailRecipient}
+                onChange={(e) => setEmailRecipient(e.target.value)}
+                placeholder="Enter recipient email"
+                autoFocus
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEmailDialog(false)}>

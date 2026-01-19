@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import { motion } from "framer-motion"
+import { toast } from "sonner"
 import { ArrowLeft, Loader2, AlertCircle, GripVertical, Keyboard } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -131,17 +132,11 @@ export function ReleasePage() {
 
   const handleApprove = async (customerId?: number, notes?: string) => {
     await approveRelease.mutateAsync({ lotId, productId, customerId, notes })
+    // Success popup in ReleaseActions handles navigation
+  }
 
-    // Find next pending item in queue or go to dashboard
-    const pendingItems = queue.filter(
-      (item) => !(item.lot_id === lotId && item.product_id === productId)
-    )
-
-    if (pendingItems.length > 0) {
-      navigate(`/release/${pendingItems[0].lot_id}/${pendingItems[0].product_id}`)
-    } else {
-      navigate("/")
-    }
+  const handleDone = () => {
+    navigate("/release")
   }
 
   if (isLoading) {
@@ -299,6 +294,7 @@ export function ReleasePage() {
               productId={productId}
               onSaveDraft={handleSaveDraft}
               onApprove={handleApprove}
+              onDone={handleDone}
               isSaving={saveDraft.isPending}
               isApproving={approveRelease.isPending}
             />

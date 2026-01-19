@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { lotsApi, type LotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
+import { lotsApi, type LotFilters, type ArchivedLotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
 import { releaseKeys } from "@/hooks/useRelease"
 import type { LotStatus } from "@/types"
 
@@ -12,6 +12,8 @@ export const lotKeys = {
   detailWithSpecs: (id: number) => [...lotKeys.details(), id, "with-specs"] as const,
   statusCounts: () => [...lotKeys.all, "statusCounts"] as const,
   sublots: (lotId: number) => [...lotKeys.all, "sublots", lotId] as const,
+  archived: () => [...lotKeys.all, "archived"] as const,
+  archivedList: (filters: ArchivedLotFilters) => [...lotKeys.archived(), filters] as const,
 }
 
 export function useLots(filters: LotFilters = {}) {
@@ -100,8 +102,9 @@ export function useSubmitForReview() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: number) => lotsApi.submitForReview(id),
-    onSuccess: (_, id) => {
+    mutationFn: ({ id, overrideUserId }: { id: number; overrideUserId?: number }) =>
+      lotsApi.submitForReview(id, overrideUserId),
+    onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
@@ -155,5 +158,14 @@ export function useCreateSublotsBulk() {
       queryClient.invalidateQueries({ queryKey: lotKeys.sublots(variables.lotId) })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
     },
+  })
+}
+
+/** Fetch archived (completed) lots for historical view */
+export function useArchivedLots(filters: ArchivedLotFilters = {}, enabled: boolean = true) {
+  return useQuery({
+    queryKey: lotKeys.archivedList(filters),
+    queryFn: () => lotsApi.listArchived(filters),
+    enabled,
   })
 }

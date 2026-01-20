@@ -464,72 +464,45 @@ export function COAPreviewDocument({
       </div>
 
       {/* Authorization Section */}
-      <div
-        className="mb-6 pt-4"
-        style={{ borderTop: "1px solid #e2e8f0" }}
-      >
+      <div className="mb-6 pt-4" style={{ borderTop: "1px solid #e2e8f0" }}>
         <h3
           className="font-semibold text-slate-900 uppercase tracking-wide mb-3"
           style={{ fontSize: "11pt", letterSpacing: "0.5px" }}
         >
           Authorization
         </h3>
-        <div className="flex justify-between">
-          <div>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-baseline gap-2">
-                <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                  Released By:
-                </span>
-                <span
-                  className="border-b border-slate-400 inline-block"
-                  style={{ width: "150px" }}
-                >
-                  {data.released_by && (
-                    <span className="text-slate-900" style={{ fontSize: "9pt" }}>
-                      {data.released_by}
-                    </span>
-                  )}
-                </span>
-                <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                  Date:
-                </span>
-                <span
-                  className="border-b border-slate-400 inline-block"
-                  style={{ width: "100px" }}
-                >
-                  {data.released_by && (
-                    <span className="text-slate-900" style={{ fontSize: "9pt" }}>
-                      {data.generated_date}
-                    </span>
-                  )}
-                </span>
-              </div>
-              {data.released_by_title && (
-                <div style={{ paddingLeft: "70px" }}>
-                  <span className="text-slate-600 italic" style={{ fontSize: "9pt" }}>
-                    {data.released_by_title}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="flex items-baseline gap-2 mt-3">
-              <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                Quality Assurance:
-              </span>
-              <span
-                className="border-b border-slate-400 inline-block"
-                style={{ width: "120px" }}
-              />
-              <span className="text-slate-600" style={{ fontSize: "9pt" }}>
-                Date:
-              </span>
-              <span
-                className="border-b border-slate-400 inline-block"
-                style={{ width: "100px" }}
-              />
-            </div>
-          </div>
+
+        <div className="flex flex-col gap-1">
+          {/* Signature Image */}
+          {data.signature_url && (
+            <img
+              src={data.signature_url}
+              alt="Signature"
+              style={{
+                height: "50px",
+                width: "auto",
+                maxWidth: "150px",
+                objectFit: "contain"
+              }}
+            />
+          )}
+
+          {/* Name */}
+          <span className="text-slate-900 font-medium" style={{ fontSize: "10pt" }}>
+            {data.released_by}
+          </span>
+
+          {/* Title */}
+          {data.released_by_title && (
+            <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+              {data.released_by_title}
+            </span>
+          )}
+
+          {/* Date */}
+          <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+            Date: {data.released_at || data.generated_date}
+          </span>
         </div>
       </div>
 
@@ -545,7 +518,7 @@ export function COAPreviewDocument({
         }}
       >
         This Certificate of Analysis is issued based on the test results of a representative sample.
-        Results apply only to the lot specified above. This document is electronically generated and valid without signature.
+        Results apply only to the lot specified above.
       </div>
     </div>
   )

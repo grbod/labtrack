@@ -401,10 +401,31 @@ async def approve_release_by_lot_product(
     from datetime import datetime
     from app.models import LotProduct, Product
     from app.models.enums import LotStatus, COAReleaseStatus
+    from app.models.lab_info import LabInfo
 
     # Default request if not provided
     if request is None:
         request = ApproveByLotProductRequest()
+
+    # Validate signature and user profile before release
+    lab_info = db.query(LabInfo).first()
+    if not lab_info or not lab_info.signature_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot release: No signature uploaded in Lab Info settings",
+        )
+
+    if not current_user.full_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot release: Your profile is missing a full name",
+        )
+
+    if not current_user.title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot release: Your profile is missing a title",
+        )
 
     # Validate lot exists and is in awaiting_release status
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
@@ -821,9 +842,12 @@ async def get_preview_data_by_lot_product(
             status="Pass",  # All approved results are considered passing
         ))
 
-    # Check for existing COARelease to get notes
+    # Check for existing COARelease to get notes and release info
+    from sqlalchemy.orm import joinedload
+
     coa_release = (
         db.query(COARelease)
+        .options(joinedload(COARelease.released_by))
         .filter(
             COARelease.lot_id == lot_id,
             COARelease.product_id == product_id
@@ -833,15 +857,25 @@ async def get_preview_data_by_lot_product(
 
     notes = None
     released_by = None
+    released_by_title = None
+    released_at = None
     if coa_release:
         notes = coa_release.notes
         if coa_release.draft_data:
             notes = coa_release.draft_data.get("notes") or notes
         if coa_release.released_by:
-            released_by = coa_release.released_by.username
+            released_by = coa_release.released_by.full_name or coa_release.released_by.username
+            released_by_title = coa_release.released_by.title
+        if coa_release.released_at:
+            released_at = coa_release.released_at.strftime("%B %d, %Y")
 
     # Get lab info from database
     lab_info = lab_info_service.get_or_create_default(db)
+
+    # Build signature URL if signature exists
+    signature_url = None
+    if lab_info and lab_info.signature_path:
+        signature_url = f"/uploads/{lab_info.signature_path}"
 
     return COAPreviewData(
         # Company info from database
@@ -870,6 +904,9 @@ async def get_preview_data_by_lot_product(
         # Generation info
         generated_date=datetime.now().strftime("%B %d, %Y"),
         released_by=released_by,
+        released_by_title=released_by_title,
+        signature_url=signature_url,
+        released_at=released_at,
     )
 
 

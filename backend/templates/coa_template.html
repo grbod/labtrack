@@ -194,24 +194,6 @@
       white-space: pre-wrap;
     }
 
-    /* Footer */
-    .footer {
-      margin-top: auto;
-      padding-top: 16px;
-      border-top: 1px solid #e2e8f0;
-      display: flex;
-      justify-content: space-between;
-      font-size: 8pt;
-      color: #64748b;
-    }
-
-    .footer .signature-line {
-      width: 200px;
-      border-top: 1px solid #94a3b8;
-      padding-top: 4px;
-      text-align: center;
-    }
-
     /* Disclaimer */
     .disclaimer {
       margin-top: 24px;
@@ -321,32 +303,30 @@
   </div>
   {% endif %}
 
-  <!-- Footer -->
-  <div class="footer">
-    <div>
-      <p>Document ID: COA-{{ reference_number }}-{{ generated_date | replace(' ', '') | replace(',', '') }}</p>
-      {% if released_by %}
-      <p>Released by: {{ released_by }}</p>
-      {% if released_by_title %}<p>{{ released_by_title }}</p>{% endif %}
-      {% if released_at %}<p>Date: {{ released_at }}</p>{% endif %}
-      {% if released_by_phone or released_by_email %}
-      <p>
-        {% if released_by_phone %}Tel: {{ released_by_phone }}{% endif %}
-        {% if released_by_phone and released_by_email %} | {% endif %}
-        {% if released_by_email %}{{ released_by_email }}{% endif %}
-      </p>
+  <!-- Authorization -->
+  <div class="authorization-section" style="border-top: 1px solid #e2e8f0; padding-top: 16px; margin-bottom: 24px;">
+    <h3 style="font-size: 11pt; font-weight: 600; color: #1e293b; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Authorization</h3>
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      {% if signature_url %}
+      <img src="{{ signature_url }}" alt="Signature" style="height: 50px; width: auto; max-width: 150px; object-fit: contain;">
       {% endif %}
+      <p style="font-size: 10pt; font-weight: 500; color: #1e293b; margin: 0;">{{ released_by }}</p>
+      {% if released_by_title %}
+      <p style="font-size: 9pt; color: #475569; margin: 0;">{{ released_by_title }}</p>
       {% endif %}
+      <p style="font-size: 9pt; color: #475569; margin: 0;">Date: {{ released_at or generated_date }}</p>
     </div>
-    <div class="signature-line">
-      Quality Assurance
-    </div>
+  </div>
+
+  <!-- Document ID -->
+  <div style="font-size: 8pt; color: #64748b; margin-bottom: 24px;">
+    <p>Document ID: COA-{{ reference_number }}-{{ generated_date | replace(' ', '') | replace(',', '') }}</p>
   </div>
 
   <!-- Disclaimer -->
   <div class="disclaimer">
     This Certificate of Analysis is issued based on the test results of a representative sample.
-    Results apply only to the lot specified above. This document is electronically generated and valid without signature.
+    Results apply only to the lot specified above.
   </div>
 </body>
 </html>

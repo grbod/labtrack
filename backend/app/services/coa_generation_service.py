@@ -304,6 +304,17 @@ class COAGenerationService:
                 if released_by_user
                 else None
             ),
+            # Signature data for COA authorization
+            "signature_url": (
+                f"/uploads/{lab_info.signature_path}"
+                if lab_info and lab_info.signature_path
+                else None
+            ),
+            "signature_path": (
+                lab_info.signature_path
+                if lab_info and lab_info.signature_path
+                else None
+            ),
         }
 
         return context
@@ -573,25 +584,48 @@ class COAGenerationService:
         released_by = context.get('released_by', '')
         released_by_title = context.get('released_by_title', '')
         released_at = context.get('released_at', context.get('generated_date', ''))
+        signature_path = context.get('signature_path')
 
-        auth_data = [
-            ['Released By:', released_by, 'Date:', released_at],
-            ['Title:', released_by_title or 'Quality Assurance', '', ''],
-        ]
-        auth_table = Table(auth_data, colWidths=[1.2*inch, 2.55*inch, 0.8*inch, 2.95*inch])
-        auth_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ]))
-        story.append(auth_table)
+        # Add signature image if exists (use settings.upload_path for Linux compatibility)
+        if signature_path:
+            from PIL import Image as PILImage
+            full_path = Path(settings.upload_path) / signature_path
+            if full_path.exists():
+                try:
+                    # Calculate dimensions maintaining aspect ratio
+                    with PILImage.open(full_path) as pil_img:
+                        aspect = pil_img.width / pil_img.height
+                    sig_height = 0.5 * inch
+                    sig_width = sig_height * aspect
+                    if sig_width > 2 * inch:
+                        sig_width = 2 * inch
+                        sig_height = sig_width / aspect
+
+                    story.append(Image(str(full_path), width=sig_width, height=sig_height))
+                    story.append(Spacer(1, 0.05*inch))
+                except Exception:
+                    pass  # Skip signature if image can't be loaded
+
+        # Name
+        story.append(Paragraph(released_by, ParagraphStyle(
+            'SignerName', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold'
+        )))
+
+        # Title
+        if released_by_title:
+            story.append(Paragraph(released_by_title, ParagraphStyle(
+                'SignerTitle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#475569')
+            )))
+
+        # Date
+        story.append(Paragraph(f"Date: {released_at}", ParagraphStyle(
+            'SignerDate', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#475569')
+        )))
+
         story.append(Spacer(1, 0.2*inch))
 
         # Disclaimer
-        disclaimer = "This Certificate of Analysis is issued based on the test results of a representative sample. Results apply only to the lot specified above. This document is electronically generated and valid without signature."
+        disclaimer = "This Certificate of Analysis is issued based on the test results of a representative sample. Results apply only to the lot specified above."
         story.append(Paragraph(disclaimer, styles['COAFooter']))
 
         # Build PDF

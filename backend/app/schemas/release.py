@@ -277,3 +277,5 @@ class COAPreviewData(BaseModel):
     generated_date: str
     released_by: Optional[str] = None
     released_by_title: Optional[str] = None
+    signature_url: Optional[str] = None  # URL to signature image for COA
+    released_at: Optional[str] = None  # Release date (if different from generated_date)

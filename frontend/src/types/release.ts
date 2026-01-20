@@ -178,4 +178,6 @@ export interface COAPreviewData {
   generated_date: string
   released_by: string | null
   released_by_title: string | null
+  signature_url: string | null  // URL to signature image for COA
+  released_at: string | null  // Release date (if different from generated_date)
 }

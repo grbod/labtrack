@@ -94,6 +94,8 @@ export function useUpdateLotStatus() {
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
       // Invalidate release queue when status changes (e.g., approved → shows in release queue)
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+      // Invalidate archived lots (audit trail) when status changes to released/rejected
+      queryClient.invalidateQueries({ queryKey: lotKeys.archived() })
     },
   })
 }

@@ -1,9 +1,15 @@
-import { useState, useRef } from "react"
-import { useParams, Link } from "react-router-dom"
+import { useState, useRef, useEffect, useCallback } from "react"
+import { useParams, Link, useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
-import { ArrowLeft, Loader2, AlertCircle, GripVertical, Archive } from "lucide-react"
+import { ArrowLeft, Loader2, AlertCircle, GripVertical, Archive, Keyboard } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { SourcePDFViewer } from "@/components/domain/SourcePDFViewer"
 import { COAPreview } from "@/components/domain/COAPreview"
 import { ArchiveLotActions } from "@/components/domain/ArchiveLotActions"
@@ -17,9 +23,47 @@ export function ArchiveLotPage() {
   }>()
   const lotId = Number(lotIdParam)
   const productId = Number(productIdParam)
+  const navigate = useNavigate()
 
   const { data: release, isLoading, error } = useReleaseDetails(lotId, productId)
   const { data: lot } = useLot(lotId)
+
+  // Modal state - lifted from ArchiveLotActions so ESC handler can check it
+  const [showAuditModal, setShowAuditModal] = useState(false)
+
+  // Exit animation state
+  const [isExiting, setIsExiting] = useState(false)
+
+  const handleExit = useCallback(() => {
+    setIsExiting(true)
+    setTimeout(() => navigate("/audittrail"), 200)
+  }, [navigate])
+
+  // Keyboard shortcuts: ESC to go back, A to open audit modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Let modal handle its own ESC when open
+      if (showAuditModal) {
+        return
+      }
+
+      // Skip if typing in an input
+      const activeEl = document.activeElement as HTMLElement
+      if (activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA") {
+        return
+      }
+
+      if (e.key === "Escape") {
+        handleExit()
+      } else if (e.key === "a" || e.key === "A") {
+        e.preventDefault()
+        setShowAuditModal(true)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [handleExit, showAuditModal])
 
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(50)
@@ -74,7 +118,7 @@ export function ArchiveLotPage() {
           The sample may not exist or you may not have access
         </p>
         <Button asChild variant="outline" className="mt-4">
-          <Link to="/archived">Back to Archive</Link>
+          <Link to="/audittrail">Back to Audit Trail</Link>
         </Button>
       </div>
     )
@@ -85,19 +129,16 @@ export function ArchiveLotPage() {
   return (
     <motion.div
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.275 }}
+      animate={{ opacity: isExiting ? 0 : 1 }}
+      transition={{ duration: isExiting ? 0.2 : 0.275 }}
       className="flex flex-col h-[calc(100vh-64px)]"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white shrink-0">
         <div className="flex items-center gap-4">
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/archived">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Archive
-            </Link>
+          <Button variant="ghost" size="sm" onClick={handleExit}>
+            <ArrowLeft className="h-4 w-4" />
+            Back to Audit Trail
           </Button>
           <div className="h-6 w-px bg-slate-200" />
           <div className="flex items-center gap-2">
@@ -114,6 +155,28 @@ export function ArchiveLotPage() {
           >
             {isReleased ? "Released" : "Rejected"}
           </Badge>
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <Keyboard className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[12px]">
+                <div className="space-y-1">
+                  <div className="font-medium text-slate-700 mb-1.5">Keyboard Shortcuts</div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">View Audit Trail</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">A</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Back to list</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Esc</kbd>
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
 
@@ -176,6 +239,8 @@ export function ArchiveLotPage() {
               lotId={lotId}
               productId={productId}
               rejectionReason={lot?.rejection_reason}
+              showAuditModal={showAuditModal}
+              onShowAuditModal={setShowAuditModal}
             />
           </div>
         </div>

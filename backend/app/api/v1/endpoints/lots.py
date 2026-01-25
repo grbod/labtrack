@@ -490,6 +490,8 @@ async def update_lot(
     current_user: CurrentUser,
 ) -> LotResponse:
     """Update a lot."""
+    from app.models.enums import AuditAction
+
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
     if not lot:
         raise HTTPException(
@@ -515,9 +517,51 @@ async def update_lot(
             )
         update_data["lot_number"] = update_data["lot_number"].upper()
 
+    # Capture old values before update for audit trail
+    old_values = {}
+    for field in update_data.keys():
+        if hasattr(lot, field):
+            old_val = getattr(lot, field)
+            # Convert dates and enums to strings for JSON serialization
+            if hasattr(old_val, 'isoformat'):
+                old_values[field] = old_val.isoformat()
+            elif hasattr(old_val, 'value'):
+                old_values[field] = old_val.value
+            else:
+                old_values[field] = old_val
+
     # Update fields
     for field, value in update_data.items():
         setattr(lot, field, value)
+
+    db.flush()
+
+    # Capture new values for audit trail
+    new_values = {}
+    for field in update_data.keys():
+        if hasattr(lot, field):
+            new_val = getattr(lot, field)
+            # Convert dates and enums to strings for JSON serialization
+            if hasattr(new_val, 'isoformat'):
+                new_values[field] = new_val.isoformat()
+            elif hasattr(new_val, 'value'):
+                new_values[field] = new_val.value
+            else:
+                new_values[field] = new_val
+
+    # Log to audit trail if there are actual changes
+    if old_values != new_values:
+        audit_service = AuditService()
+        audit_service.log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot.id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=new_values,
+            reason=f"Field update by {current_user.username}",
+        )
 
     db.commit()
     db.refresh(lot)
@@ -547,22 +591,39 @@ async def submit_for_review(
             detail=f"Cannot submit for review from status '{lot.status.value}'. Must be 'under_review'.",
         )
 
+    old_status = lot.status.value
     lot.status = LotStatus.AWAITING_RELEASE
-    db.commit()
-    db.refresh(lot)
+    db.flush()
 
-    # Log override if used
+    # Log status change
+    audit_service = AuditService()
+    reason = "Submitted for QC release"
     if override_user_id:
-        audit_service = AuditService()
+        reason = "Submitted for review without required PDF attachment (admin/QC override)"
         audit_service.log_action(
             db=db,
             table_name="lots",
             record_id=lot.id,
             action=AuditAction.OVERRIDE,
             user_id=override_user_id,
-            new_values={"submitted_by": current_user.id, "lot_reference": lot.reference_number},
-            reason="Submitted for review without required PDF attachment (admin/QC override)",
+            old_values={"status": old_status},
+            new_values={"status": lot.status.value},
+            reason=reason,
         )
+    else:
+        audit_service.log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot.id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values={"status": old_status},
+            new_values={"status": lot.status.value},
+            reason=reason,
+        )
+
+    db.commit()
+    db.refresh(lot)
 
     return LotResponse.model_validate(lot)
 
@@ -588,9 +649,33 @@ async def resubmit_lot(
             detail=f"Cannot resubmit from status '{lot.status.value}'. Must be 'rejected'.",
         )
 
+    # Capture old values
+    old_values = {
+        "status": lot.status.value,
+        "rejection_reason": lot.rejection_reason,
+    }
+
     # Clear rejection reason and move back to awaiting_release
     lot.rejection_reason = None
     lot.status = LotStatus.AWAITING_RELEASE
+    db.flush()
+
+    # Log the resubmission
+    audit_service = AuditService()
+    audit_service.log_action(
+        db=db,
+        table_name="lots",
+        record_id=lot.id,
+        action=AuditAction.UPDATE,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values={
+            "status": lot.status.value,
+            "rejection_reason": None,
+        },
+        reason="Lot resubmitted for QC review after rejection",
+    )
+
     db.commit()
     db.refresh(lot)
 
@@ -611,6 +696,12 @@ async def update_lot_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lot not found",
         )
+
+    # Capture old values for audit
+    old_values = {
+        "status": lot.status.value,
+        "rejection_reason": lot.rejection_reason,
+    }
 
     # Handle rejection - require reason
     if status_update.status == LotStatus.REJECTED:
@@ -636,6 +727,37 @@ async def update_lot_status(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+
+    db.flush()
+
+    # Determine action type and reason
+    if status_update.status == LotStatus.REJECTED:
+        action = AuditAction.REJECT
+        reason = f"Lot rejected: {status_update.rejection_reason}"
+    elif status_update.status == LotStatus.APPROVED:
+        action = AuditAction.APPROVE
+        reason = "Lot approved for release"
+        if status_update.override_reason:
+            reason = f"Lot approved with override: {status_update.override_reason}"
+    else:
+        action = AuditAction.UPDATE
+        reason = f"Status changed to {status_update.status.value}"
+
+    # Log the status change
+    audit_service = AuditService()
+    audit_service.log_action(
+        db=db,
+        table_name="lots",
+        record_id=lot.id,
+        action=action,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values={
+            "status": lot.status.value,
+            "rejection_reason": lot.rejection_reason,
+        },
+        reason=reason,
+    )
 
     db.commit()
     db.refresh(lot)

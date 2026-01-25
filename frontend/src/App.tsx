@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "sonner"
 
 import { useAuthStore } from "@/store/auth"
 import { AppLayout } from "@/components/domain/AppLayout"
@@ -58,8 +59,8 @@ function AppRoutes() {
         <Route path="/release" element={<ReleaseQueuePage />} />
         <Route path="/release/:lotId/:productId" element={<ReleasePage />} />
         <Route path="/archive" element={<ArchivePage />} />
-        <Route path="/archived" element={<ArchivedItemsPage />} />
-        <Route path="/archived/lot/:lotId/:productId" element={<ArchiveLotPage />} />
+        <Route path="/audittrail" element={<ArchivedItemsPage />} />
+        <Route path="/audittrail/lot/:lotId/:productId" element={<ArchiveLotPage />} />
         <Route path="/users" element={<UserManagementPage />} />
       </Route>
 
@@ -75,6 +76,7 @@ function App() {
       <BrowserRouter>
         <AppRoutes />
       </BrowserRouter>
+      <Toaster position="top-right" richColors />
     </QueryClientProvider>
   )
 }

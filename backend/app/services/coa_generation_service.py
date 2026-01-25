@@ -304,15 +304,15 @@ class COAGenerationService:
                 if released_by_user
                 else None
             ),
-            # Signature data for COA authorization
+            # Signature data for COA authorization (use the releasing user's signature)
             "signature_url": (
-                f"/uploads/{lab_info.signature_path}"
-                if lab_info and lab_info.signature_path
+                f"/uploads/{released_by_user.signature_path}"
+                if released_by_user and released_by_user.signature_path
                 else None
             ),
             "signature_path": (
-                lab_info.signature_path
-                if lab_info and lab_info.signature_path
+                released_by_user.signature_path
+                if released_by_user and released_by_user.signature_path
                 else None
             ),
         }

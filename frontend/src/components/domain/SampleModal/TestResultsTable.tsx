@@ -454,9 +454,9 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
         },
       }),
 
-      // Notes - editable
+      // Reason - editable (for explaining pass/fail decisions)
       columnHelper.accessor("notes", {
-        header: "Notes",
+        header: "Reason",
         size: 150,
         cell: (info) => {
           const row = info.row.original

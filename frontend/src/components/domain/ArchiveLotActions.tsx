@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { format } from "date-fns"
 import { Download, History, Clock, Building2, AlertCircle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +12,8 @@ interface ArchiveLotActionsProps {
   lotId: number
   productId: number
   rejectionReason?: string | null
+  showAuditModal: boolean
+  onShowAuditModal: (show: boolean) => void
 }
 
 export function ArchiveLotActions({
@@ -20,8 +21,9 @@ export function ArchiveLotActions({
   lotId,
   productId,
   rejectionReason,
+  showAuditModal,
+  onShowAuditModal,
 }: ArchiveLotActionsProps) {
-  const [showAuditModal, setShowAuditModal] = useState(false)
 
   const { data: emailHistory = [] } = useEmailHistory(lotId, productId)
   const downloadCoa = useDownloadCoa()
@@ -167,7 +169,7 @@ export function ArchiveLotActions({
         <Button
           className="w-full"
           variant="default"
-          onClick={() => setShowAuditModal(true)}
+          onClick={() => onShowAuditModal(true)}
         >
           <History className="h-4 w-4" />
           View Audit Trail
@@ -218,10 +220,14 @@ export function ArchiveLotActions({
 
       {/* Audit Trail Modal */}
       <AuditTrailModal
-        open={showAuditModal}
-        onOpenChange={setShowAuditModal}
-        lotId={lotId}
-        referenceNumber={release.lot.reference_number}
+        isOpen={showAuditModal}
+        onClose={() => onShowAuditModal(false)}
+        tableName="lots"
+        recordId={lotId}
+        title={`Audit Trail: ${release.product.brand}-${release.product.product_name}-${release.lot.lot_number}-${release.lot.reference_number}`}
+        brand={release.product.brand}
+        productName={release.product.product_name}
+        lotNumber={release.lot.lot_number}
       />
     </div>
   )

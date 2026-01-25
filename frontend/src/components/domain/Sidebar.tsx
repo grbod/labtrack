@@ -62,7 +62,7 @@ const navSections: NavSection[] = [
     adminOnly: true,
     items: [
       { label: "User Management", href: "/users", icon: <UserCog className="h-[18px] w-[18px]" /> },
-      { label: "Audit Trail", href: "/archived", icon: <FolderArchive className="h-[18px] w-[18px]" /> },
+      { label: "Audit Trail", href: "/audittrail", icon: <FolderArchive className="h-[18px] w-[18px]" /> },
     ],
   },
   {

@@ -122,10 +122,10 @@ export function ReleaseActions({
         } else if (axiosError.response?.status === 403) {
           message = "You don't have permission to approve releases. QC Manager or Admin role required."
         } else if (axiosError.response?.status === 400) {
-          message = "Cannot approve: lot may not be in the correct status"
+          message = "Cannot approve release. Check Lab Info settings and user profile."
         }
       }
-      toast.error(message)
+      toast.error(message, { duration: 5000 })
     }
   }
 

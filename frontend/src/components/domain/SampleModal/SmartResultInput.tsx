@@ -189,7 +189,6 @@ export function SmartResultInput({
           onChange={(e) => {
             setLocalValue(e.target.value)
             onChange(e.target.value)
-            onEndEdit()
           }}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}

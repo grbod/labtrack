@@ -9,6 +9,8 @@ from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.config import settings
+from app.services.audit_service import AuditService
+from app.models.enums import AuditAction
 from app.models.coa_release import COARelease
 from app.models.lot import Lot
 from app.services.coa_generation_service import coa_generation_service
@@ -36,6 +38,7 @@ from app.schemas.release import (
 
 router = APIRouter()
 release_service = ReleaseService()
+audit_service = AuditService()
 
 
 def _get_coa_pdf_response(
@@ -401,18 +404,16 @@ async def approve_release_by_lot_product(
     from datetime import datetime
     from app.models import LotProduct, Product
     from app.models.enums import LotStatus, COAReleaseStatus
-    from app.models.lab_info import LabInfo
 
     # Default request if not provided
     if request is None:
         request = ApproveByLotProductRequest()
 
-    # Validate signature and user profile before release
-    lab_info = db.query(LabInfo).first()
-    if not lab_info or not lab_info.signature_path:
+    # Validate user profile before release
+    if not current_user.signature_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot release: No signature uploaded in Lab Info settings",
+            detail="Cannot release: Please upload your signature in User Profile settings",
         )
 
     if not current_user.full_name:
@@ -440,6 +441,9 @@ async def approve_release_by_lot_product(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Lot must be in 'awaiting_release' status. Current status: {lot.status.value}",
         )
+
+    # Capture old lot status for audit
+    old_lot_status = lot.status.value
 
     # Validate product exists
     product = db.query(Product).filter(Product.id == product_id).first()
@@ -469,6 +473,9 @@ async def approve_release_by_lot_product(
         )
         .first()
     )
+
+    # Capture old COA values for audit
+    old_coa_status = coa_release.status.value if coa_release else None
 
     if coa_release:
         # Update existing release if not already released
@@ -531,6 +538,31 @@ async def approve_release_by_lot_product(
     # Update lot status to RELEASED if all products are released
     if all_products_released:
         lot.status = LotStatus.RELEASED
+
+    # Log COARelease status change to audit trail
+    audit_service.log_action(
+        db=db,
+        table_name="coa_releases",
+        record_id=coa_release.id,
+        action=AuditAction.UPDATE,
+        user_id=current_user.id,
+        old_values={"status": old_coa_status} if old_coa_status else None,
+        new_values={"status": coa_release.status.value},
+        reason=f"COA released for {product.product_name}",
+    )
+
+    # Log lot status change to RELEASED if applicable
+    if all_products_released:
+        audit_service.log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot_id,
+            action=AuditAction.APPROVE,
+            user_id=current_user.id,
+            old_values={"status": old_lot_status},
+            new_values={"status": lot.status.value},
+            reason="All products released - COA approved",
+        )
 
     db.commit()
     db.refresh(coa_release)
@@ -872,10 +904,12 @@ async def get_preview_data_by_lot_product(
     # Get lab info from database
     lab_info = lab_info_service.get_or_create_default(db)
 
-    # Build signature URL if signature exists
+    # Build signature URL - use released_by user's signature if released, else current user's
     signature_url = None
-    if lab_info and lab_info.signature_path:
-        signature_url = f"/uploads/{lab_info.signature_path}"
+    if coa_release and coa_release.released_by and coa_release.released_by.signature_path:
+        signature_url = f"/uploads/{coa_release.released_by.signature_path}"
+    elif current_user.signature_path:
+        signature_url = f"/uploads/{current_user.signature_path}"
 
     return COAPreviewData(
         # Company info from database
@@ -1008,10 +1042,22 @@ async def save_draft_by_lot_product(
             detail="Product not associated with this lot",
         )
 
+    # Capture old lot values for audit
+    old_mfg_date = lot.mfg_date.isoformat() if lot.mfg_date else None
+    old_exp_date = lot.exp_date.isoformat() if lot.exp_date else None
+
+    # Track lot date changes
+    lot_changes_old = {}
+    lot_changes_new = {}
+
     # Update Lot dates if provided
-    if request.mfg_date is not None:
+    if request.mfg_date is not None and request.mfg_date != lot.mfg_date:
+        lot_changes_old["mfg_date"] = old_mfg_date
+        lot_changes_new["mfg_date"] = request.mfg_date.isoformat()
         lot.mfg_date = request.mfg_date
-    if request.exp_date is not None:
+    if request.exp_date is not None and request.exp_date != lot.exp_date:
+        lot_changes_old["exp_date"] = old_exp_date
+        lot_changes_new["exp_date"] = request.exp_date.isoformat()
         lot.exp_date = request.exp_date
 
     # Get or create COARelease
@@ -1023,6 +1069,13 @@ async def save_draft_by_lot_product(
         )
         .first()
     )
+
+    # Capture old draft values for audit
+    old_customer_id = None
+    old_notes = None
+    if coa_release and coa_release.draft_data:
+        old_customer_id = coa_release.draft_data.get("customer_id")
+        old_notes = coa_release.draft_data.get("notes")
 
     if coa_release:
         # Update existing
@@ -1042,6 +1095,44 @@ async def save_draft_by_lot_product(
             }
         )
         db.add(coa_release)
+        db.flush()  # Get the ID for audit logging
+
+    # Log lot date changes if any
+    if lot_changes_new:
+        audit_service.log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot_id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values=lot_changes_old,
+            new_values=lot_changes_new,
+            reason="Release draft: dates updated",
+        )
+
+    # Log draft data changes (customer, notes)
+    draft_changes_old = {}
+    draft_changes_new = {}
+
+    if request.customer_id != old_customer_id:
+        draft_changes_old["customer_id"] = old_customer_id
+        draft_changes_new["customer_id"] = request.customer_id
+
+    if request.notes != old_notes:
+        draft_changes_old["notes"] = old_notes
+        draft_changes_new["notes"] = request.notes
+
+    if draft_changes_new:
+        audit_service.log_action(
+            db=db,
+            table_name="coa_releases",
+            record_id=coa_release.id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values=draft_changes_old if any(v is not None for v in draft_changes_old.values()) else None,
+            new_values=draft_changes_new,
+            reason="Release draft: details updated",
+        )
 
     db.commit()
     db.refresh(lot)  # Refresh to get updated dates

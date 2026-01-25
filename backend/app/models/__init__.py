@@ -16,7 +16,7 @@ from app.models.product_size import ProductSize
 from app.models.lot import Lot, Sublot, LotProduct
 from app.models.user import User
 from app.models.test_result import TestResult
-from app.models.audit import AuditLog
+from app.models.audit import AuditLog, AuditAnnotation
 from app.models.parsing import ParsingQueue
 from app.models.coa import COAHistory
 from app.models.lab_test_type import LabTestType
@@ -49,6 +49,7 @@ __all__ = [
     "User",
     "TestResult",
     "AuditLog",
+    "AuditAnnotation",
     "ParsingQueue",
     "COAHistory",
     "LabTestType",

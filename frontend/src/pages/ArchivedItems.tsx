@@ -1,8 +1,8 @@
-import { useState } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Archive, Package, FlaskConical, Users, Search, Loader2, RotateCcw, Beaker } from "lucide-react"
+import { Archive, Package, FlaskConical, Users, Search, Loader2, RotateCcw, Beaker, Keyboard } from "lucide-react"
 import { format } from "date-fns"
 
 import { Button } from "@/components/ui/button"
@@ -27,8 +27,16 @@ import {
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 
 import { productsApi } from "@/api/products"
@@ -44,6 +52,7 @@ export function ArchivedItemsPage() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<ArchivedTab>("samples")
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [search, setSearch] = useState("")
 
   // Restore confirmation dialog state
@@ -52,32 +61,36 @@ export function ArchivedItemsPage() {
     item: Product | LabTestType | Customer
   } | null>(null)
 
+  // Keyboard shortcut state for row navigation (using refs to avoid effect re-runs)
+  const pendingDigitRef = useRef<string | null>(null)
+  const pendingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   // Samples (completed lots) query - only fetch when samples tab is active
   const samplesQuery = useArchivedLots(
     activeTab === "samples"
-      ? { page, page_size: 50, search: search || undefined }
+      ? { page, page_size: pageSize, search: search || undefined }
       : { page: 1, page_size: 1 }, // Minimal query when not active
     activeTab === "samples"
   )
 
   // Products query
   const productsQuery = useQuery({
-    queryKey: ["archivedProducts", page, search],
-    queryFn: () => productsApi.listArchived({ page, page_size: 50, search: search || undefined }),
+    queryKey: ["archivedProducts", page, pageSize, search],
+    queryFn: () => productsApi.listArchived({ page, page_size: pageSize, search: search || undefined }),
     enabled: activeTab === "products",
   })
 
   // Lab test types query
   const labTestsQuery = useQuery({
-    queryKey: ["archivedLabTests", page, search],
-    queryFn: () => labTestTypesApi.listArchived({ page, page_size: 50, search: search || undefined }),
+    queryKey: ["archivedLabTests", page, pageSize, search],
+    queryFn: () => labTestTypesApi.listArchived({ page, page_size: pageSize, search: search || undefined }),
     enabled: activeTab === "lab-tests",
   })
 
   // Customers query
   const customersQuery = useQuery({
-    queryKey: ["archivedCustomers", page, search],
-    queryFn: () => customersApi.listArchived({ page, page_size: 50, search: search || undefined }),
+    queryKey: ["archivedCustomers", page, pageSize, search],
+    queryFn: () => customersApi.listArchived({ page, page_size: pageSize, search: search || undefined }),
     enabled: activeTab === "customers",
   })
 
@@ -129,6 +142,75 @@ export function ArchivedItemsPage() {
     restoreLabTestMutation.isPending ||
     restoreCustomerMutation.isPending
 
+  // Navigate to a specific row in the samples list
+  const navigateToRow = useCallback((rowNum: number) => {
+    const items = samplesQuery.data?.items
+    if (!items || rowNum < 1 || rowNum > items.length) return
+    const sample = items[rowNum - 1]
+    navigate(`/audittrail/lot/${sample.lot_id}/${sample.product_id}`)
+  }, [samplesQuery.data, navigate])
+
+  // Keyboard shortcuts for row navigation (samples tab only)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only on samples tab
+      if (activeTab !== "samples") return
+
+      // Skip if restore dialog is open
+      if (restoreDialog) return
+
+      // Skip if typing in input
+      const activeEl = document.activeElement as HTMLElement
+      if (activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA") return
+
+      // Only handle digits 0-9
+      if (!/^[0-9]$/.test(e.key)) {
+        // Clear pending digit on non-digit key
+        if (pendingTimeoutRef.current) {
+          clearTimeout(pendingTimeoutRef.current)
+          pendingTimeoutRef.current = null
+        }
+        pendingDigitRef.current = null
+        return
+      }
+
+      e.preventDefault()
+
+      if (pendingDigitRef.current) {
+        // Two-digit sequence complete
+        const rowNum = parseInt(pendingDigitRef.current + e.key, 10)
+        if (pendingTimeoutRef.current) {
+          clearTimeout(pendingTimeoutRef.current)
+          pendingTimeoutRef.current = null
+        }
+        pendingDigitRef.current = null
+        navigateToRow(rowNum)
+      } else if (e.key !== "0") {
+        // Start sequence (can't start with 0)
+        pendingDigitRef.current = e.key
+        pendingTimeoutRef.current = setTimeout(() => {
+          // Single digit after 300ms timeout
+          const digit = pendingDigitRef.current
+          pendingDigitRef.current = null
+          pendingTimeoutRef.current = null
+          if (digit) {
+            navigateToRow(parseInt(digit, 10))
+          }
+        }, 300)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current)
+        pendingTimeoutRef.current = null
+      }
+      pendingDigitRef.current = null
+    }
+  }, [activeTab, navigateToRow, restoreDialog])
+
   const tabs = [
     { id: "samples" as const, label: "Completed Samples", icon: <Beaker className="h-4 w-4" /> },
     { id: "products" as const, label: "Products", icon: <Package className="h-4 w-4" /> },
@@ -155,7 +237,7 @@ export function ArchivedItemsPage() {
     customersQuery.isLoading
 
   const handleSampleClick = (sample: ArchivedLot) => {
-    navigate(`/archived/lot/${sample.lot_id}/${sample.product_id}`)
+    navigate(`/audittrail/lot/${sample.lot_id}/${sample.product_id}`)
   }
 
   const data = getCurrentData()
@@ -230,6 +312,26 @@ export function ArchivedItemsPage() {
           <span className="text-[14px] font-medium text-slate-500">
             {data?.total ?? 0} {activeTab === "samples" ? "completed samples" : "archived items"}
           </span>
+          {activeTab === "samples" && (
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button className="text-slate-400 hover:text-slate-600 transition-colors">
+                    <Keyboard className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[12px]">
+                  <div className="space-y-1">
+                    <div className="font-medium text-slate-700 mb-1.5">Keyboard Shortcuts</div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">Open sample</span>
+                      <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">1-20</kbd>
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
 
         {/* Table */}
@@ -250,10 +352,11 @@ export function ArchivedItemsPage() {
                 <TableRow className="bg-slate-50/80 hover:bg-slate-50/80 border-b border-slate-100">
                   {activeTab === "samples" && (
                     <>
+                      <TableHead className="w-[40px] text-slate-400 text-[12px] font-normal">#</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Reference #</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Lot #</TableHead>
-                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Product</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Brand</TableHead>
+                      <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Product</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Status</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Completed</TableHead>
                       <TableHead className="font-semibold text-slate-600 text-[13px] tracking-wide">Customer</TableHead>
@@ -288,18 +391,22 @@ export function ArchivedItemsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {activeTab === "samples" && samplesQuery.data?.items.map((sample) => (
+                {activeTab === "samples" && samplesQuery.data?.items.map((sample, index) => (
                   <TableRow
                     key={`${sample.lot_id}-${sample.product_id}`}
                     className="hover:bg-slate-50/50 transition-colors cursor-pointer"
                     onClick={() => handleSampleClick(sample)}
                   >
+                    <TableCell className="text-[12px] text-slate-400 font-mono tabular-nums">
+                      {index + 1}
+                    </TableCell>
                     <TableCell className="font-mono font-semibold text-slate-900 text-[14px]">
                       {sample.reference_number}
                     </TableCell>
                     <TableCell className="font-mono text-slate-700 text-[14px]">
                       {sample.lot_number}
                     </TableCell>
+                    <TableCell className="text-slate-600 text-[14px]">{sample.brand}</TableCell>
                     <TableCell className="text-slate-700 text-[14px]">
                       {sample.product_name}
                       {sample.flavor && (
@@ -309,7 +416,6 @@ export function ArchivedItemsPage() {
                         <span className="text-slate-400 ml-1">({sample.size})</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-slate-600 text-[14px]">{sample.brand}</TableCell>
                     <TableCell>
                       <Badge
                         variant={sample.status === "released" ? "emerald" : "destructive"}
@@ -443,12 +549,12 @@ export function ArchivedItemsPage() {
           )}
 
           {/* Pagination */}
-          {data && data.total_pages > 1 && (
+          {data && data.total_pages >= 1 && (
             <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
               <p className="text-[14px] text-slate-500">
                 Page {data.page} of {data.total_pages}
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -467,6 +573,22 @@ export function ArchivedItemsPage() {
                 >
                   Next
                 </Button>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(Number(v))
+                    setPage(1)
+                  }}
+                >
+                  <SelectTrigger className="w-20 h-9 border-slate-200">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}

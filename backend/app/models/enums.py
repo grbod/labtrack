@@ -58,6 +58,7 @@ class AuditAction(str, enum.Enum):
     APPROVE = "approve"
     REJECT = "reject"
     OVERRIDE = "override"
+    VALIDATION_FAILED = "validation_failed"
 
 
 class COAReleaseStatus(str, enum.Enum):

@@ -38,7 +38,10 @@ function DialogOverlay({
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/60",
+        // Enter animation
         "animate-in fade-in-0 duration-300",
+        // Exit animation
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-200",
         className
       )}
     />
@@ -60,8 +63,10 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "bg-background fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
-          // Add CSS animation instead of framer-motion
+          // Enter animation
           "animate-in fade-in-0 zoom-in-95 duration-300",
+          // Exit animation
+          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:duration-200",
           className
         )}
         {...props}

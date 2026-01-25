@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.models import TestResult, Lot, User
-from app.models.enums import TestResultStatus
+from app.models.enums import TestResultStatus, AuditAction
 from app.services.lot_service import LotService
+from app.services.audit_service import AuditService
 from app.schemas.test_result import (
     TestResultCreate,
     TestResultUpdate,
@@ -141,6 +142,29 @@ async def create_test_result(
         status=TestResultStatus.DRAFT,
     )
     db.add(result)
+    db.flush()  # Get the ID before commit
+
+    # Log to audit trail
+    audit_service = AuditService()
+    new_values = {
+        "test_type": result.test_type,
+        "result_value": result.result_value,
+        "unit": result.unit,
+        "specification": result.specification,
+        "method": result.method,
+        "status": result.status.value,
+    }
+    audit_service.log_action(
+        db=db,
+        table_name="test_results",
+        record_id=result.id,
+        action=AuditAction.INSERT,
+        user_id=current_user.id,
+        old_values=None,
+        new_values=new_values,
+        reason=f"Test result created: {result.test_type}",
+    )
+
     db.commit()
     db.refresh(result)
 
@@ -183,6 +207,30 @@ async def bulk_create_test_results(
         db.add(result)
         created_results.append(result)
 
+    db.flush()  # Get IDs before commit
+
+    # Log to audit trail for each created result
+    audit_service = AuditService()
+    for result in created_results:
+        new_values = {
+            "test_type": result.test_type,
+            "result_value": result.result_value,
+            "unit": result.unit,
+            "specification": result.specification,
+            "method": result.method,
+            "status": result.status.value,
+        }
+        audit_service.log_action(
+            db=db,
+            table_name="test_results",
+            record_id=result.id,
+            action=AuditAction.INSERT,
+            user_id=current_user.id,
+            old_values=None,
+            new_values=new_values,
+            reason=f"Test result created (bulk): {result.test_type}",
+        )
+
     db.commit()
     for result in created_results:
         db.refresh(result)
@@ -217,8 +265,49 @@ async def update_test_result(
         )
 
     update_data = result_in.model_dump(exclude_unset=True)
+
+    # Capture old values before update for audit trail
+    old_values = {}
+    for field in update_data.keys():
+        if hasattr(result, field):
+            old_val = getattr(result, field)
+            if hasattr(old_val, 'isoformat'):
+                old_values[field] = old_val.isoformat()
+            elif hasattr(old_val, 'value'):
+                old_values[field] = old_val.value
+            else:
+                old_values[field] = old_val
+
     for field, value in update_data.items():
         setattr(result, field, value)
+
+    db.flush()
+
+    # Capture new values for audit trail
+    new_values = {}
+    for field in update_data.keys():
+        if hasattr(result, field):
+            new_val = getattr(result, field)
+            if hasattr(new_val, 'isoformat'):
+                new_values[field] = new_val.isoformat()
+            elif hasattr(new_val, 'value'):
+                new_values[field] = new_val.value
+            else:
+                new_values[field] = new_val
+
+    # Log to audit trail if there are actual changes
+    if old_values != new_values:
+        audit_service = AuditService()
+        audit_service.log_action(
+            db=db,
+            table_name="test_results",
+            record_id=result.id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=new_values,
+            reason=f"Test result update: {result.test_type}",
+        )
 
     db.commit()
     db.refresh(result)
@@ -246,17 +335,47 @@ async def update_test_result_status(
             detail="Test result not found",
         )
 
+    # Capture old values
+    old_values = {
+        "status": result.status.value,
+        "approved_by_id": result.approved_by_id,
+        "approved_at": result.approved_at.isoformat() if result.approved_at else None,
+        "notes": result.notes,
+    }
+
     if approval.status == TestResultStatus.APPROVED:
         result.status = TestResultStatus.APPROVED
         result.approved_by_id = current_user.id
         result.approved_at = datetime.utcnow()
+        action_reason = f"Test result approved: {result.test_type}"
     else:
         result.status = TestResultStatus.DRAFT
         result.approved_by_id = None
         result.approved_at = None
+        action_reason = f"Test result reverted to draft: {result.test_type}"
 
     if approval.notes:
         result.notes = f"{result.notes or ''}\n{approval.notes}".strip()
+
+    db.flush()
+
+    # Log the approval/rejection
+    audit_service = AuditService()
+    audit_service.log_action(
+        db=db,
+        table_name="test_results",
+        record_id=result.id,
+        action=AuditAction.APPROVE if approval.status == TestResultStatus.APPROVED else AuditAction.UPDATE,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values={
+            "status": result.status.value,
+            "approved_by_id": result.approved_by_id,
+            "approved_at": result.approved_at.isoformat() if result.approved_at else None,
+            "notes": result.notes,
+        },
+        reason=action_reason,
+    )
 
     db.commit()
     db.refresh(result)
@@ -283,15 +402,43 @@ async def bulk_approve_test_results(
             detail="One or more test results not found",
         )
 
+    audit_service = AuditService()
+    action_type = AuditAction.APPROVE if bulk_approval.status == TestResultStatus.APPROVED else AuditAction.UPDATE
+
     for result in results:
+        # Capture old values
+        old_values = {
+            "status": result.status.value,
+            "approved_by_id": result.approved_by_id,
+            "approved_at": result.approved_at.isoformat() if result.approved_at else None,
+        }
+
         if bulk_approval.status == TestResultStatus.APPROVED:
             result.status = TestResultStatus.APPROVED
             result.approved_by_id = current_user.id
             result.approved_at = datetime.utcnow()
+            action_reason = f"Bulk approved: {result.test_type}"
         else:
             result.status = TestResultStatus.DRAFT
             result.approved_by_id = None
             result.approved_at = None
+            action_reason = f"Bulk reverted to draft: {result.test_type}"
+
+        # Log each result's change
+        audit_service.log_action(
+            db=db,
+            table_name="test_results",
+            record_id=result.id,
+            action=action_type,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values={
+                "status": result.status.value,
+                "approved_by_id": result.approved_by_id,
+                "approved_at": result.approved_at.isoformat() if result.approved_at else None,
+            },
+            reason=action_reason,
+        )
 
     db.commit()
     for result in results:

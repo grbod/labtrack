@@ -1,11 +1,17 @@
-"""Audit log model for tracking all system changes."""
+"""Audit log and annotation models for tracking all system changes."""
 
+import gzip
 import json
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index, LargeBinary
 from sqlalchemy.orm import relationship, validates
 from app.models.base import BaseModel
 from app.models.enums import AuditAction
+
+
+# Constants for attachment limits
+MAX_ATTACHMENTS_PER_ENTRY = 5
+MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10MB uncompressed
 
 
 class AuditLog(BaseModel):
@@ -65,9 +71,13 @@ class AuditLog(BaseModel):
 
     @validates("record_id")
     def validate_record_id(self, key, value):
-        """Validate record ID is positive."""
-        if value is None or value <= 0:
-            raise ValueError("Record ID must be positive")
+        """Validate record ID is non-negative.
+
+        Note: record_id=0 is reserved for bulk operation summary entries.
+        Regular audit entries must have a positive record_id.
+        """
+        if value is None or value < 0:
+            raise ValueError("Record ID must be non-negative (0 is reserved for bulk summaries)")
         return value
 
     @validates("old_values", "new_values")
@@ -186,4 +196,101 @@ class AuditLog(BaseModel):
             f"<AuditLog(id={self.id}, table='{self.table_name}', "
             f"record={self.record_id}, action='{self.action.value}', "
             f"timestamp='{self.timestamp}')>"
+        )
+
+
+class AuditAnnotation(BaseModel):
+    """
+    Model for comments and attachments on audit log entries.
+
+    Allows QC Managers and Admins to add comments and attach files
+    to audit entries for additional context.
+
+    Attributes:
+        audit_log_id: ID of the associated audit log entry
+        user_id: User who created the annotation
+        comment: Text comment (optional)
+        attachment_filename: Original filename of attachment (optional)
+        attachment_data: Compressed (gzip) file contents
+        attachment_size: Original uncompressed size in bytes
+        attachment_hash: SHA256 hash of original file
+        created_at: When the annotation was created
+    """
+
+    __tablename__ = "audit_annotations"
+
+    # Override base model to use custom id and timestamps
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    updated_at = None  # Annotations should never be updated
+
+    # Core fields
+    audit_log_id = Column(Integer, ForeignKey("audit_logs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    comment = Column(Text, nullable=True)
+
+    # Attachment fields
+    attachment_filename = Column(String(255), nullable=True)
+    attachment_data = Column(LargeBinary, nullable=True)  # Gzip compressed
+    attachment_size = Column(Integer, nullable=True)  # Original uncompressed size
+    attachment_hash = Column(String(64), nullable=True)  # SHA256 hash
+
+    # Timestamp
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    audit_log = relationship("AuditLog", backref="annotations")
+    user = relationship("User")
+
+    # Indexes for performance
+    __table_args__ = (
+        Index("idx_audit_annotation_log", "audit_log_id"),
+        Index("idx_audit_annotation_user", "user_id"),
+        Index("idx_audit_annotation_created", "created_at"),
+    )
+
+    @validates("comment", "attachment_data")
+    def validate_has_content(self, key, value):
+        """Validate that annotation has either comment or attachment."""
+        # This validation happens on the field level, so we can't check both
+        # We'll handle this in the endpoint
+        return value
+
+    def set_attachment(self, filename: str, file_content: bytes, file_hash: str):
+        """
+        Set attachment with compression.
+
+        Args:
+            filename: Original filename
+            file_content: Uncompressed file bytes
+            file_hash: SHA256 hash of original file
+        """
+        if len(file_content) > MAX_ATTACHMENT_SIZE_BYTES:
+            raise ValueError(
+                f"Attachment size ({len(file_content)} bytes) exceeds maximum "
+                f"({MAX_ATTACHMENT_SIZE_BYTES} bytes)"
+            )
+
+        self.attachment_filename = filename
+        self.attachment_size = len(file_content)
+        self.attachment_hash = file_hash
+        self.attachment_data = gzip.compress(file_content)
+
+    def get_attachment(self) -> bytes:
+        """
+        Get decompressed attachment data.
+
+        Returns:
+            Decompressed file bytes
+        """
+        if not self.attachment_data:
+            return None
+        return gzip.decompress(self.attachment_data)
+
+    def __repr__(self):
+        """String representation of AuditAnnotation."""
+        has_comment = "yes" if self.comment else "no"
+        has_attachment = "yes" if self.attachment_filename else "no"
+        return (
+            f"<AuditAnnotation(id={self.id}, audit_log_id={self.audit_log_id}, "
+            f"comment={has_comment}, attachment={has_attachment})>"
         )

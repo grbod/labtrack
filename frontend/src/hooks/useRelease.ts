@@ -118,6 +118,8 @@ export function useApproveRelease() {
       })
       // Invalidate all recently released queries to refresh the list
       queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "recently-released"] })
+      // Invalidate archived lots (audit trail) so it refreshes with new released items
+      queryClient.invalidateQueries({ queryKey: ["lots", "archived"] })
     },
   })
 }

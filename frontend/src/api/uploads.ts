@@ -3,7 +3,7 @@ import { api } from "./client"
 export interface UploadResponse {
   filename: string
   original_filename: string
-  path: string
+  key: string  // Storage key (R2 or local path)
   size: number
   content_type: string
 }

@@ -72,11 +72,14 @@ def _get_coa_pdf_response(
         )
 
     try:
-        # Get or generate the PDF
-        pdf_path = coa_generation_service.get_or_generate_pdf(db, release_id)
+        # Get or generate the PDF (returns storage key, not full path)
+        storage_key = coa_generation_service.get_or_generate_pdf(db, release_id)
+
+        # Get full path by prepending upload_path
+        full_path = settings.upload_path / storage_key
 
         # Verify file exists
-        if not Path(pdf_path).exists():
+        if not full_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="PDF file generation failed",
@@ -87,7 +90,7 @@ def _get_coa_pdf_response(
         filename = f"COA_{coa_release.lot.lot_number}.pdf"
 
         return FileResponse(
-            path=pdf_path,
+            path=str(full_path),
             media_type="application/pdf",
             filename=filename,
             headers={
@@ -617,7 +620,9 @@ async def preview_coa_by_lot_product(
         )
 
     try:
-        # Check if COARelease exists
+        from app.services.storage_service import get_storage_service
+
+        # Check if COARelease exists with a valid file
         existing_release = (
             db.query(COARelease)
             .filter(
@@ -628,10 +633,11 @@ async def preview_coa_by_lot_product(
         )
 
         if existing_release and existing_release.coa_file_path:
-            pdf_path = existing_release.coa_file_path
-            if Path(pdf_path).exists():
+            storage = get_storage_service()
+            if storage.exists(existing_release.coa_file_path):
+                full_path = settings.upload_path / existing_release.coa_file_path
                 return FileResponse(
-                    path=pdf_path,
+                    path=str(full_path),
                     media_type="application/pdf",
                     filename=f"COA_{lot.lot_number}.pdf",
                     headers={
@@ -639,11 +645,12 @@ async def preview_coa_by_lot_product(
                     }
                 )
 
-        # Generate preview PDF on-the-fly
-        pdf_path = coa_generation_service.generate_preview(db, lot_id, product_id)
+        # Generate preview PDF on-the-fly (returns storage key)
+        storage_key = coa_generation_service.generate_preview(db, lot_id, product_id)
+        full_path = settings.upload_path / storage_key
 
         return FileResponse(
-            path=pdf_path,
+            path=str(full_path),
             media_type="application/pdf",
             filename=f"COA_{lot.lot_number}_preview.pdf",
             headers={
@@ -670,6 +677,7 @@ async def download_coa_by_lot_product(
     Only works if a COARelease exists and has been released.
     """
     from app.models.enums import COAReleaseStatus
+    from app.services.storage_service import get_storage_service
 
     # Get the COARelease
     coa_release = (
@@ -689,14 +697,25 @@ async def download_coa_by_lot_product(
             detail="Released COA not found for this lot+product",
         )
 
-    if not coa_release.coa_file_path or not Path(coa_release.coa_file_path).exists():
+    if not coa_release.coa_file_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="COA PDF file not found",
+            detail="COA PDF file path not set",
         )
 
+    # Use storage service to check if file exists
+    storage = get_storage_service()
+    if not storage.exists(coa_release.coa_file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="COA PDF file not found in storage",
+        )
+
+    # Get full path by prepending upload_path
+    full_path = settings.upload_path / coa_release.coa_file_path
+
     return FileResponse(
-        path=coa_release.coa_file_path,
+        path=str(full_path),
         media_type="application/pdf",
         filename=f"COA_{coa_release.lot.lot_number}.pdf",
         headers={
@@ -890,6 +909,7 @@ async def get_preview_data_by_lot_product(
     notes = None
     released_by = None
     released_by_title = None
+    released_by_email = None
     released_at = None
     if coa_release:
         notes = coa_release.notes
@@ -898,6 +918,7 @@ async def get_preview_data_by_lot_product(
         if coa_release.released_by:
             released_by = coa_release.released_by.full_name or coa_release.released_by.username
             released_by_title = coa_release.released_by.title
+            released_by_email = coa_release.released_by.email
         if coa_release.released_at:
             released_at = coa_release.released_at.strftime("%B %d, %Y")
 
@@ -939,6 +960,7 @@ async def get_preview_data_by_lot_product(
         generated_date=datetime.now().strftime("%B %d, %Y"),
         released_by=released_by,
         released_by_title=released_by_title,
+        released_by_email=released_by_email or "(Preview)",
         signature_url=signature_url,
         released_at=released_at,
     )

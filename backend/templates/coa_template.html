@@ -35,16 +35,17 @@
     }
 
     .company-info h1 {
-      font-size: 18pt;
-      font-weight: 700;
-      color: #1e293b;
-      margin-bottom: 4px;
+      font-size: 9pt;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 0;
     }
 
     .company-info p {
       font-size: 9pt;
       color: #64748b;
       line-height: 1.5;
+      margin: 0;
     }
 
     .document-title {
@@ -314,6 +315,7 @@
       {% if released_by_title %}
       <p style="font-size: 9pt; color: #475569; margin: 0;">{{ released_by_title }}</p>
       {% endif %}
+      <p style="font-size: 9pt; color: #475569; margin: 0;">Email: {{ released_by_email or '(Preview)' }}</p>
       <p style="font-size: 9pt; color: #475569; margin: 0;">Date: {{ released_at or generated_date }}</p>
     </div>
   </div>

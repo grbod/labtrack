@@ -1,5 +1,5 @@
 import { api } from "./client"
-import type { User, UserProfileUpdate, UserRole } from "@/types"
+import type { User, UserRole } from "@/types"
 
 export interface UserUpdate {
   email?: string | null
@@ -11,20 +11,21 @@ export interface UserUpdate {
   password?: string
 }
 
+export interface UserCreateData {
+  username: string
+  password: string
+  email: string
+  role: UserRole
+  full_name: string
+  title: string
+}
+
 export const usersApi = {
   /**
-   * Get the current user's profile.
+   * Create a new user (admin only).
    */
-  getProfile: async (): Promise<User> => {
-    const response = await api.get<User>("/users/me")
-    return response.data
-  },
-
-  /**
-   * Update the current user's profile.
-   */
-  updateProfile: async (data: UserProfileUpdate): Promise<User> => {
-    const response = await api.put<User>("/users/me", data)
+  create: async (data: UserCreateData): Promise<User> => {
+    const response = await api.post<User>("/users", data)
     return response.data
   },
 

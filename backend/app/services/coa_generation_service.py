@@ -1,5 +1,6 @@
 """COA PDF generation service using ReportLab (pure Python, no system dependencies)."""
 
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -17,6 +18,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from xml.sax.saxutils import escape as xml_escape
 
 from app.config import settings
 from app.models.coa_release import COARelease
@@ -24,6 +26,7 @@ from app.models.test_result import TestResult
 from app.models.enums import TestResultStatus
 from app.models.lab_test_type import LabTestType
 from app.services.lab_info_service import lab_info_service
+from app.services.storage_service import get_storage_service
 
 
 class COAGenerationService:
@@ -58,7 +61,7 @@ class COAGenerationService:
             coa_release_id: ID of the COARelease record
 
         Returns:
-            Path to the generated PDF file
+            Storage key for the generated PDF file
 
         Raises:
             ValueError: If COARelease not found or has no approved test results
@@ -71,20 +74,38 @@ class COAGenerationService:
         # Build template context
         context = self._build_context(db, coa_release.lot, coa_release.product, coa_release)
 
-        # Generate PDF filename
+        # Generate PDF filename and storage key
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"COA_{coa_release.lot.lot_number}_{timestamp}.pdf"
-        output_path = self.output_dir / filename
+        storage_key = f"coas/{filename}"
 
-        # Generate PDF with ReportLab
-        self._generate_pdf_reportlab(context, str(output_path))
+        # Generate PDF to temporary file, then upload to storage
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_path = tmp_file.name
 
-        # Update COARelease with file path
-        coa_release.coa_file_path = str(output_path)
+        try:
+            # Generate PDF with ReportLab to temp file
+            self._generate_pdf_reportlab(context, tmp_path)
+
+            # Read the generated PDF and upload to storage
+            with open(tmp_path, "rb") as f:
+                pdf_content = f.read()
+
+            storage = get_storage_service()
+            storage.upload(pdf_content, storage_key, content_type="application/pdf")
+
+        finally:
+            # Clean up temp file
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Update COARelease with storage key
+        coa_release.coa_file_path = storage_key
         db.commit()
 
-        logger.info(f"Generated COA PDF: {output_path}")
-        return str(output_path)
+        logger.info(f"Generated COA PDF: {storage_key}")
+        return storage_key
 
     def get_preview_data(self, db: Session, coa_release_id: int) -> Dict[str, Any]:
         """
@@ -108,27 +129,45 @@ class COAGenerationService:
 
     def get_or_generate_pdf(self, db: Session, coa_release_id: int) -> str:
         """
-        Get existing PDF or generate a new one if needed.
+        Get existing PDF storage key or generate a new one if needed.
 
         Args:
             db: Database session
             coa_release_id: ID of the COARelease record
 
         Returns:
-            Path to the PDF file
+            Storage key for the PDF file
         """
         coa_release = self._get_coa_release(db, coa_release_id)
         if not coa_release:
             raise ValueError(f"COARelease with id {coa_release_id} not found")
 
-        # Check if PDF exists and is valid
+        # Check if PDF exists in storage
         if coa_release.coa_file_path:
-            pdf_path = Path(coa_release.coa_file_path)
-            if pdf_path.exists():
-                return str(pdf_path)
+            storage = get_storage_service()
+            if storage.exists(coa_release.coa_file_path):
+                return coa_release.coa_file_path
 
         # Generate new PDF
         return self.generate(db, coa_release_id)
+
+    def get_pdf_url(self, db: Session, coa_release_id: int) -> str:
+        """
+        Get a URL for downloading the COA PDF.
+
+        For R2 storage: Returns a presigned URL (1-hour expiry).
+        For local storage: Returns the storage key (API will serve file).
+
+        Args:
+            db: Database session
+            coa_release_id: ID of the COARelease record
+
+        Returns:
+            URL or key for accessing the PDF
+        """
+        storage_key = self.get_or_generate_pdf(db, coa_release_id)
+        storage = get_storage_service()
+        return storage.get_presigned_url(storage_key)
 
     def _get_coa_release(self, db: Session, coa_release_id: int) -> Optional[COARelease]:
         """Get COARelease with all required relations loaded."""
@@ -236,6 +275,7 @@ class COAGenerationService:
                 specification = self._get_default_spec(result.test_type)
 
             tests.append({
+                "id": result.id,  # Include ID for retest original value matching
                 "name": result.test_type,
                 "result": result.result_value or "N/D",
                 "unit": result.unit or "",
@@ -292,6 +332,11 @@ class COAGenerationService:
                 released_by_user.title
                 if released_by_user
                 else None
+            ),
+            "released_by_email": (
+                released_by_user.email
+                if released_by_user
+                else "(Preview)"
             ),
             # Contact info from the releasing user (not company-wide)
             "released_by_phone": (
@@ -378,7 +423,7 @@ class COAGenerationService:
             product_id: ID of the product
 
         Returns:
-            Path to the generated preview PDF file
+            Storage key for the generated preview PDF file
         """
         from app.models import Lot, Product
 
@@ -394,16 +439,34 @@ class COAGenerationService:
         # Build context without COARelease (preview mode)
         context = self._build_context(db, lot, product)
 
-        # Generate preview PDF filename
+        # Generate preview PDF filename and storage key
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"COA_preview_{lot.lot_number}_{timestamp}.pdf"
-        output_path = self.output_dir / filename
+        storage_key = f"coas/{filename}"
 
-        # Generate PDF with ReportLab
-        self._generate_pdf_reportlab(context, str(output_path))
+        # Generate PDF to temporary file, then upload to storage
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_path = tmp_file.name
 
-        logger.info(f"Generated COA preview PDF: {output_path}")
-        return str(output_path)
+        try:
+            # Generate PDF with ReportLab to temp file
+            self._generate_pdf_reportlab(context, tmp_path)
+
+            # Read the generated PDF and upload to storage
+            with open(tmp_path, "rb") as f:
+                pdf_content = f.read()
+
+            storage = get_storage_service()
+            storage.upload(pdf_content, storage_key, content_type="application/pdf")
+
+        finally:
+            # Clean up temp file
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        logger.info(f"Generated COA preview PDF: {storage_key}")
+        return storage_key
 
     def _generate_pdf_reportlab(self, context: Dict[str, Any], output_path: str) -> None:
         """
@@ -429,7 +492,7 @@ class COAGenerationService:
             name='COATitle',
             parent=styles['Title'],
             fontSize=18,
-            textColor=colors.HexColor('#1a5f2a'),
+            textColor=colors.HexColor('#0f172a'),
             alignment=TA_CENTER,
             spaceAfter=10
         ))
@@ -437,7 +500,7 @@ class COAGenerationService:
             name='COAHeader',
             parent=styles['Heading2'],
             fontSize=11,
-            textColor=colors.HexColor('#1a5f2a'),
+            textColor=colors.HexColor('#0f172a'),
             alignment=TA_LEFT,
             spaceBefore=12,
             spaceAfter=6
@@ -456,64 +519,165 @@ class COAGenerationService:
             alignment=TA_CENTER,
             textColor=colors.grey
         ))
+        styles.add(ParagraphStyle(
+            name='COADocTitle',
+            parent=styles['Normal'],
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#0f172a'),
+            alignment=TA_RIGHT,
+            spaceAfter=4
+        ))
+        styles.add(ParagraphStyle(
+            name='COADocMeta',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#64748b'),
+            alignment=TA_RIGHT,
+            leading=11
+        ))
+        styles.add(ParagraphStyle(
+            name='COACompanyName',
+            parent=styles['Normal'],
+            fontSize=9,
+            fontName='Helvetica-Bold',
+            textColor=colors.HexColor('#64748b'),
+            leading=11
+        ))
+        styles.add(ParagraphStyle(
+            name='COACompanyInfo',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#64748b'),
+            leading=11
+        ))
+
+        wrap_style = ParagraphStyle(
+            name='COAWrap',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            leading=11,
+            alignment=TA_LEFT,
+            wordWrap='CJK',
+            splitLongWords=1,
+        )
+        wrap_style_small = ParagraphStyle(
+            name='COAWrapSmall',
+            parent=wrap_style,
+            fontSize=8,
+            leading=10,
+        )
+        label_value_style = ParagraphStyle(
+            name='COALabelValue',
+            parent=styles['Normal'],
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor('#0f172a'),
+        )
+
+        def wrap_cell(value: Any, style: ParagraphStyle) -> Paragraph:
+            text = "" if value is None else str(value)
+            return Paragraph(xml_escape(text), style)
+
+        def stacked_label_value(label: str, value: Any) -> Paragraph:
+            safe_value = "" if value is None else str(value)
+            return Paragraph(
+                f"<font size='8' color='#64748b'><b>{xml_escape(label.upper())}</b></font>"
+                f"<br/><font size='10' color='#0f172a'>{xml_escape(safe_value)}</font>",
+                label_value_style
+            )
 
         # Build story (content)
         story = []
 
-        # Company header
-        company_header = [
-            [context.get('company_name', 'Company Name'), '', context.get('company_phone', '')],
-            [context.get('company_address', ''), '', context.get('company_email', '')]
+        # Company header + document info (aligned to match preview)
+        company_blocks = []
+        logo_path = context.get('company_logo_url')
+        if logo_path:
+            try:
+                from PIL import Image as PILImage
+                logo_full_path = Path(logo_path)
+                if logo_full_path.exists():
+                    with PILImage.open(logo_full_path) as pil_img:
+                        aspect = pil_img.width / pil_img.height
+                    max_height = 0.6 * inch
+                    max_width = 2.2 * inch
+                    logo_width = min(max_width, max_height * aspect)
+                    logo_height = logo_width / aspect
+                    if logo_height > max_height:
+                        logo_height = max_height
+                        logo_width = logo_height * aspect
+                    logo_img = Image(str(logo_full_path), width=logo_width, height=logo_height)
+                    logo_img.hAlign = 'LEFT'
+                    company_blocks.append(logo_img)
+                    company_blocks.append(Spacer(1, 0.06 * inch))
+            except Exception:
+                pass
+
+        company_blocks.append(Paragraph(
+            xml_escape(context.get('company_name', 'Company Name')),
+            styles['COACompanyName']
+        ))
+        company_address = context.get('company_address')
+        if company_address:
+            company_blocks.append(Paragraph(xml_escape(company_address), styles['COACompanyInfo']))
+
+        phone = context.get('company_phone')
+        email = context.get('company_email')
+        contact_parts = []
+        if phone:
+            contact_parts.append(f"Tel: {phone}")
+        if email:
+            contact_parts.append(f"Email: {email}")
+        if contact_parts:
+            company_blocks.append(Paragraph(
+                xml_escape(" | ".join(contact_parts)),
+                styles['COACompanyInfo']
+            ))
+
+        doc_number = f"COA-{context.get('reference_number', 'N/A')}"
+        doc_blocks = [
+            Paragraph("CERTIFICATE OF ANALYSIS", styles['COADocTitle']),
+            Paragraph(f"Document #: {doc_number}", styles['COADocMeta']),
+            Paragraph(f"Generated: {context.get('generated_date', 'N/A')}", styles['COADocMeta']),
         ]
-        header_table = Table(company_header, colWidths=[3.5*inch, 1*inch, 3*inch])
+
+        header_table = Table([[company_blocks, doc_blocks]], colWidths=[4.6*inch, 2.9*inch])
         header_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (0, 0), 14),
-            ('TEXTCOLOR', (0, 0), (0, 0), colors.HexColor('#1a5f2a')),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 1), (-1, -1), colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#1e293b')),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
         ]))
         story.append(header_table)
-        story.append(Spacer(1, 0.2*inch))
-
-        # Title
-        story.append(Paragraph("CERTIFICATE OF ANALYSIS", styles['COATitle']))
-        story.append(Spacer(1, 0.15*inch))
-
-        # Document info
-        doc_number = f"COA-{context.get('reference_number', 'N/A')}"
-        doc_info = [[f"Document #: {doc_number}", f"Generated: {context.get('generated_date', 'N/A')}"]]
-        doc_table = Table(doc_info, colWidths=[3.75*inch, 3.75*inch])
-        doc_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.grey),
-        ]))
-        story.append(doc_table)
         story.append(Spacer(1, 0.15*inch))
 
         # Product Information section
         story.append(Paragraph("PRODUCT INFORMATION", styles['COAHeader']))
 
         product_data = [
-            ['Product Name:', context.get('product_name', 'N/A'), 'Brand:', context.get('brand', 'N/A')],
-            ['Lot Number:', context.get('lot_number', 'N/A'), 'Reference:', context.get('reference_number', 'N/A')],
-            ['Mfg Date:', context.get('mfg_date', 'N/A'), 'Exp Date:', context.get('exp_date', 'N/A')],
+            [
+                stacked_label_value("Product Name", context.get('product_name', 'N/A')),
+                stacked_label_value("Brand", context.get('brand', 'N/A')),
+            ],
+            [
+                stacked_label_value("Lot Number", context.get('lot_number', 'N/A')),
+                stacked_label_value("Reference Number", context.get('reference_number', 'N/A')),
+            ],
+            [
+                stacked_label_value("Manufacturing Date", context.get('mfg_date', 'Not set')),
+                stacked_label_value("Expiration Date", context.get('exp_date', 'Not set')),
+            ],
         ]
-        product_table = Table(product_data, colWidths=[1.2*inch, 2.55*inch, 1*inch, 2.75*inch])
+        product_table = Table(product_data, colWidths=[3.75*inch, 3.75*inch])
         product_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 2),
-            ('BOX', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.lightgrey),
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8f9fa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fafc')),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]))
         story.append(product_table)
         story.append(Spacer(1, 0.15*inch))
@@ -523,32 +687,37 @@ class COAGenerationService:
 
         tests = context.get('tests', [])
         if tests:
-            test_data = [['Test', 'Result', 'Specification', 'Status']]
+            test_data = [['TEST NAME', 'RESULT', 'SPECIFICATION', 'STATUS']]
             for test in tests:
+                status = test.get('status', 'Pass')
+                status_color = '#16a34a' if str(status).lower() == 'pass' else '#dc2626'
                 test_data.append([
-                    test.get('name', ''),
+                    wrap_cell(test.get('name', ''), wrap_style_small),
                     test.get('result', 'N/D'),
-                    test.get('specification', 'Within limits'),
-                    test.get('status', 'Pass')
+                    wrap_cell(test.get('specification', 'Within limits'), wrap_style_small),
+                    Paragraph(
+                        f"<font color='{status_color}'>{xml_escape(status)}</font>",
+                        wrap_style_small
+                    ),
                 ])
 
             test_table = Table(test_data, colWidths=[2.5*inch, 1.5*inch, 2*inch, 1.5*inch])
             test_table.setStyle(TableStyle([
                 # Header
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5f2a')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#475569')),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
                 # Data
                 ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
-                ('ALIGN', (3, 1), (3, -1), 'CENTER'),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#0f172a')),
+                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 # Grid
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#e2e8f0')),
                 # Padding
                 ('TOPPADDING', (0, 0), (-1, -1), 4),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
@@ -563,9 +732,9 @@ class COAGenerationService:
 
         # Notes section (if present)
         notes = context.get('notes')
-        if notes:
+        if notes and str(notes).strip() and str(notes).strip().lower() != "click to add notes...":
             story.append(Paragraph("NOTES", styles['COAHeader']))
-            notes_table = Table([[notes]], colWidths=[7.5*inch])
+            notes_table = Table([[wrap_cell(notes, wrap_style)]], colWidths=[7.5*inch])
             notes_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fffbeb')),
                 ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#fbbf24')),
@@ -583,6 +752,7 @@ class COAGenerationService:
 
         released_by = context.get('released_by', '')
         released_by_title = context.get('released_by_title', '')
+        released_by_email = context.get('released_by_email', '(Preview)')
         released_at = context.get('released_at', context.get('generated_date', ''))
         signature_path = context.get('signature_path')
 
@@ -601,21 +771,29 @@ class COAGenerationService:
                         sig_width = 2 * inch
                         sig_height = sig_width / aspect
 
-                    story.append(Image(str(full_path), width=sig_width, height=sig_height))
+                    sig_img = Image(str(full_path), width=sig_width, height=sig_height)
+                    sig_img.hAlign = 'LEFT'
+                    story.append(sig_img)
                     story.append(Spacer(1, 0.05*inch))
                 except Exception:
                     pass  # Skip signature if image can't be loaded
 
         # Name
-        story.append(Paragraph(released_by, ParagraphStyle(
-            'SignerName', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold'
-        )))
+        if released_by:
+            story.append(Paragraph(released_by, ParagraphStyle(
+                'SignerName', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold'
+            )))
 
         # Title
         if released_by_title:
             story.append(Paragraph(released_by_title, ParagraphStyle(
                 'SignerTitle', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#475569')
             )))
+
+        # Email
+        story.append(Paragraph(f"Email: {released_by_email}", ParagraphStyle(
+            'SignerEmail', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#475569')
+        )))
 
         # Date
         story.append(Paragraph(f"Date: {released_at}", ParagraphStyle(
@@ -626,7 +804,16 @@ class COAGenerationService:
 
         # Disclaimer
         disclaimer = "This Certificate of Analysis is issued based on the test results of a representative sample. Results apply only to the lot specified above."
-        story.append(Paragraph(disclaimer, styles['COAFooter']))
+        disclaimer_table = Table([[Paragraph(xml_escape(disclaimer), styles['COAFooter'])]], colWidths=[7.5*inch])
+        disclaimer_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fafc')),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(disclaimer_table)
 
         # Build PDF
         doc.build(story)

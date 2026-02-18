@@ -80,6 +80,7 @@ class LotResponse(BaseModel):
     generate_coa: bool
     rejection_reason: Optional[str] = None
     attached_pdfs: Optional[List[str]] = None  # List of uploaded PDF filenames
+    has_pending_retest: bool = False  # True when retest is pending
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -174,6 +175,7 @@ class ProductInLotWithSpecs(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     display_name: str
+    serving_size: Optional[str] = None
     percentage: Optional[Decimal] = None
     test_specifications: List[TestSpecInProduct] = []
 

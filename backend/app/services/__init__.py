@@ -13,6 +13,8 @@ from .coa_generator_service import COAGeneratorService
 from .lab_test_type_service import LabTestTypeService
 from .email_template_service import EmailTemplateService
 from .customer_service import CustomerService
+from .retest_service import RetestService, retest_service
+from .daane_coc_service import DaaneCOCService, daane_coc_service
 
 __all__ = [
     "BaseService",
@@ -30,4 +32,8 @@ __all__ = [
     "LabTestTypeService",
     "EmailTemplateService",
     "CustomerService",
+    "RetestService",
+    "retest_service",
+    "DaaneCOCService",
+    "daane_coc_service",
 ]

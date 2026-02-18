@@ -25,6 +25,7 @@ export function SampleTrackerPage() {
 
   const [selectedLot, setSelectedLot] = useState<Lot | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [scrollToRetests, setScrollToRetests] = useState(false)
 
   // Fetch lots for kanban (active workflow statuses only)
   // Exclude approved, released, awaiting_release, rejected - they appear in Release Queue/Archive
@@ -41,9 +42,16 @@ export function SampleTrackerPage() {
     setIsModalOpen(true)
   }
 
+  const handleRetestSubRowClick = (lot: Lot) => {
+    setSelectedLot(lot)
+    setScrollToRetests(true)
+    setIsModalOpen(true)
+  }
+
   const handleCloseModal = () => {
     setIsModalOpen(false)
     setSelectedLot(null)
+    setScrollToRetests(false)
   }
 
   // After submission, navigate to next under_review sample or close
@@ -137,6 +145,7 @@ export function SampleTrackerPage() {
           <SampleTable
             lots={lotsData?.items || []}
             onRowClick={handleCardClick}
+            onRetestSubRowClick={handleRetestSubRowClick}
             staleWarningDays={systemSettings.staleWarningDays}
             staleCriticalDays={systemSettings.staleCriticalDays}
             pageSize={25}
@@ -153,6 +162,7 @@ export function SampleTrackerPage() {
         prevDisabled={prevDisabled}
         nextDisabled={nextDisabled ?? false}
         onSubmitSuccess={handleSubmitSuccess}
+        scrollToRetests={scrollToRetests}
       />
       </div>
     </div>

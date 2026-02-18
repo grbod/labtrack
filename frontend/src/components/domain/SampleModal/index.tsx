@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import type { KeyboardEvent } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useDropzone } from "react-dropzone"
 import { useNavigate } from "react-router-dom"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2 } from "lucide-react"
+import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
@@ -15,8 +16,10 @@ import { SampleModalHeader } from "./SampleModalHeader"
 import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTable"
 import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
+import { RetestsHistoryAccordion } from "./RetestsHistoryAccordion"
 import { useLotWithSpecs, lotKeys, useSubmitForReview } from "@/hooks/useLots"
 import { useTestResults, useUpdateTestResult, useCreateTestResult, useDeleteTestResult } from "@/hooks/useTestResults"
+import { useRetestRequests } from "@/hooks/useRetests"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import { useUploadPdf } from "@/hooks/useUploads"
 import { uploadsApi } from "@/api/uploads"
@@ -24,9 +27,11 @@ import { authApi } from "@/api/client"
 import { useLabInfo } from "@/hooks/useLabInfo"
 import { useAuthStore } from "@/store/auth"
 import { calculatePassFail } from "@/lib/spec-validation"
+import { SendForRetestDialog } from "@/components/domain/SendForRetestDialog"
 
 import type {
   Lot,
+  LotStatus,
   TestResultRow,
   TestFilterStatus,
   TestSpecInProduct,
@@ -47,6 +52,8 @@ interface SampleModalProps {
   nextDisabled?: boolean
   /** Callback when sample is successfully submitted for approval */
   onSubmitSuccess?: () => void
+  /** Whether to auto-scroll to Retests History accordion on open */
+  scrollToRetests?: boolean
 }
 
 /**
@@ -68,16 +75,22 @@ export function SampleModal({
   prevDisabled = false,
   nextDisabled = false,
   onSubmitSuccess,
+  scrollToRetests = false,
 }: SampleModalProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement>(null)
   const tableRef = useRef<TestResultsTableHandle>(null)
+  const retestsRef = useRef<HTMLDivElement>(null)
   const saveButtonRef = useRef<HTMLButtonElement>(null)
+  const additionalTriggerRef = useRef<HTMLButtonElement>(null)
+  const addTestButtonRef = useRef<HTMLButtonElement>(null)
+  const uploadButtonRef = useRef<HTMLButtonElement>(null)
 
   // Auth store for role-based UI
   const { user } = useAuthStore()
   const canGoToRelease = user?.role === "admin" || user?.role === "qc_manager"
+  const canRequestRetest = user?.role === "admin" || user?.role === "qc_manager"
 
   // State
   const [filter, setFilter] = useState<TestFilterStatus>("all")
@@ -90,12 +103,127 @@ export function SampleModal({
   const [showSubmitSuccessDialog, setShowSubmitSuccessDialog] = useState(false)
   const [submittedLotRef, setSubmittedLotRef] = useState<string | null>(null)
 
+  // Retest dialog state
+  const [showRetestDialog, setShowRetestDialog] = useState(false)
+  const [isAdditionalExpanded, setIsAdditionalExpanded] = useState(false)
+  const [openedFromStatus, setOpenedFromStatus] = useState<LotStatus | null>(null)
+  const openedFromLotIdRef = useRef<number | null>(null)
+
   // Override modal state
   const [showOverrideModal, setShowOverrideModal] = useState(false)
   const [overrideUsername, setOverrideUsername] = useState("")
   const [overridePassword, setOverridePassword] = useState("")
   const [overrideError, setOverrideError] = useState<string | null>(null)
   const [isVerifyingOverride, setIsVerifyingOverride] = useState(false)
+
+  // Focus helpers for custom tab order
+  const focusSaveButton = useCallback(() => {
+    saveButtonRef.current?.focus()
+  }, [])
+
+  const focusUploadButton = useCallback(() => {
+    if (uploadButtonRef.current) {
+      uploadButtonRef.current.focus()
+      return true
+    }
+    focusSaveButton()
+    return false
+  }, [focusSaveButton])
+
+  const focusAdditionalTrigger = useCallback(() => {
+    if (additionalTriggerRef.current) {
+      additionalTriggerRef.current.focus()
+      return true
+    }
+    return false
+  }, [])
+
+  const focusAddTestButton = useCallback(() => {
+    if (addTestButtonRef.current) {
+      addTestButtonRef.current.focus()
+      return true
+    }
+    return false
+  }, [])
+
+  const focusFirstResultCell = useCallback(() => {
+    tableRef.current?.focusFirstCell()
+  }, [])
+
+  const focusLastResultCell = useCallback(() => {
+    tableRef.current?.focusLastCell()
+  }, [])
+
+  const handleMainTableFocusExit = useCallback((direction: "forward" | "backward") => {
+    if (direction === "forward") {
+      if (!focusAdditionalTrigger()) {
+        focusUploadButton()
+      }
+    } else {
+      focusSaveButton()
+    }
+  }, [focusAdditionalTrigger, focusUploadButton, focusSaveButton])
+
+  const handleAdditionalTriggerKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "Tab") return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) {
+      focusLastResultCell()
+      return
+    }
+    if (isAdditionalExpanded && focusAddTestButton()) {
+      return
+    }
+    focusUploadButton()
+  }, [focusAddTestButton, focusLastResultCell, focusUploadButton, isAdditionalExpanded])
+
+  const handleAddTestKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "Tab") return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) {
+      if (!focusAdditionalTrigger()) {
+        focusLastResultCell()
+      }
+    } else {
+      focusUploadButton()
+    }
+  }, [focusAdditionalTrigger, focusLastResultCell, focusUploadButton])
+
+  const handleUploadKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "Tab") return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) {
+      if (isAdditionalExpanded && focusAddTestButton()) {
+        return
+      }
+      if (focusAdditionalTrigger()) {
+        return
+      }
+      focusLastResultCell()
+    } else {
+      focusSaveButton()
+    }
+  }, [focusAddTestButton, focusAdditionalTrigger, focusLastResultCell, focusSaveButton, isAdditionalExpanded])
+
+  const handleSaveButtonKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "Tab") return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.shiftKey) {
+      if (focusUploadButton()) {
+        return
+      }
+      if (focusAdditionalTrigger()) {
+        return
+      }
+      focusLastResultCell()
+    } else {
+      focusFirstResultCell()
+    }
+  }, [focusAdditionalTrigger, focusFirstResultCell, focusLastResultCell, focusUploadButton])
 
   // Fetch lot with specs
   const { data: lotWithSpecs } = useLotWithSpecs(lot?.id ?? 0)
@@ -108,6 +236,26 @@ export function SampleModal({
   // Fetch lab test types for additional tests autocomplete
   const { data: labTestTypesData } = useLabTestTypes({ page_size: 200 })
 
+  // Fetch retest requests for original value display
+  const { data: retestData } = useRetestRequests(lot?.id ?? 0)
+
+  // Build map of test_result_id -> original_value from retest items
+  const originalValuesMap = useMemo(() => {
+    const map = new Map<number, string | null>()
+    if (retestData?.items) {
+      for (const request of retestData.items) {
+        for (const item of request.items) {
+          // Only show original value if the test was retested (value changed)
+          // Keep the most recent original value if retested multiple times
+          if (!map.has(item.test_result_id)) {
+            map.set(item.test_result_id, item.original_value)
+          }
+        }
+      }
+    }
+    return map
+  }, [retestData])
+
   // Mutations
   const updateTestResultMutation = useUpdateTestResult()
   const createTestResultMutation = useCreateTestResult()
@@ -118,10 +266,27 @@ export function SampleModal({
   // Lab info for PDF requirement setting
   const { labInfo } = useLabInfo()
 
+  // Snapshot status when modal opens or lot changes (prevents auto-updates from enabling actions mid-session)
+  useEffect(() => {
+    if (!isOpen) {
+      openedFromLotIdRef.current = null
+      setOpenedFromStatus(null)
+      return
+    }
+    if (!lot) {
+      setOpenedFromStatus(null)
+      return
+    }
+    if (openedFromLotIdRef.current !== lot.id) {
+      openedFromLotIdRef.current = lot.id
+      setOpenedFromStatus(lot.status)
+    }
+  }, [isOpen, lot?.id, lot?.status])
+
   // Derived state - use lotWithSpecs status if available (fresh data), fallback to lot prop
   const currentStatus = lotWithSpecs?.status ?? lot?.status
   const isLocked = currentStatus === "approved" || currentStatus === "released"
-  const canSubmitForReview = currentStatus === "under_review"
+  const openedFromUnderReview = openedFromStatus === "under_review"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -212,6 +377,21 @@ export function SampleModal({
     return rows
   }, [testResultsData, mergedTestSpecs, lot?.id])
 
+  // Check if there are any failing tests (for retest button visibility)
+  const hasFailingTests = useMemo(() => {
+    return testResultRows.some((r) => r.passFailStatus === "fail")
+  }, [testResultRows])
+
+  const allTestsPassing = useMemo(() => {
+    if (testResultRows.length === 0) return false
+    return testResultRows.every((r) => r.passFailStatus === "pass")
+  }, [testResultRows])
+
+  const canSubmitForReview =
+    openedFromUnderReview &&
+    currentStatus === "under_review" &&
+    allTestsPassing
+
   // Separate spec tests from additional tests
   const { specTests, additionalTests } = useMemo(() => {
     const spec: TestResultRow[] = []
@@ -297,6 +477,16 @@ export function SampleModal({
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
   }, [isOpen, prevDisabled, nextDisabled, onNavigate])
+
+  // Auto-scroll to retests section when requested
+  useEffect(() => {
+    if (scrollToRetests && isOpen && retestsRef.current) {
+      const timer = setTimeout(() => {
+        retestsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [scrollToRetests, isOpen])
 
   // Handle updating a test result (or creating new one for placeholder rows)
   const handleUpdateResult = useCallback(
@@ -602,6 +792,8 @@ export function SampleModal({
                   disabled={isLocked}
                   savingRowId={savingRowId}
                   saveButtonRef={saveButtonRef}
+                  originalValuesMap={originalValuesMap}
+                  onRequestNextFocus={handleMainTableFocusExit}
                 />
               </div>
 
@@ -614,7 +806,17 @@ export function SampleModal({
                 onDeleteResult={handleDeleteResult}
                 disabled={isLocked}
                 savingRowId={savingRowId}
+                triggerRef={additionalTriggerRef}
+                onTriggerKeyDown={handleAdditionalTriggerKeyDown}
+                addTestButtonRef={addTestButtonRef}
+                onAddTestKeyDown={handleAddTestKeyDown}
+                onToggle={(open) => setIsAdditionalExpanded(open)}
               />
+
+              {/* Retest History accordion - only shows if lot has retest requests */}
+              <div ref={retestsRef}>
+                {lot && <RetestsHistoryAccordion lotId={lot.id} />}
+              </div>
 
               {/* Attached PDFs section */}
               <div className="mt-6">
@@ -629,6 +831,8 @@ export function SampleModal({
                       className="text-xs"
                       onClick={openFileDialog}
                       disabled={isUploading}
+                      ref={uploadButtonRef}
+                      onKeyDown={handleUploadKeyDown}
                     >
                       <Upload className="h-3.5 w-3.5 mr-1.5" />
                       Upload PDF
@@ -867,28 +1071,83 @@ export function SampleModal({
           </DialogContent>
         </Dialog>
 
+        {/* Retest Dialog */}
+        {lot && (
+          <SendForRetestDialog
+            isOpen={showRetestDialog}
+            onClose={() => setShowRetestDialog(false)}
+            lotId={lot.id}
+            testResults={testResultRows}
+            defaultSpecialInstructions={(() => {
+              const sizes = [...new Set(
+                (lotWithSpecs?.products ?? [])
+                  .map((p) => p.serving_size)
+                  .filter(Boolean) as string[]
+              )]
+              return sizes.length > 0
+                ? `Serving Size = ${sizes.sort().join(", ")}`
+                : undefined
+            })()}
+            onSuccess={() => {
+              // Refresh lot data to update has_pending_retest flag
+              if (lot) {
+                queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+                queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(lot.id) })
+              }
+            }}
+            onComplete={() => {
+              // Close both dialogs
+              setShowRetestDialog(false)
+              onClose()
+            }}
+          />
+        )}
+
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
-          <div className="flex w-full items-center justify-end gap-2">
-            {/* Submit for Approval action (available to any authenticated user for under_review status) */}
-            {canSubmitForReview && (
-              <Button
-                type="button"
-                onClick={handleSubmitForReview}
-                disabled={submitForReviewMutation.isPending}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {submitForReviewMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : null}
-                Submit for Approval
-              </Button>
-            )}
+          <div className="flex w-full items-center justify-between">
+            {/* Left side - Send for Retest button */}
+            <div>
+              {canRequestRetest && hasFailingTests && !isLocked && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowRetestDialog(true)}
+                  className="text-amber-700 border-amber-300 hover:bg-amber-50 hover:border-amber-400"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Send for Retest
+                </Button>
+              )}
+            </div>
 
-            {/* Save/Close button */}
-            <Button type="button" ref={saveButtonRef} onClick={handleCloseAttempt}>
-              Save & Close
-            </Button>
+            {/* Right side - Submit and Save buttons */}
+            <div className="flex items-center gap-2">
+              {/* Submit for Approval action (available to any authenticated user for under_review status) */}
+              {canSubmitForReview && (
+                <Button
+                  type="button"
+                  onClick={handleSubmitForReview}
+                  disabled={submitForReviewMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {submitForReviewMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : null}
+                  Submit for Approval
+                </Button>
+              )}
+
+              {/* Save/Close button */}
+            <Button
+              type="button"
+              ref={saveButtonRef}
+              onClick={handleCloseAttempt}
+              onKeyDown={handleSaveButtonKeyDown}
+            >
+                Save & Close
+              </Button>
+            </div>
           </div>
         </DialogFooter>
       </DialogContent>

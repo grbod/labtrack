@@ -1,37 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { usersApi, type UserUpdate } from "@/api/users"
-import type { UserProfileUpdate } from "@/types"
+import { usersApi, type UserUpdate, type UserCreateData } from "@/api/users"
+import { authApi } from "@/api/client"
 
 // Query keys
 export const userKeys = {
   all: ["users"] as const,
-  profile: () => [...userKeys.all, "profile"] as const,
   list: () => [...userKeys.all, "list"] as const,
   detail: (id: number) => [...userKeys.all, "detail", id] as const,
-}
-
-/**
- * Hook to get the current user's profile.
- */
-export function useProfile() {
-  return useQuery({
-    queryKey: userKeys.profile(),
-    queryFn: usersApi.getProfile,
-  })
-}
-
-/**
- * Hook to update the current user's profile.
- */
-export function useUpdateProfile() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (data: UserProfileUpdate) => usersApi.updateProfile(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: userKeys.profile() })
-    },
-  })
 }
 
 /**
@@ -71,6 +46,20 @@ export function useUpdateUser() {
 }
 
 /**
+ * Hook to create a new user (admin only).
+ */
+export function useCreateUser() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: UserCreateData) => usersApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.list() })
+    },
+  })
+}
+
+/**
  * Hook to delete a user (admin only).
  */
 export function useDeleteUser() {
@@ -81,5 +70,15 @@ export function useDeleteUser() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.list() })
     },
+  })
+}
+
+/**
+ * Hook to change the current user's password.
+ */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
+      authApi.changePassword(currentPassword, newPassword),
   })
 }

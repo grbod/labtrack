@@ -149,12 +149,6 @@ export function ArchiveLotPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Badge
-            variant={isReleased ? "emerald" : "destructive"}
-            className="text-[11px]"
-          >
-            {isReleased ? "Released" : "Rejected"}
-          </Badge>
           <TooltipProvider delayDuration={0}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -177,6 +171,12 @@ export function ArchiveLotPage() {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <Badge
+            variant={isReleased ? "emerald" : "destructive"}
+            className="text-[11px]"
+          >
+            {isReleased ? "Released" : "Rejected"}
+          </Badge>
         </div>
       </div>
 

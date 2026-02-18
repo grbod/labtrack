@@ -1,6 +1,8 @@
+import { useState, useCallback } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { releaseApi, customerApi } from "@/api/release"
 import { downloadBlob } from "@/lib/utils"
+import { toast } from "sonner"
 import type { ArchiveFilters, SaveDraftData, CreateCustomerData } from "@/types/release"
 
 export const releaseKeys = {
@@ -154,6 +156,37 @@ export function useDownloadCoa() {
       downloadBlob(blob, filename)
     },
   })
+}
+
+/** Download COA with per-item loading state tracking, cursor-wait, and 404 handling */
+export function useDownloadWithTracking() {
+  const [downloadingItem, setDownloadingItem] = useState<string | null>(null)
+  const downloadCoa = useDownloadCoa()
+
+  const handleDownload = useCallback(async (lotId: number, productId: number) => {
+    const itemKey = `${lotId}-${productId}`
+    setDownloadingItem(itemKey)
+    try {
+      await downloadCoa.mutateAsync({ lotId, productId })
+      toast.success("COA downloaded successfully")
+    } catch (error: unknown) {
+      console.error("Failed to download COA:", error)
+      const status = (error as { response?: { status?: number } })?.response?.status
+      if (status === 404) {
+        toast.error("File not found")
+      } else {
+        toast.error("Failed to download COA")
+      }
+    } finally {
+      setDownloadingItem(null)
+    }
+  }, [downloadCoa])
+
+  const isDownloading = useCallback((lotId: number, productId: number) => {
+    return downloadingItem === `${lotId}-${productId}`
+  }, [downloadingItem])
+
+  return { handleDownload, isDownloading, downloadingItem }
 }
 
 /** Regenerate COA PDF mutation - forces fresh PDF generation */

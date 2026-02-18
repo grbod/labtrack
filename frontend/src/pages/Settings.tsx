@@ -13,6 +13,8 @@ import {
   Info,
   ListOrdered,
   UserCircle,
+  Users,
+  KeyRound,
   Trash2,
 } from "lucide-react"
 
@@ -26,15 +28,19 @@ import { Switch } from "@/components/ui/switch"
 
 import { useAuthStore } from "@/store/auth"
 import { useSettings, PAGE_SIZE_OPTIONS } from "@/hooks/useSettings"
+import { useLabMapping, useRebuildLabMapping } from "@/hooks/useLabMapping"
+import { useChangePassword } from "@/hooks/useUsers"
 import { emailTemplateApi } from "@/api/emailTemplate"
 import { authApi } from "@/api/client"
 import { useLabInfo } from "@/hooks/useLabInfo"
 import { COACategoryOrderEditor } from "@/components/domain/COACategoryOrderEditor"
+import { UserManagementTab } from "@/components/domain/UserManagementTab"
 import { ImageCropper } from "@/components/ui/image-cropper"
+import { toast } from "sonner"
 import type { EmailTemplateVariable } from "@/types/emailTemplate"
 import type { User } from "@/types"
 
-type SettingsTab = "display" | "system" | "user" | "email" | "coa-style"
+type SettingsTab = "display" | "system" | "user" | "email" | "coa-style" | "lab-mapping" | "user-management"
 
 export function SettingsPage() {
   const { user } = useAuthStore()
@@ -53,14 +59,23 @@ export function SettingsPage() {
   const [recentlyCompletedDays, setRecentlyCompletedDays] = useState(systemSettings.settings.recentlyCompletedDays)
   const [companyName, setCompanyName] = useState(systemSettings.settings.labInfo.companyName)
   const [address, setAddress] = useState(systemSettings.settings.labInfo.address)
+  const [phone, setPhone] = useState(systemSettings.settings.labInfo.phone)
+  const [email, setEmail] = useState(systemSettings.settings.labInfo.email)
   const [city, setCity] = useState("")
   const [state, setState] = useState("")
   const [zipCode, setZipCode] = useState("")
   const [requirePdfForSubmission, setRequirePdfForSubmission] = useState(true)
   const [labInfoDirty, setLabInfoDirty] = useState(false)
+  const [labInfoAutoSaveSuccess, setLabInfoAutoSaveSuccess] = useState(false)
 
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  useEffect(() => {
+    if (labInfoDirty) {
+      setLabInfoAutoSaveSuccess(false)
+    }
+  }, [labInfoDirty])
 
   // Lab info from backend
   const {
@@ -90,6 +105,12 @@ export function SettingsPage() {
   const [signatureCropperOpen, setSignatureCropperOpen] = useState(false)
   const [signatureToCrop, setSignatureToCrop] = useState<string | null>(null)
 
+  // Change password state
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const changePasswordMutation = useChangePassword()
+
   // Email template state
   const [emailSubject, setEmailSubject] = useState("")
   const [emailBody, setEmailBody] = useState("")
@@ -116,6 +137,12 @@ export function SettingsPage() {
     queryFn: () => emailTemplateApi.preview({ subject: emailSubject, body: emailBody }),
     enabled: canEditSystemSettings && emailSubject.length > 0 && emailBody.length > 0,
   })
+
+  const {
+    data: labMappingData,
+    isLoading: isLabMappingLoading,
+  } = useLabMapping(activeTab === "lab-mapping")
+  const rebuildMappingMutation = useRebuildLabMapping()
 
   // Update email template mutation
   const updateTemplateMutation = useMutation({
@@ -157,6 +184,8 @@ export function SettingsPage() {
     if (labInfo) {
       setCompanyName(labInfo.company_name)
       setAddress(labInfo.address)
+      setPhone(labInfo.phone)
+      setEmail(labInfo.email)
       setCity(labInfo.city)
       setState(labInfo.state)
       setZipCode(labInfo.zip_code)
@@ -197,10 +226,12 @@ export function SettingsPage() {
         recentlyCompletedDays: recentlyCompleted,
       })
 
-      // Save lab info to backend API (phone/email are per-user, not company-wide)
+      // Save lab info to backend API
       await updateLabInfoMutation.mutateAsync({
         company_name: companyName,
         address,
+        phone,
+        email,
         city,
         state,
         zip_code: zipCode,
@@ -254,6 +285,8 @@ export function SettingsPage() {
     setIsUploadingLogo(true)
     try {
       await uploadLogoMutation.mutateAsync(file)
+      setLabInfoAutoSaveSuccess(true)
+      setTimeout(() => setLabInfoAutoSaveSuccess(false), 2000)
       // Success! Dialog will close via onOpenChange(false) in ImageCropper
       // URL cleanup happens in onOpenChange callback when dialog closes
     } catch (error: any) {
@@ -273,6 +306,8 @@ export function SettingsPage() {
   const handleDeleteLogo = async () => {
     try {
       await deleteLogoMutation.mutateAsync()
+      setLabInfoAutoSaveSuccess(true)
+      setTimeout(() => setLabInfoAutoSaveSuccess(false), 2000)
     } catch {
       // Error handled by mutation
     }
@@ -294,13 +329,13 @@ export function SettingsPage() {
     setIsUserSaving(true)
     setUserSaveSuccess(false)
     try {
-      const updatedUser = await authApi.updateProfile({
+      await authApi.updateProfile({
         full_name: userFullName || null,
         title: userTitle || null,
         phone: userPhone || null,
-        email: userEmail || null,
       })
-      // Update auth store with new user data
+      // Refresh Zustand auth store so the rest of the app sees updated user data
+      await useAuthStore.getState().checkAuth()
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
       setUserSaveSuccess(true)
       setTimeout(() => setUserSaveSuccess(false), 2000)
@@ -342,6 +377,7 @@ export function SettingsPage() {
 
     try {
       await authApi.uploadSignature(file)
+      await useAuthStore.getState().checkAuth()
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
       // Success! Dialog will close via onOpenChange(false) in ImageCropper
       // URL cleanup happens in onOpenChange callback when dialog closes
@@ -355,6 +391,7 @@ export function SettingsPage() {
   const handleDeleteSignature = async () => {
     try {
       await authApi.deleteSignature()
+      await useAuthStore.getState().checkAuth()
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
     } catch {
       // Error handled
@@ -398,8 +435,7 @@ export function SettingsPage() {
   const hasUserProfileChanges =
     (user && userFullName !== (user.full_name || "")) ||
     (user && userTitle !== (user.title || "")) ||
-    (user && userPhone !== (user.phone || "")) ||
-    (user && userEmail !== (user.email || ""))
+    (user && userPhone !== (user.phone || ""))
 
   const hasEmailChanges =
     emailTemplate &&
@@ -411,9 +447,11 @@ export function SettingsPage() {
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { id: "display", label: "Display", icon: <Eye className="h-4 w-4" /> },
     { id: "user", label: "User Profile", icon: <UserCircle className="h-4 w-4" /> },
+    { id: "user-management", label: "User Management", icon: <Users className="h-4 w-4" />, adminOnly: true },
     { id: "system", label: "System", icon: <SettingsIcon className="h-4 w-4" />, adminOnly: true },
     { id: "coa-style", label: "COA Style", icon: <ListOrdered className="h-4 w-4" />, adminOnly: true },
     { id: "email", label: "Customer Email", icon: <Mail className="h-4 w-4" />, adminOnly: true },
+    { id: "lab-mapping", label: "Lab Mapping", icon: <Building2 className="h-4 w-4" /> },
   ]
 
   const visibleTabs = tabs.filter((tab) => !tab.adminOnly || canEditSystemSettings)
@@ -575,10 +613,12 @@ export function SettingsPage() {
                   id="userEmailField"
                   type="email"
                   value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="Enter email address"
-                  className="h-10 border-slate-200"
+                  disabled
+                  className="h-10 border-slate-200 bg-slate-50 text-slate-500"
                 />
+                <p className="text-[11px] text-slate-400">
+                  Contact an admin to update your email address
+                </p>
               </div>
               <div className="sm:col-span-2 space-y-1.5">
                 <Label className="text-[13px] font-semibold text-slate-700">
@@ -645,6 +685,92 @@ export function SettingsPage() {
                 <span className="text-[13px] text-slate-400">No unsaved changes</span>
               )}
             </div>
+
+            {/* Change Password */}
+            <div className="pt-6 mt-6 border-t border-slate-200">
+              <div className="flex items-center gap-2 mb-4">
+                <KeyRound className="h-4 w-4 text-slate-500" />
+                <h3 className="text-[14px] font-semibold text-slate-800">Change Password</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+                <div className="space-y-1.5">
+                  <Label htmlFor="currentPassword" className="text-[13px] font-semibold text-slate-700">
+                    Current Password
+                  </Label>
+                  <Input
+                    id="currentPassword"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    className="h-10 border-slate-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="newPassword" className="text-[13px] font-semibold text-slate-700">
+                    New Password
+                  </Label>
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="h-10 border-slate-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="confirmPassword" className="text-[13px] font-semibold text-slate-700">
+                    Confirm New Password
+                  </Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="h-10 border-slate-200"
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <Button
+                  onClick={async () => {
+                    if (!currentPassword || !newPassword || !confirmPassword) {
+                      toast.error("All password fields are required")
+                      return
+                    }
+                    if (newPassword.length < 6) {
+                      toast.error("New password must be at least 6 characters")
+                      return
+                    }
+                    if (newPassword !== confirmPassword) {
+                      toast.error("New passwords do not match")
+                      return
+                    }
+                    try {
+                      await changePasswordMutation.mutateAsync({ currentPassword, newPassword })
+                      toast.success("Password changed successfully")
+                      setCurrentPassword("")
+                      setNewPassword("")
+                      setConfirmPassword("")
+                    } catch (err: any) {
+                      toast.error(err?.response?.data?.detail || "Failed to change password")
+                    }
+                  }}
+                  disabled={changePasswordMutation.isPending}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  {changePasswordMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4" />
+                  )}
+                  Change Password
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -664,6 +790,11 @@ export function SettingsPage() {
           onCropComplete={handleSignatureCropComplete}
           title="Crop Signature"
         />
+      )}
+
+      {/* User Management Tab */}
+      {activeTab === "user-management" && canEditSystemSettings && (
+        <UserManagementTab />
       )}
 
       {/* System Settings Tab */}
@@ -858,6 +989,45 @@ export function SettingsPage() {
                     />
                   </div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="phone"
+                      className="text-[13px] font-semibold text-slate-700"
+                    >
+                      Phone
+                    </Label>
+                    <Input
+                      id="phone"
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value)
+                        setLabInfoDirty(true)
+                      }}
+                      placeholder="(555) 123-4567"
+                      className="h-10 border-slate-200"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="email"
+                      className="text-[13px] font-semibold text-slate-700"
+                    >
+                      Email
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value)
+                        setLabInfoDirty(true)
+                      }}
+                      placeholder="lab@company.com"
+                      className="h-10 border-slate-200"
+                    />
+                  </div>
+                </div>
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label className="text-[13px] font-semibold text-slate-700">
                     Company Logo
@@ -908,7 +1078,7 @@ export function SettingsPage() {
                     )}
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Recommended: PNG or JPG, max 2MB. Will appear above company name on COAs.
+                    Recommended: PNG or JPG, max 2MB. Changes save automatically and appear above company name on COAs.
                   </p>
                 </div>
               </div>
@@ -967,7 +1137,12 @@ export function SettingsPage() {
                     Settings saved successfully
                   </span>
                 )}
-                {!hasSystemChanges && !saveSuccess && (
+                {!saveSuccess && labInfoAutoSaveSuccess && (
+                  <span className="text-[12px] text-emerald-600">
+                    Changes saved automatically
+                  </span>
+                )}
+                {!hasSystemChanges && !saveSuccess && !labInfoAutoSaveSuccess && (
                   <span className="text-[12px] text-slate-400">
                     No unsaved changes
                   </span>
@@ -1220,6 +1395,108 @@ export function SettingsPage() {
             </>
           )}
         </div>
+      )}
+
+      {/* Lab Mapping Tab */}
+      {activeTab === "lab-mapping" && (
+        <Card className="border-slate-200/60 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
+                <Building2 className="h-5 w-5 text-slate-600" />
+              </div>
+              <div>
+                <CardTitle className="text-[16px] font-semibold text-slate-900">
+                  Lab Mapping
+                </CardTitle>
+                <CardDescription className="text-[13px] text-slate-500">
+                  Read-only mapping of internal tests to Daane Labs COC methods
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            {isLabMappingLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-slate-500">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span>Total mappings: {labMappingData?.total ?? 0}</span>
+                    <span>
+                      Unmapped:{" "}
+                      {labMappingData?.items?.filter((item) => item.match_type === "unmapped").length ?? 0}
+                    </span>
+                  </div>
+                  {canEditSystemSettings && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => rebuildMappingMutation.mutate()}
+                      disabled={rebuildMappingMutation.isPending}
+                    >
+                      {rebuildMappingMutation.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Rebuild Mappings
+                    </Button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-full text-left text-[13px]">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Test</th>
+                        <th className="px-4 py-3 font-semibold">Method</th>
+                        <th className="px-4 py-3 font-semibold">Daane Method</th>
+                        <th className="px-4 py-3 font-semibold">Match</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {labMappingData?.items.map((item) => (
+                        <tr key={item.lab_test_type_id} className="border-t border-slate-100">
+                          <td className="px-4 py-3 text-slate-900">{item.test_name}</td>
+                          <td className="px-4 py-3 text-slate-600">{item.test_method || "—"}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.daane_method || "—"}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                item.match_type === "name_method"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : item.match_type === "name_only"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                              title={item.match_reason || undefined}
+                            >
+                              {item.match_type === "name_method"
+                                ? "Name + Method"
+                                : item.match_type === "name_only"
+                                ? "Name Only"
+                                : "Unmapped"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {labMappingData?.items?.length === 0 && (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-slate-500" colSpan={4}>
+                            No mappings found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
       </div>
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, type KeyboardEvent, type Ref } from "react"
 import { ChevronDown, Plus, X, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { TestResultsTable } from "./TestResultsTable"
-import { PassFailBadge } from "./PassFailBadge"
 import type { TestResultRow, LabTestType } from "@/types"
 
 interface AdditionalTestsAccordionProps {
@@ -27,6 +26,16 @@ interface AdditionalTestsAccordionProps {
   disabled?: boolean
   /** ID of the row currently being saved */
   savingRowId?: number | null
+  /** Ref for the accordion trigger */
+  triggerRef?: Ref<HTMLButtonElement>
+  /** Optional key handler for the trigger */
+  onTriggerKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
+  /** Ref for the Add Test button */
+  addTestButtonRef?: Ref<HTMLButtonElement>
+  /** Optional key handler for the Add Test button */
+  onAddTestKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
+  /** Notify parent when accordion expands/collapses */
+  onToggle?: (open: boolean) => void
 }
 
 /**
@@ -41,6 +50,11 @@ export function AdditionalTestsAccordion({
   onDeleteResult,
   disabled = false,
   savingRowId,
+  triggerRef,
+  onTriggerKeyDown,
+  addTestButtonRef,
+  onAddTestKeyDown,
+  onToggle,
 }: AdditionalTestsAccordionProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isAddingTest, setIsAddingTest] = useState(false)
@@ -68,9 +82,16 @@ export function AdditionalTestsAccordion({
     setSearchQuery("")
   }
 
+  const handleOpenChange = (open: boolean) => {
+    setIsExpanded(open)
+    onToggle?.(open)
+  }
+
   return (
-    <Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="mt-4">
+    <Collapsible open={isExpanded} onOpenChange={handleOpenChange} className="mt-4">
       <CollapsibleTrigger
+        ref={triggerRef}
+        onKeyDown={onTriggerKeyDown}
         className={cn(
           "flex items-center justify-between w-full px-4 py-3 rounded-lg transition-colors",
           "bg-slate-50 hover:bg-slate-100",
@@ -180,6 +201,8 @@ export function AdditionalTestsAccordion({
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsAddingTest(true)}
+                  ref={addTestButtonRef as React.RefObject<HTMLButtonElement>}
+                  onKeyDown={onAddTestKeyDown}
                   className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                 >
                   <Plus className="h-4 w-4 mr-1.5" />

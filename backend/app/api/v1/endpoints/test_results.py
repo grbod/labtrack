@@ -7,9 +7,11 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.models import TestResult, Lot, User
-from app.models.enums import TestResultStatus, AuditAction
+from app.models.enums import TestResultStatus, AuditAction, RetestStatus
+from app.models.retest_request import RetestRequest, RetestItem
 from app.services.lot_service import LotService
 from app.services.audit_service import AuditService
+from app.services.retest_service import retest_service
 from app.schemas.test_result import (
     TestResultCreate,
     TestResultUpdate,
@@ -297,6 +299,27 @@ async def update_test_result(
 
     # Log to audit trail if there are actual changes
     if old_values != new_values:
+        # Check if this test result is part of a pending retest
+        pending_retest_item = (
+            db.query(RetestItem)
+            .join(RetestRequest)
+            .filter(
+                RetestItem.test_result_id == result_id,
+                RetestRequest.status == RetestStatus.PENDING,
+            )
+            .first()
+        )
+
+        # Add retest context to audit if applicable
+        audit_reason = f"Test result update: {result.test_type}"
+        if pending_retest_item:
+            retest_ref = pending_retest_item.retest_request.reference_number
+            new_values["retest_context"] = {
+                "retest_request_id": pending_retest_item.retest_request_id,
+                "reference_number": retest_ref,
+            }
+            audit_reason = f"Retest result entry ({retest_ref}): {result.test_type}"
+
         audit_service = AuditService()
         audit_service.log_action(
             db=db,
@@ -306,11 +329,15 @@ async def update_test_result(
             user_id=current_user.id,
             old_values=old_values,
             new_values=new_values,
-            reason=f"Test result update: {result.test_type}",
+            reason=audit_reason,
         )
 
     db.commit()
     db.refresh(result)
+
+    # Check if this update completes any pending retests
+    if 'result_value' in update_data:
+        retest_service.check_and_complete_retest(db, result_id, user_id=current_user.id)
 
     # Auto-recalculate lot status based on test results completion
     if result.lot_id:

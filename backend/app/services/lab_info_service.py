@@ -62,6 +62,8 @@ class LabInfoService(BaseService[LabInfo]):
         db: Session,
         company_name: str,
         address: str,
+        phone: Optional[str],
+        email: Optional[str],
         city: str,
         state: str,
         zip_code: str,
@@ -69,12 +71,14 @@ class LabInfoService(BaseService[LabInfo]):
         user_id: int = None,
     ) -> LabInfo:
         """
-        Update the lab info text fields. Phone/email are per-user, not company-wide.
+        Update the lab info text fields.
 
         Args:
             db: Database session
             company_name: Company name
             address: Street address
+            phone: Phone number
+            email: Email address
             city: City
             state: State
             zip_code: ZIP code
@@ -93,6 +97,11 @@ class LabInfoService(BaseService[LabInfo]):
             "state": state,
             "zip_code": zip_code,
         }
+
+        if phone is not None:
+            update_data["phone"] = phone
+        if email is not None:
+            update_data["email"] = email
 
         if require_pdf_for_submission is not None:
             update_data["require_pdf_for_submission"] = require_pdf_for_submission

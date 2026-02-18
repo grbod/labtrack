@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('comment', sa.Text(), nullable=True),
         sa.Column('attachment_filename', sa.String(length=255), nullable=True),
-        sa.Column('attachment_data', sa.LargeBinary(), nullable=True),
+        sa.Column('attachment_key', sa.String(length=500), nullable=True),  # R2/storage key
         sa.Column('attachment_size', sa.Integer(), nullable=True),
         sa.Column('attachment_hash', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False),

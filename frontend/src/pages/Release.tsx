@@ -281,7 +281,7 @@ export function ReleasePage() {
         </div>
 
         {/* Right Column: Release Actions */}
-        <div className="w-[224px] border-l border-slate-200 flex flex-col shrink-0">
+        <div className="w-[246px] border-l border-slate-200 flex flex-col shrink-0">
           <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50">
             <h2 className="text-[13px] font-semibold text-slate-700">
               Release Actions

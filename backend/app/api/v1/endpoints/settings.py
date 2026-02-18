@@ -23,6 +23,11 @@ from app.schemas.lab_info import (
     LabInfoResponse,
     LabInfoUpdate,
 )
+from app.schemas.daane_mapping import (
+    DaaneTestMappingListResponse,
+    DaaneTestMappingItem,
+)
+from app.services.daane_coc_service import daane_coc_service
 
 router = APIRouter()
 email_template_service = EmailTemplateService()
@@ -174,6 +179,51 @@ def _build_lab_info_response(lab_info) -> LabInfoResponse:
     )
 
 
+@router.get("/lab-mapping", response_model=DaaneTestMappingListResponse)
+async def get_lab_mapping(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> DaaneTestMappingListResponse:
+    """Get the current Daane Labs test mappings."""
+    mappings = daane_coc_service.list_mappings(db)
+    items = [
+        DaaneTestMappingItem(
+            lab_test_type_id=mapping.lab_test_type_id,
+            test_name=mapping.lab_test_type.test_name if mapping.lab_test_type else "",
+            test_method=mapping.lab_test_type.test_method if mapping.lab_test_type else None,
+            default_unit=mapping.lab_test_type.default_unit if mapping.lab_test_type else None,
+            daane_method=mapping.daane_method,
+            match_type=mapping.match_type,
+            match_reason=mapping.match_reason,
+        )
+        for mapping in mappings
+    ]
+    return DaaneTestMappingListResponse(items=items, total=len(items))
+
+
+@router.post("/lab-mapping/rebuild", response_model=DaaneTestMappingListResponse)
+async def rebuild_lab_mapping(
+    db: DbSession,
+    current_user: AdminUser,
+) -> DaaneTestMappingListResponse:
+    """Rebuild the Daane Labs test mappings from the template."""
+    daane_coc_service.rebuild_mappings(db)
+    mappings = daane_coc_service.list_mappings(db)
+    items = [
+        DaaneTestMappingItem(
+            lab_test_type_id=mapping.lab_test_type_id,
+            test_name=mapping.lab_test_type.test_name if mapping.lab_test_type else "",
+            test_method=mapping.lab_test_type.test_method if mapping.lab_test_type else None,
+            default_unit=mapping.lab_test_type.default_unit if mapping.lab_test_type else None,
+            daane_method=mapping.daane_method,
+            match_type=mapping.match_type,
+            match_reason=mapping.match_reason,
+        )
+        for mapping in mappings
+    ]
+    return DaaneTestMappingListResponse(items=items, total=len(items))
+
+
 @router.get("/lab-info", response_model=LabInfoResponse)
 async def get_lab_info(
     db: DbSession,
@@ -190,11 +240,13 @@ async def update_lab_info(
     db: DbSession,
     current_user: AdminUser,
 ) -> LabInfoResponse:
-    """Update lab information (admin only). Phone/email are per-user, not here."""
+    """Update lab information (admin only)."""
     lab_info = lab_info_service.update_info(
         db=db,
         company_name=lab_info_in.company_name,
         address=lab_info_in.address,
+        phone=lab_info_in.phone,
+        email=lab_info_in.email,
         city=lab_info_in.city,
         state=lab_info_in.state,
         zip_code=lab_info_in.zip_code,

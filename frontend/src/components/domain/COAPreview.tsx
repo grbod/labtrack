@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { toast } from "sonner"
 import { Loader2, FileText, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { usePreviewData, useSaveDraft, releaseKeys } from "@/hooks/useRelease"
+import { useRetestRequests } from "@/hooks/useRetests"
 import { useQueryClient } from "@tanstack/react-query"
 import { COAPreviewDocument } from "./COAPreviewDocument"
 
@@ -34,6 +35,23 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
 
   const { data: previewData, isLoading, error } = usePreviewData(lotId, productId)
   const saveDraft = useSaveDraft()
+  const { data: retestData } = useRetestRequests(lotId)
+
+  // Build map of test_result_id -> original_value from retest items
+  const originalValuesMap = useMemo(() => {
+    const map = new Map<number, string | null>()
+    if (retestData?.items) {
+      for (const request of retestData.items) {
+        for (const item of request.items) {
+          // Only keep the first (most recent) original value for each test
+          if (!map.has(item.test_result_id)) {
+            map.set(item.test_result_id, item.original_value)
+          }
+        }
+      }
+    }
+    return map
+  }, [retestData])
 
   // Measure container width on mount and resize
   useEffect(() => {
@@ -188,6 +206,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
             onNotesChange={handleNotesChange}
             onMfgDateChange={handleMfgDateChange}
             onExpDateChange={handleExpDateChange}
+            originalValuesMap={originalValuesMap}
           />
         </div>
       </div>

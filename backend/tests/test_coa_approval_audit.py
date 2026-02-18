@@ -151,7 +151,7 @@ class TestCOAApprovalAudit:
     def test_approve_release_creates_audit_entry(
         self, client, test_db, awaiting_release_lot, test_product
     ):
-        """Test that approving a COA release creates an audit entry with APPROVE action."""
+        """Test that approving a COA release creates an audit entry for the status change."""
         lot_id = awaiting_release_lot.id
         product_id = test_product.id
 
@@ -162,20 +162,20 @@ class TestCOAApprovalAudit:
         )
         assert response.status_code == 200
 
-        # Check audit log for coa_releases entry with APPROVE action
+        # Check audit log for coa_releases entry with UPDATE action (status change)
         audit_entry = (
             test_db.query(AuditLog)
             .filter(
                 AuditLog.table_name == "coa_releases",
-                AuditLog.action == AuditAction.APPROVE
+                AuditLog.action == AuditAction.UPDATE
             )
             .first()
         )
 
-        assert audit_entry is not None, "No APPROVE audit entry found for coa_releases"
-        assert audit_entry.action == AuditAction.APPROVE
+        assert audit_entry is not None, "No UPDATE audit entry found for coa_releases"
+        assert audit_entry.action == AuditAction.UPDATE
 
-        # Verify new_values contains only the released status
+        # Verify new_values contains the released status
         new_values = audit_entry.get_new_values_dict()
         assert new_values.get("status") == "released"
 
@@ -227,12 +227,12 @@ class TestCOAApprovalAudit:
         )
         assert response.status_code == 200
 
-        # Check coa_releases audit entry reason
+        # Check coa_releases audit entry reason (logged as UPDATE for status change)
         coa_audit = (
             test_db.query(AuditLog)
             .filter(
                 AuditLog.table_name == "coa_releases",
-                AuditLog.action == AuditAction.APPROVE
+                AuditLog.action == AuditAction.UPDATE
             )
             .first()
         )

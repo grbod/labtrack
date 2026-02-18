@@ -66,3 +66,11 @@ class COAReleaseStatus(str, enum.Enum):
 
     AWAITING_RELEASE = "awaiting_release"
     RELEASED = "released"
+
+
+class RetestStatus(str, enum.Enum):
+    """Retest request status enumeration."""
+
+    PENDING = "pending"
+    REVIEW_REQUIRED = "review_required"
+    COMPLETED = "completed"

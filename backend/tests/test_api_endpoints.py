@@ -273,13 +273,17 @@ class TestProductEndpoints:
         assert data["brand"] == "Updated Brand"
 
     def test_delete_product(self, client, test_product):
-        """Test deleting a product."""
-        response = client.delete(f"/api/v1/products/{test_product.id}")
-        assert response.status_code == 204
+        """Test archiving a product (soft delete)."""
+        response = client.request(
+            "DELETE",
+            f"/api/v1/products/{test_product.id}",
+            json={"reason": "Test archive reason"}
+        )
+        assert response.status_code == 200
 
-        # Verify deleted
-        response = client.get(f"/api/v1/products/{test_product.id}")
-        assert response.status_code == 404
+        # Verify archived (is_active should be False)
+        data = response.json()
+        assert data["is_active"] is False
 
     def test_list_brands(self, client, test_product):
         """Test getting list of unique brands."""

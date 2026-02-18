@@ -10,7 +10,6 @@ import {
   FileCheck,
   Archive,
   Users,
-  UserCog,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -61,7 +60,6 @@ const navSections: NavSection[] = [
     title: "Admin",
     adminOnly: true,
     items: [
-      { label: "User Management", href: "/users", icon: <UserCog className="h-[18px] w-[18px]" /> },
       { label: "Audit Trail", href: "/audittrail", icon: <FolderArchive className="h-[18px] w-[18px]" /> },
     ],
   },

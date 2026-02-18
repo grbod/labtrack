@@ -124,6 +124,8 @@ export interface ArchiveFilters {
   lot_number?: string
   page?: number
   page_size?: number
+  sort_by?: 'released_at' | 'reference_number' | 'lot_number' | 'brand' | 'product_name'
+  sort_order?: 'asc' | 'desc'
 }
 
 // Draft save data
@@ -143,6 +145,7 @@ export interface CreateCustomerData {
 
 // COA Preview Data types
 export interface COATestResult {
+  id?: number  // Test result ID for retest original value matching
   name: string
   result: string
   unit: string | null
@@ -178,6 +181,7 @@ export interface COAPreviewData {
   generated_date: string
   released_by: string | null
   released_by_title: string | null
+  released_by_email: string | null
   signature_url: string | null  // URL to signature image for COA
   released_at: string | null  // Release date (if different from generated_date)
 }

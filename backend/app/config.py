@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     upload_path: Path = Field(default=Path("./uploads"), env="UPLOAD_PATH")
     export_path: Path = Field(default=Path("./exports"), env="EXPORT_PATH")
 
+    # Cloudflare R2 Storage
+    r2_account_id: str = Field(default="", env="R2_ACCOUNT_ID")
+    r2_access_key_id: str = Field(default="", env="R2_ACCESS_KEY_ID")
+    r2_secret_access_key: str = Field(default="", env="R2_SECRET_ACCESS_KEY")
+    r2_bucket_name: str = Field(default="coa-files", env="R2_BUCKET_NAME")
+    r2_endpoint: str = Field(default="", env="R2_ENDPOINT")
+    storage_backend: str = Field(default="local", env="STORAGE_BACKEND")  # "local" or "r2"
+    presigned_url_expiry: int = Field(default=3600, env="PRESIGNED_URL_EXPIRY")  # 1 hour
+
     # Aliases for compatibility
     @property
     def COA_OUTPUT_FOLDER(self):

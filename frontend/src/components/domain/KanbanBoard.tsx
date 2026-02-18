@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Lot, LotStatus } from "@/types"
 
@@ -233,31 +234,41 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
         </div>
       )}
 
-      {/* Footer: Lab Ref + Tests Badge */}
+      {/* Footer: Lab Ref + Badges */}
       <div className="mt-1.5 flex items-center justify-between">
         <p className="text-[11px] text-slate-600">
           Lab Ref <span className="font-mono font-medium">{lot.reference_number}</span>
         </p>
-        <span
-          className={cn(
-            "rounded px-1.5 py-0.5 text-[9px] font-medium",
-            (() => {
-              const entered = lot.tests_entered ?? 0
-              const total = lot.tests_total ?? 0
-              const failed = lot.tests_failed ?? 0
-              if (failed > 0) return "bg-red-100 text-red-700"
-              if (total === 0) return "bg-slate-100 text-slate-500"
-              // Darker green when user added extra tests (entered > required)
-              if (entered > total && total > 0) return "bg-emerald-200 text-emerald-800"
-              // Regular green when exactly matching required tests
-              if (entered === total && total > 0) return "bg-emerald-100 text-emerald-700"
-              if (entered > 0) return "bg-amber-100 text-amber-700"
-              return "bg-slate-100 text-slate-500"
-            })()
+        <div className="flex items-center gap-1">
+          {/* Retest Pending Badge */}
+          {lot.has_pending_retest && (
+            <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+              <RefreshCw className="h-2.5 w-2.5" />
+              Retest
+            </span>
           )}
-        >
-          {lot.tests_entered ?? 0}/{lot.tests_total ?? 0}
-        </span>
+          {/* Tests Count Badge */}
+          <span
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[9px] font-medium",
+              (() => {
+                const entered = lot.tests_entered ?? 0
+                const total = lot.tests_total ?? 0
+                const failed = lot.tests_failed ?? 0
+                if (failed > 0) return "bg-red-100 text-red-700"
+                if (total === 0) return "bg-slate-100 text-slate-500"
+                // Darker green when user added extra tests (entered > required)
+                if (entered > total && total > 0) return "bg-emerald-200 text-emerald-800"
+                // Regular green when exactly matching required tests
+                if (entered === total && total > 0) return "bg-emerald-100 text-emerald-700"
+                if (entered > 0) return "bg-amber-100 text-amber-700"
+                return "bg-slate-100 text-slate-500"
+              })()
+            )}
+          >
+            {lot.tests_entered ?? 0}/{lot.tests_total ?? 0}
+          </span>
+        </div>
       </div>
     </div>
   )

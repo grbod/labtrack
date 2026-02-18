@@ -7,10 +7,12 @@ from pydantic import BaseModel, Field
 
 
 class LabInfoUpdate(BaseModel):
-    """Schema for updating lab info (phone/email are per-user, not here)."""
+    """Schema for updating lab info."""
 
     company_name: str = Field(..., min_length=1, max_length=200)
     address: str = Field("", max_length=500)
+    phone: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = Field(None, max_length=200)
     city: str = Field("", max_length=100)
     state: str = Field("", max_length=50)
     zip_code: str = Field("", max_length=20)

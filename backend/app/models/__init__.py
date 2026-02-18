@@ -10,6 +10,7 @@ from app.models.enums import (
     ParsingStatus,
     AuditAction,
     COAReleaseStatus,
+    RetestStatus,
 )
 from app.models.product import Product
 from app.models.product_size import ProductSize
@@ -27,6 +28,9 @@ from app.models.email_history import EmailHistory
 from app.models.email_template import EmailTemplate
 from app.models.coa_category_order import COACategoryOrder
 from app.models.lab_info import LabInfo
+from app.models.retest_request import RetestRequest, RetestItem
+from app.models.daane_test_mapping import DaaneTestMapping
+from app.models.daane_coc_daily_counter import DaaneCOCDailyCounter
 
 # Export all models and enums
 __all__ = [
@@ -40,6 +44,7 @@ __all__ = [
     "ParsingStatus",
     "AuditAction",
     "COAReleaseStatus",
+    "RetestStatus",
     # Models
     "Product",
     "ProductSize",
@@ -60,4 +65,8 @@ __all__ = [
     "EmailTemplate",
     "COACategoryOrder",
     "LabInfo",
+    "RetestRequest",
+    "RetestItem",
+    "DaaneTestMapping",
+    "DaaneCOCDailyCounter",
 ]

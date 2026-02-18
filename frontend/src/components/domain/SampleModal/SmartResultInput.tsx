@@ -52,7 +52,8 @@ export function SmartResultInput({
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
   const [localValue, setLocalValue] = useState(value)
   const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const tabPressedRef = useRef(false)
+  // Tracks when keyboard navigation already handled focus so blur should no-op
+  const skipBlurRef = useRef(false)
 
   // Register input ref with parent when it changes
   useEffect(() => {
@@ -85,6 +86,10 @@ export function SmartResultInput({
 
   // Handle blur - save and end editing
   const handleBlur = () => {
+    if (skipBlurRef.current) {
+      skipBlurRef.current = false
+      return
+    }
     if (localValue !== value) {
       onChange(localValue)
     }
@@ -102,6 +107,7 @@ export function SmartResultInput({
       if (localValue !== value) {
         onChange(localValue)
       }
+      skipBlurRef.current = true
       if (onTab) {
         onTab(e.shiftKey)
       } else {
@@ -218,9 +224,8 @@ export function SmartResultInput({
             onBlur={() => {
               // Delay blur to allow click on options
               setTimeout(() => {
-                // Skip if Tab triggered this blur - Tab navigation handles it
-                if (tabPressedRef.current) {
-                  tabPressedRef.current = false
+                if (skipBlurRef.current) {
+                  skipBlurRef.current = false
                   return
                 }
                 if (localValue !== value) {
@@ -261,7 +266,7 @@ export function SmartResultInput({
                 if (finalValue !== value) {
                   onChange(finalValue)
                 }
-                tabPressedRef.current = true
+                skipBlurRef.current = true
                 if (onTab) {
                   onTab(e.shiftKey)
                 } else {
@@ -276,12 +281,13 @@ export function SmartResultInput({
                 if (finalValue !== value) {
                   onChange(finalValue)
                 }
-                // Enter moves to next column (same as Tab forward)
-                if (onTab) {
-                  onTab(false)
-                } else if (onEnter) {
+                skipBlurRef.current = true
+                if (onEnter) {
                   onEnter()
+                } else if (onTab) {
+                  onTab(false)
                 } else {
+                  skipBlurRef.current = false
                   onEndEdit()
                 }
               }

@@ -29,10 +29,13 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables."""
+    """Initialize database tables and seed default data."""
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
         raise
+
+    from app.seed import seed_if_empty
+    seed_if_empty(engine)

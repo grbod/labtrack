@@ -4,6 +4,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
@@ -28,6 +29,7 @@ from app.schemas.lot import (
     SublotResponse,
     LotStatusUpdate,
 )
+from app.services.daane_coc_service import daane_coc_service
 
 router = APIRouter()
 
@@ -418,6 +420,89 @@ async def get_lot_with_specs(
     return response
 
 
+@router.get("/{lot_id}/daane-coc")
+async def download_daane_coc(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    """Download Daane Labs Chain of Custody (XLSX) for a lot."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    try:
+        content, test_count = daane_coc_service.generate_coc_for_lot(db, lot_id, current_user)
+        filename = f"daane-coc-{lot.reference_number}.xlsx"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Daane-Test-Count": str(test_count),
+            "X-Daane-Test-Limit": "12",
+            "X-Daane-Test-Limit-Exceeded": "true" if test_count > 12 else "false",
+        }
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.get("/{lot_id}/daane-coc/pdf")
+async def download_daane_coc_pdf(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+    selected_lab_test_type_ids: Optional[List[int]] = Query(default=None),
+    special_instructions: Optional[str] = Query(default=None),
+):
+    """Download Daane Labs Chain of Custody (PDF) for a lot."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    try:
+        content, test_count = daane_coc_service.generate_coc_pdf_for_lot(
+            db,
+            lot_id,
+            current_user,
+            selected_lab_test_type_ids=selected_lab_test_type_ids,
+            special_instructions=special_instructions,
+        )
+        filename = f"daane-coc-{lot.reference_number}.pdf"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Daane-Test-Count": str(test_count),
+            "X-Daane-Test-Limit": "12",
+            "X-Daane-Test-Limit-Exceeded": "true" if test_count > 12 else "false",
+        }
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers=headers,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.post("", response_model=LotResponse, status_code=status.HTTP_201_CREATED)
 async def create_lot(
     lot_in: LotCreate,
@@ -463,6 +548,7 @@ async def create_lot(
         exp_date=lot_in.exp_date,
         status=LotStatus.AWAITING_RESULTS,
         generate_coa=lot_in.generate_coa,
+        daane_po_number=daane_coc_service.generate_po_number(db),
     )
     db.add(lot)
     db.flush()  # Get the lot ID

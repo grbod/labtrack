@@ -18,7 +18,6 @@ import { ReleasePage } from "@/pages/Release"
 import { ArchivePage } from "@/pages/Archive"
 import { ArchivedItemsPage } from "@/pages/ArchivedItems"
 import { ArchiveLotPage } from "@/pages/ArchiveLot"
-import { UserManagementPage } from "@/pages/UserManagement"
 
 // Create a client
 const queryClient = new QueryClient({
@@ -61,7 +60,7 @@ function AppRoutes() {
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/audittrail" element={<ArchivedItemsPage />} />
         <Route path="/audittrail/lot/:lotId/:productId" element={<ArchiveLotPage />} />
-        <Route path="/users" element={<UserManagementPage />} />
+        <Route path="/users" element={<Navigate to="/settings" replace />} />
       </Route>
 
       {/* Catch all */}

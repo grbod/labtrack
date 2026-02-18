@@ -48,6 +48,8 @@ class Lot(BaseModel):
     generate_coa = Column(Boolean, default=True, nullable=False)
     rejection_reason = Column(Text, nullable=True)  # Required when status is REJECTED
     attached_pdfs = Column(JSON, nullable=True, default=list)  # List of uploaded PDF filenames
+    has_pending_retest = Column(Boolean, default=False, nullable=False)  # True when retest is pending
+    daane_po_number = Column(String(20), nullable=True)  # Daane COC PO number
 
     # Relationships
     sublots = relationship(
@@ -64,6 +66,9 @@ class Lot(BaseModel):
     )
     coa_releases = relationship(
         "COARelease", back_populates="lot", cascade="all, delete-orphan"
+    )
+    retest_requests = relationship(
+        "RetestRequest", back_populates="lot", cascade="all, delete-orphan"
     )
 
     # Indexes for performance

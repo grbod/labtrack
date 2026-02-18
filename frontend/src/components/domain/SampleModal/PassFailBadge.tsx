@@ -2,8 +2,8 @@ import { Check, X, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface PassFailBadgeProps {
-  /** Pass/fail status: 'pass', 'fail', or null for no result */
-  status: 'pass' | 'fail' | null
+  /** Pass/fail status: 'pass', 'fail', 'pending', or null for no result */
+  status: 'pass' | 'fail' | 'pending' | null
   /** Whether this test is flagged for QC review */
   isFlagged?: boolean
   /** Additional class names */
@@ -15,8 +15,8 @@ interface PassFailBadgeProps {
  * Shows green PASS, red FAIL with optional flagged indicator, or empty for no result.
  */
 export function PassFailBadge({ status, isFlagged = false, className }: PassFailBadgeProps) {
-  // No result yet - empty cell
-  if (status === null) {
+  // No result yet or pending - empty cell
+  if (status === null || status === 'pending') {
     return <span className={cn("text-slate-300", className)}>—</span>
   }
 

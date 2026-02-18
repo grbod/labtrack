@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import React, { useMemo, useState, useCallback } from "react"
 import {
   useReactTable,
   getCoreRowModel,
@@ -10,7 +10,7 @@ import {
   type SortingState,
   type ColumnFiltersState,
 } from "@tanstack/react-table"
-import { ArrowUpDown, ArrowUp, ArrowDown, FileText, Search, ChevronLeft, ChevronRight } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, FileText, Search, ChevronLeft, ChevronRight, ChevronDown, RefreshCw } from "lucide-react"
 
 import {
   Table,
@@ -23,11 +23,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Select, type SelectOption } from "@/components/ui/select"
+// Simple select option type for native select elements
+type SelectOption = { value: string; label: string }
 import { cn } from "@/lib/utils"
 import { generateDisplayName } from "@/lib/product-utils"
+import { getRelativeTime } from "@/lib/date-utils"
 import { STATUS_CONFIG, STATUS_OPTIONS, getStatusColor } from "@/lib/status-config"
 import type { Lot, LotType } from "@/types"
+import { RetestSubRows } from "./RetestSubRows"
 
 // Lot type display names
 const LOT_TYPE_LABELS: Record<LotType, string> = {
@@ -48,27 +51,10 @@ const PAGE_SIZE_OPTIONS: SelectOption[] = [
 interface SampleTableProps {
   lots: Lot[]
   onRowClick: (lot: Lot) => void
+  onRetestSubRowClick?: (lot: Lot) => void  // Triggers when retest sub-row clicked
   staleWarningDays?: number
   staleCriticalDays?: number
   pageSize?: number
-}
-
-/**
- * Calculate relative time string from a date
- */
-function getRelativeTime(dateString: string): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) return "Today"
-  if (diffDays === 1) return "1 day ago"
-  if (diffDays < 7) return `${diffDays} days ago`
-  if (diffDays < 14) return "1 week ago"
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`
-  if (diffDays < 60) return "1 month ago"
-  return `${Math.floor(diffDays / 30)} months ago`
 }
 
 /**
@@ -86,6 +72,7 @@ const columnHelper = createColumnHelper<Lot>()
 export function SampleTable({
   lots,
   onRowClick,
+  onRetestSubRowClick,
   staleWarningDays = 7,
   staleCriticalDays = 12,
   pageSize: initialPageSize = 25,
@@ -94,9 +81,54 @@ export function SampleTable({
   const [globalFilter, setGlobalFilter] = useState("")
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [statusFilter, setStatusFilter] = useState("all")
+  const [expandedLotIds, setExpandedLotIds] = useState<Set<number>>(new Set())
+
+  const toggleExpand = useCallback((lotId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpandedLotIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(lotId)) {
+        next.delete(lotId)
+      } else {
+        next.add(lotId)
+      }
+      return next
+    })
+  }, [])
 
   const columns = useMemo(
     () => [
+      columnHelper.display({
+        id: "expand",
+        header: () => null,
+        cell: ({ row }) => {
+          const lot = row.original
+          // Show chevron for pending/review_required retests
+          // Note: Historical retests (completed) are accessible via Sample Modal's Retests History accordion
+          const hasActiveRetests = lot.has_pending_retest
+          const isExpanded = expandedLotIds.has(lot.id)
+
+          if (!hasActiveRetests) {
+            return <div className="w-6" />
+          }
+
+          return (
+            <button
+              type="button"
+              onClick={(e) => toggleExpand(lot.id, e)}
+              className="p-1 rounded hover:bg-slate-100 transition-colors"
+              aria-label={isExpanded ? "Collapse retests" : "Expand retests"}
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4 text-amber-600" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-amber-600" />
+              )}
+            </button>
+          )
+        },
+        size: 40,
+      }),
       columnHelper.accessor("reference_number", {
         header: ({ column }) => (
           <SortableHeader column={column} label="Reference #" />
@@ -176,10 +208,18 @@ export function SampleTable({
         cell: (info) => {
           const status = info.getValue()
           const config = STATUS_CONFIG[status]
+          const lot = info.row.original
           return (
-            <Badge variant={getStatusColor(status)}>
-              {config.label}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={getStatusColor(status)}>
+                {config.label}
+              </Badge>
+              {lot.has_pending_retest && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                  <RefreshCw className="h-3 w-3" />
+                </span>
+              )}
+            </div>
           )
         },
         filterFn: (row, columnId, filterValue) => {
@@ -229,7 +269,7 @@ export function SampleTable({
         },
       }),
     ],
-    [staleWarningDays, staleCriticalDays]
+    [staleWarningDays, staleCriticalDays, expandedLotIds, toggleExpand]
   )
 
   // Apply status filter
@@ -304,12 +344,15 @@ export function SampleTable({
           />
         </div>
         <div className="w-48">
-          <Select
-            options={STATUS_OPTIONS}
+          <select
             value={statusFilter}
-            onChange={setStatusFilter}
-            className="h-11 bg-white border-slate-200"
-          />
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-11 w-full bg-white border border-slate-200 rounded-lg px-3 text-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -350,23 +393,37 @@ export function SampleTable({
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  onClick={() => onRowClick(row.original)}
-                  className={cn(
-                    "cursor-pointer transition-colors",
-                    getRowClassName(row.original)
+                <React.Fragment key={row.id}>
+                  <TableRow
+                    onClick={() => onRowClick(row.original)}
+                    className={cn(
+                      "cursor-pointer transition-colors",
+                      getRowClassName(row.original)
+                    )}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="text-[14px]">
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                  {expandedLotIds.has(row.original.id) && (
+                    <RetestSubRows
+                      lotId={row.original.id}
+                      colSpan={columns.length}
+                      onRetestClick={() => {
+                        if (onRetestSubRowClick) {
+                          onRetestSubRowClick(row.original)
+                        } else {
+                          onRowClick(row.original)
+                        }
+                      }}
+                    />
                   )}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="text-[14px]">
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
+                </React.Fragment>
               ))
             )}
           </TableBody>
@@ -380,12 +437,15 @@ export function SampleTable({
               {table.getFilteredRowModel().rows.length !== 1 ? "s" : ""}
             </p>
             <div className="w-40">
-              <Select
-                options={PAGE_SIZE_OPTIONS}
+              <select
                 value={String(table.getState().pagination.pageSize)}
-                onChange={(value) => table.setPageSize(Number(value))}
-                className="h-9 text-sm"
-              />
+                onChange={(e) => table.setPageSize(Number(e.target.value))}
+                className="h-9 w-full bg-white border border-slate-200 rounded-lg px-3 text-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
+              >
+                {PAGE_SIZE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
           </div>
 

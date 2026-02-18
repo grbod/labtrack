@@ -106,6 +106,14 @@ export const authApi = {
     return response.data
   },
 
+  changePassword: async (currentPassword: string, newPassword: string): Promise<{ message: string }> => {
+    const response = await api.put<{ message: string }>("/auth/me/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+    return response.data
+  },
+
   verifyOverride: async (username: string, password: string): Promise<VerifyOverrideResponse> => {
     const formData = new URLSearchParams()
     formData.append("username", username)

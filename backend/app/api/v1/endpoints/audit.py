@@ -3,19 +3,22 @@
 import csv
 import io
 import hashlib
+import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, QCManagerOrAdmin
+from app.config import settings
 from app.models.audit import AuditLog, AuditAnnotation, MAX_ATTACHMENTS_PER_ENTRY, MAX_ATTACHMENT_SIZE_BYTES
 from app.models.enums import AuditAction
 from app.models.test_result import TestResult
 from app.models.coa_release import COARelease
+from app.models.retest_request import RetestRequest
 from app.schemas.audit import (
     AuditLogResponse,
     AuditLogListResponse,
@@ -26,6 +29,7 @@ from app.schemas.audit import (
     AuditEntryDisplay,
     FieldChange,
 )
+from app.services.storage_service import get_storage_service
 
 router = APIRouter()
 
@@ -357,6 +361,34 @@ def _get_comprehensive_audit_logs(
             for log in coa_logs:
                 results.append((log, "COA Release"))
 
+        # Also get retest request entries for this lot
+        retest_requests = (
+            db.query(RetestRequest.id, RetestRequest.reference_number)
+            .filter(RetestRequest.lot_id == record_id)
+            .all()
+        )
+
+        if retest_requests:
+            # Build a mapping of retest_request_id -> reference_number for context
+            retest_ref_map = {rr.id: rr.reference_number for rr in retest_requests}
+            retest_request_ids = list(retest_ref_map.keys())
+
+            # Get audit entries for those retest requests
+            retest_logs = (
+                db.query(AuditLog)
+                .options(joinedload(AuditLog.user))
+                .filter(
+                    AuditLog.table_name == "retest_requests",
+                    AuditLog.record_id.in_(retest_request_ids),
+                )
+                .all()
+            )
+
+            # Add with retest reference as context prefix
+            for log in retest_logs:
+                context_prefix = f"Retest: {retest_ref_map.get(log.record_id, 'Unknown')}"
+                results.append((log, context_prefix))
+
     # Sort all entries by timestamp descending
     results.sort(key=lambda x: x[0].timestamp, reverse=True)
 
@@ -455,6 +487,7 @@ async def create_annotation(
 
     Either comment or file must be provided (or both).
     Max 5 attachments per audit entry. Max 10MB per attachment.
+    Attachments are stored in R2 (production) or local storage (development).
     """
     # Verify audit log exists
     audit_log = db.query(AuditLog).filter(AuditLog.id == audit_id).first()
@@ -495,7 +528,7 @@ async def create_annotation(
         comment=comment.strip() if comment else None,
     )
 
-    # Handle file upload
+    # Handle file upload to storage
     if file:
         file_content = await file.read()
 
@@ -506,7 +539,30 @@ async def create_annotation(
             )
 
         file_hash = hashlib.sha256(file_content).hexdigest()
-        annotation.set_attachment(file.filename, file_content, file_hash)
+
+        # Generate unique storage key
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        safe_name = "".join(
+            c if c.isalnum() or c in ".-_" else "_"
+            for c in (file.filename or "attachment")
+        )
+        storage_key = f"attachments/{timestamp}_{unique_id}_{safe_name}"
+
+        # Determine content type
+        content_type = file.content_type or "application/octet-stream"
+
+        # Upload to storage
+        storage = get_storage_service()
+        storage.upload(file_content, storage_key, content_type=content_type)
+
+        # Set metadata on annotation
+        annotation.set_attachment_metadata(
+            filename=file.filename or "attachment",
+            storage_key=storage_key,
+            file_size=len(file_content),
+            file_hash=file_hash,
+        )
 
     db.add(annotation)
     db.commit()
@@ -531,8 +587,13 @@ async def download_attachment(
     annotation_id: int,
     db: DbSession,
     current_user: QCManagerOrAdmin,
-) -> StreamingResponse:
-    """Download an attachment from an annotation (QC Manager or Admin only)."""
+):
+    """
+    Download an attachment from an annotation (QC Manager or Admin only).
+
+    For R2 storage: Returns a redirect to a presigned URL (1-hour expiry).
+    For local storage: Returns the file content directly.
+    """
     annotation = (
         db.query(AuditAnnotation)
         .filter(
@@ -548,20 +609,33 @@ async def download_attachment(
             detail="Annotation not found",
         )
 
-    if not annotation.attachment_data:
+    if not annotation.attachment_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No attachment found",
         )
 
-    # Decompress and return
-    file_content = annotation.get_attachment()
+    storage = get_storage_service()
 
-    return StreamingResponse(
-        io.BytesIO(file_content),
+    # For R2 storage, redirect to presigned URL
+    if settings.storage_backend == "r2":
+        presigned_url = storage.get_presigned_url(annotation.attachment_key)
+        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    # For local storage, download and return directly
+    try:
+        file_content = storage.download(annotation.attachment_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment file not found in storage",
+        )
+
+    return Response(
+        content=file_content,
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f"attachment; filename=\"{annotation.attachment_filename}\""
+            "Content-Disposition": f'attachment; filename="{annotation.attachment_filename}"'
         },
     )
 

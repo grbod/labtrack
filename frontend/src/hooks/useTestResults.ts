@@ -7,6 +7,7 @@ import {
   type BulkCreateData,
 } from "@/api/testResults"
 import type { TestResultStatus } from "@/types"
+import { retestKeys } from "@/hooks/useRetests"
 
 export const testResultKeys = {
   all: ["testResults"] as const,
@@ -69,9 +70,13 @@ export function useUpdateTestResult() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: UpdateTestResultData }) =>
       testResultsApi.update(id, data),
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: testResultKeys.lists() })
       queryClient.invalidateQueries({ queryKey: testResultKeys.detail(variables.id) })
+      // Invalidate retest queries - backend may have auto-completed a retest
+      if (result.lot_id) {
+        queryClient.invalidateQueries({ queryKey: retestKeys.forLot(result.lot_id) })
+      }
     },
   })
 }

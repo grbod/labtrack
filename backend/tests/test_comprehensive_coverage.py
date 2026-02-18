@@ -649,12 +649,21 @@ class TestAuditLogModel:
             )
 
     # Test 46
-    def test_audit_log_record_id_positive(self, test_db):
-        """Test record ID must be positive."""
-        with pytest.raises(ValueError, match="must be positive"):
+    def test_audit_log_record_id_non_negative(self, test_db):
+        """Test record ID must be non-negative (0 is allowed for bulk summaries)."""
+        # 0 is now allowed for bulk operation summaries
+        audit_zero = AuditLog(
+            table_name="test",
+            record_id=0,
+            action=AuditAction.INSERT
+        )
+        assert audit_zero.record_id == 0
+
+        # Negative values should still raise
+        with pytest.raises(ValueError, match="must be non-negative"):
             AuditLog(
                 table_name="test",
-                record_id=0,
+                record_id=-1,
                 action=AuditAction.INSERT
             )
 

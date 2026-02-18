@@ -35,6 +35,10 @@ interface TestResultsTableProps {
   savingRowId?: number | null
   /** Ref to the save button for focus on last cell Tab */
   saveButtonRef?: React.RefObject<HTMLButtonElement | null>
+  /** Map of test_result_id -> original_value for retested tests */
+  originalValuesMap?: Map<number, string | null>
+  /** Callback when navigation should move outside the table */
+  onRequestNextFocus?: (direction: "forward" | "backward") => void
 }
 
 export interface TestResultsTableHandle {
@@ -42,6 +46,10 @@ export interface TestResultsTableHandle {
   hasUnsavedChanges: () => boolean
   /** Get current editing state */
   isEditing: () => boolean
+  /** Focus the first editable cell */
+  focusFirstCell: () => void
+  /** Focus the last editable cell */
+  focusLastCell: () => void
 }
 
 const columnHelper = createColumnHelper<TestResultRow>()
@@ -64,6 +72,8 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
       disabled = false,
       savingRowId,
       saveButtonRef,
+      originalValuesMap,
+      onRequestNextFocus,
     },
     ref
   ) {
@@ -76,10 +86,22 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
   const pendingTabNavigation = useRef<EditingCell | null>(null)
 
   // Expose methods to parent
-  useImperativeHandle(ref, () => ({
-    hasUnsavedChanges: () => false, // With immediate save, no pending changes
-    isEditing: () => editingCell !== null,
-  }))
+  useImperativeHandle(
+    ref,
+    () => ({
+      hasUnsavedChanges: () => false, // With immediate save, no pending changes
+      isEditing: () => editingCell !== null,
+      focusFirstCell: () => {
+        if (!testResults.length) return
+        setEditingCell({ rowId: testResults[0].id, columnId: "result_value" })
+      },
+      focusLastCell: () => {
+        if (!testResults.length) return
+        setEditingCell({ rowId: testResults[testResults.length - 1].id, columnId: "notes" })
+      },
+    }),
+    [editingCell, testResults]
+  )
 
   // Focus input when editingCell changes
   useEffect(() => {
@@ -152,15 +174,25 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
         }
       }
 
+      const direction: "forward" | "backward" = e.shiftKey ? "backward" : "forward"
+
       // Check bounds
       if (nextRowIndex < 0) {
-        // At beginning, loop to last cell
-        nextRowIndex = testResults.length - 1
-        nextColIndex = EDITABLE_COLUMNS.length - 1
+        pendingTabNavigation.current = null
+        if (activeEl instanceof HTMLElement) {
+          activeEl.blur()
+        }
+        setTimeout(() => {
+          if (onRequestNextFocus) {
+            onRequestNextFocus("backward")
+          } else {
+            saveButtonRef?.current?.focus()
+          }
+        }, 0)
+        return
       }
 
       if (nextRowIndex >= testResults.length) {
-        // At end, focus save button after blur completes
         pendingTabNavigation.current = null
         // Blur the current input to trigger save, then focus save button
         if (activeEl instanceof HTMLElement) {
@@ -168,7 +200,11 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
         }
         // Use setTimeout to focus save button after blur handler runs
         setTimeout(() => {
-          saveButtonRef?.current?.focus()
+          if (onRequestNextFocus) {
+            onRequestNextFocus(direction)
+          } else {
+            saveButtonRef?.current?.focus()
+          }
         }, 0)
         return
       }
@@ -187,7 +223,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     // Add listener on WINDOW with CAPTURE phase - runs before document-level Radix listener
     window.addEventListener('keydown', handleTabCapture, { capture: true })
     return () => window.removeEventListener('keydown', handleTabCapture, { capture: true })
-  }, [testResults, saveButtonRef])
+  }, [testResults, saveButtonRef, onRequestNextFocus])
 
   // Navigate to a specific cell
   const navigateToCell = useCallback((rowIndex: number, columnId: EditableColumn) => {
@@ -230,15 +266,22 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
 
     // Check bounds
     if (nextRowIndex < 0) {
-      // At beginning, loop to last cell
-      nextRowIndex = testResults.length - 1
-      nextColIndex = EDITABLE_COLUMNS.length - 1
+      setEditingCell(null)
+      if (onRequestNextFocus) {
+        onRequestNextFocus("backward")
+      } else {
+        saveButtonRef?.current?.focus()
+      }
+      return
     }
 
     if (nextRowIndex >= testResults.length) {
-      // At end, focus save button
       setEditingCell(null)
-      saveButtonRef?.current?.focus()
+      if (onRequestNextFocus) {
+        onRequestNextFocus("forward")
+      } else {
+        saveButtonRef?.current?.focus()
+      }
       return
     }
 
@@ -246,7 +289,7 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
     // Our call comes later in the event, so it wins
     const nextRow = testResults[nextRowIndex]
     setEditingCell({ rowId: nextRow.id, columnId: EDITABLE_COLUMNS[nextColIndex] })
-  }, [testResults, saveButtonRef])
+  }, [testResults, saveButtonRef, onRequestNextFocus])
 
   // Handle Enter navigation (move down to same column) - navigates immediately
   const handleEnterNavigation = useCallback((
@@ -343,6 +386,10 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
             editingCell?.rowId === row.id && editingCell?.columnId === "result_value"
           const isSaving = savingRowId === row.id
 
+          // Check if this test has been retested (has original value)
+          const originalValue = originalValuesMap?.get(row.id)
+          const hasBeenRetested = originalValue !== undefined && originalValue !== row.result_value
+
           return (
             <div className="relative">
               <SmartResultInput
@@ -362,6 +409,12 @@ export const TestResultsTable = forwardRef<TestResultsTableHandle, TestResultsTa
                   }
                 }}
               />
+              {/* Show original value if test was retested */}
+              {hasBeenRetested && (
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  Original: {originalValue || "—"}
+                </div>
+              )}
               {isSaving && (
                 <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-blue-500" />
               )}

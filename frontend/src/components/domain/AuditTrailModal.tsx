@@ -106,8 +106,19 @@ interface FlattenedRow {
  */
 function getActionBadgeVariant(
   action: string,
-  field?: string
-): "emerald" | "blue" | "amber" | "red" | "slate" | "violet" | "cyan" {
+  field?: string,
+  reason?: string | null
+): "emerald" | "blue" | "amber" | "red" | "slate" | "violet" | "cyan" | "orange" {
+  // Check if this is a retest entry (result entry OR retest request lifecycle)
+  if (reason?.includes("Retest result entry") ||
+      reason?.includes("Retest requested") ||
+      reason?.includes("Retest auto-completed") ||
+      reason?.includes("Retest requires review") ||
+      reason?.includes("Retest manually completed") ||
+      field?.startsWith("Retest:")) {
+    return "orange"
+  }
+
   // Status field changes get distinct styling (violet)
   if (action === "update" && field?.toLowerCase().includes("status")) {
     return "violet"
@@ -138,8 +149,16 @@ function getActionBadgeVariant(
 function getActionDisplayText(
   action: string,
   actionDisplay: string,
-  field?: string
+  field?: string,
+  reason?: string | null
 ): string {
+  // Retest patterns - use specific labels for different events
+  if (reason?.includes("Retest requested")) return "Retest Requested"
+  if (reason?.includes("Retest result entry")) return "Retest"
+  if (reason?.includes("Retest manually completed")) return "Retest Completed"
+  if (reason?.includes("Retest auto-completed")) return "Retest Completed"
+  if (reason?.includes("Retest requires review")) return "Retest Review"
+  if (field?.startsWith("Retest:")) return "Retest"
   // Status field changes show as "Status Change"
   if (action === "update" && field?.toLowerCase().includes("status")) {
     return "Status Change"
@@ -254,9 +273,9 @@ function extractTestName(field: string): string | null {
  */
 function extractTestNameFromReason(reason: string | null): string | null {
   if (!reason) return null
-  // Match patterns like "Test result created: E. coli" or "Test result update: Salmonella"
-  // Use non-greedy match and trim result to handle trailing whitespace
+  // Match patterns like "Test result created: E. coli" or "Retest result entry (R1): E. coli"
   const match = reason.match(/Test result (?:created|update|updated):\s*(.+)/i)
+    || reason.match(/Retest result entry[^:]*:\s*(.+)/i)
   return match ? match[1].trim() : null
 }
 
@@ -311,6 +330,52 @@ function formatTestResultForSummary(
     field: `${displayName} (${fieldCount} fields)`,
     newValue: newValueParts.join("") || "(created)",
   }
+}
+
+/**
+ * Format a retest entry for summary view
+ * Shows "Test retest (N fields)" with old and new values
+ */
+function formatRetestForSummary(
+  changes: Array<{ field: string; oldValue: string; newValue: string }>,
+  reason: string | null
+): { field: string; oldValue: string; newValue: string } {
+  let testName = ""
+  const values: { [key: string]: { old: string; new: string } } = {}
+
+  for (const change of changes) {
+    const testNameFromField = extractTestName(change.field)
+    if (testNameFromField) testName = testNameFromField
+
+    const lowerField = change.field.toLowerCase()
+    if (lowerField.includes("result") && lowerField.includes("value")) {
+      values.resultValue = { old: change.oldValue, new: change.newValue }
+    } else if (lowerField.includes("unit")) {
+      values.unit = { old: change.oldValue, new: change.newValue }
+    }
+  }
+
+  // Fall back to extracting from reason: "Retest result entry (R1): E. coli"
+  if (!testName) {
+    const match = reason?.match(/Retest result entry[^:]*:\s*(.+)/i)
+    testName = match?.[1]?.trim() || "Test"
+  }
+
+  // Build field label: "E. coli retest" or "E. coli retest (3 fields)"
+  const fieldCount = changes.length
+  const field = fieldCount === 1
+    ? `${testName} retest`
+    : `${testName} retest (${fieldCount} fields)`
+
+  // Build old/new value strings
+  const oldValue = values.resultValue?.old || "—"
+  const newValueParts: string[] = []
+  if (values.resultValue?.new) {
+    newValueParts.push(values.resultValue.new)
+    if (values.unit?.new) newValueParts.push(` ${values.unit.new}`)
+  }
+
+  return { field, oldValue, newValue: newValueParts.join("") || "—" }
 }
 
 /**
@@ -421,6 +486,50 @@ function consolidateEntries(entries: AuditEntryDisplay[]): ConsolidatedRow[] {
 
     // For UPDATE actions, check for rapid changes to consolidate
     if (entry.action === "update") {
+      // Check if this is a retest entry - handle specially
+      const isRetestEntry = entry.reason?.includes("Retest result entry")
+
+      if (isRetestEntry && entry.changes && entry.changes.length > 0) {
+        // Group by test name for multi-test retests
+        const testGroups = new Map<string, typeof entry.changes>()
+
+        for (const change of entry.changes) {
+          const testName = extractTestName(change.field) || "Unknown"
+          if (!testGroups.has(testName)) testGroups.set(testName, [])
+          testGroups.get(testName)!.push(change)
+        }
+
+        // Create one consolidated row per test
+        for (const [testName, testChanges] of testGroups) {
+          const changeData = testChanges.map((c) => ({
+            field: c.field,
+            oldValue: c.display_old ?? formatValue(c.old_value),
+            newValue: c.display_new ?? formatValue(c.new_value),
+          }))
+          const { field, oldValue, newValue } = formatRetestForSummary(changeData, entry.reason)
+
+          rows.push({
+            id: `consolidated-${entry.id}-${testName}`,
+            auditIds: [entry.id],
+            primaryAuditId: entry.id,
+            timestamp,
+            timestampDisplay,
+            username: entry.username,
+            action: entry.action,
+            actionDisplay: entry.action_display,
+            field,
+            oldValue,
+            newValue,
+            reason: entry.reason,
+            annotationCount: testGroups.size === 1 ? entry.annotation_count : 0,
+            consolidatedCount: testChanges.length,
+          })
+        }
+        i++
+        continue
+      }
+
+      // Existing UPDATE consolidation logic continues below...
       const consolidatedAuditIds: number[] = [entry.id]
       let totalAnnotations = entry.annotation_count
       const allChanges: Array<{
@@ -1087,10 +1196,10 @@ export function AuditTrailModal({
                         </TableCell>
                         <TableCell className="align-top">
                           <Badge
-                            variant={getActionBadgeVariant(row.action, row.field)}
+                            variant={getActionBadgeVariant(row.action, row.field, row.reason)}
                             className="text-xs"
                           >
-                            {getActionDisplayText(row.action, row.actionDisplay, row.field)}
+                            {getActionDisplayText(row.action, row.actionDisplay, row.field, row.reason)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm text-slate-700 align-top whitespace-normal break-words">
@@ -1126,10 +1235,10 @@ export function AuditTrailModal({
                         </TableCell>
                         <TableCell className="align-top">
                           <Badge
-                            variant={getActionBadgeVariant(row.action, row.field)}
+                            variant={getActionBadgeVariant(row.action, row.field, row.reason)}
                             className="text-xs"
                           >
-                            {getActionDisplayText(row.action, row.actionDisplay, row.field)}
+                            {getActionDisplayText(row.action, row.actionDisplay, row.field, row.reason)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm text-slate-700 align-top whitespace-normal break-words">

@@ -36,6 +36,15 @@ export const releaseApi = {
       responseType: "blob",
     })
 
+    // Check if we got JSON instead of PDF (server error returned as blob)
+    const contentType = response.headers["content-type"]
+    if (contentType?.includes("application/json")) {
+      // Parse the JSON error from the blob
+      const text = await response.data.text()
+      const error = JSON.parse(text)
+      throw { response: { status: 404, data: error } }
+    }
+
     // Extract filename from Content-Disposition header
     const contentDisposition = response.headers["content-disposition"]
     let filename = `COA_${lotId}_${productId}.pdf`
@@ -116,6 +125,8 @@ export const releaseApi = {
     if (filters.lot_number) params.append("lot_number", filters.lot_number)
     if (filters.page) params.append("page", filters.page.toString())
     if (filters.page_size) params.append("page_size", filters.page_size.toString())
+    if (filters.sort_by) params.append("sort_by", filters.sort_by)
+    if (filters.sort_order) params.append("sort_order", filters.sort_order)
 
     const response = await api.get<PaginatedResponse<ArchiveItem>>(`/archive?${params}`)
     return response.data

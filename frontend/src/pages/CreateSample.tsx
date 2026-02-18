@@ -3,13 +3,16 @@ import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown, Copy, CheckCircle2, Check } from "lucide-react"
+import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown, Copy, CheckCircle2, Check, Download } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogContent,
@@ -18,10 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ProductAutocomplete } from "@/components/form/ProductAutocomplete"
 
 import { useProducts } from "@/hooks/useProducts"
-import { useCreateLot, useCreateSublotsBulk } from "@/hooks/useLots"
+import { useCreateLot, useCreateSublotsBulk, useLotWithSpecs } from "@/hooks/useLots"
+import { useDownloadLotDaaneCoc, useDownloadLotDaaneCocPdf } from "@/hooks/useDaaneCoc"
 import type { Product, LotType } from "@/types"
 
 // User-selectable lot types (excludes sublot which is created automatically)
@@ -76,6 +81,13 @@ interface CompositeProductRow {
   batch_number: string
 }
 
+interface DaaneTestSelectionOption {
+  labTestTypeId: number
+  testName: string
+  testCategory: string | null
+  specification: string
+}
+
 export function CreateSamplePage() {
   const navigate = useNavigate()
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false)
@@ -109,6 +121,7 @@ export function CreateSamplePage() {
 
   // Success dialog state
   const [successData, setSuccessData] = useState<{
+    lotId: number
     referenceNumber: string
     brand: string
     productName: string
@@ -120,6 +133,10 @@ export function CreateSamplePage() {
 
   // "Add new product" dialog state
   const [showAddProductDialog, setShowAddProductDialog] = useState(false)
+  const [isDaanePdfDialogOpen, setIsDaanePdfDialogOpen] = useState(false)
+  const [selectedDaaneTestIds, setSelectedDaaneTestIds] = useState<number[]>([])
+  const [initializedDaaneSelection, setInitializedDaaneSelection] = useState(false)
+  const [daaneSpecialInstructions, setDaaneSpecialInstructions] = useState("")
 
   // Helper to format flavor and size for success dialog
   const formatFlavorSize = (product: { flavor?: string | null; size?: string | null }) => {
@@ -132,6 +149,14 @@ export function CreateSamplePage() {
   const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
   const createMutation = useCreateLot()
   const createSublotsMutation = useCreateSublotsBulk()
+  const {
+    data: successLotWithSpecs,
+    isLoading: isLoadingSuccessLotWithSpecs,
+    isError: isSuccessLotWithSpecsError,
+    refetch: refetchSuccessLotWithSpecs,
+  } = useLotWithSpecs(successData?.lotId ?? 0)
+  const downloadCocMutation = useDownloadLotDaaneCoc()
+  const downloadCocPdfMutation = useDownloadLotDaaneCocPdf()
 
   const form = useForm<SampleForm>({
     resolver: zodResolver(sampleSchema),
@@ -204,6 +229,51 @@ export function CreateSamplePage() {
     }
   }, [watchedMfgDate, selectedProducts, compositeProducts, watchedLotType, productsData, setValue, calculateExpiryDate, expiryNudgeDays])
 
+  const daaneTestSelectionOptions = useMemo<DaaneTestSelectionOption[]>(() => {
+    if (!successLotWithSpecs?.products?.length) return []
+
+    const byTestTypeId = new Map<number, DaaneTestSelectionOption>()
+    for (const product of successLotWithSpecs.products) {
+      for (const spec of product.test_specifications ?? []) {
+        if (!byTestTypeId.has(spec.lab_test_type_id)) {
+          byTestTypeId.set(spec.lab_test_type_id, {
+            labTestTypeId: spec.lab_test_type_id,
+            testName: spec.test_name,
+            testCategory: spec.test_category,
+            specification: spec.specification,
+          })
+        }
+      }
+    }
+
+    return Array.from(byTestTypeId.values()).sort((a, b) => a.testName.localeCompare(b.testName))
+  }, [successLotWithSpecs])
+
+  const isOrganolepticCategory = useCallback((category: string | null | undefined) => {
+    const normalized = (category ?? "").trim().toLowerCase()
+    return normalized.includes("organoleptic")
+  }, [])
+
+  useEffect(() => {
+    if (!isDaanePdfDialogOpen || initializedDaaneSelection) return
+    if (isLoadingSuccessLotWithSpecs) return
+    if (isSuccessLotWithSpecsError) return
+
+    const defaultSelected = daaneTestSelectionOptions
+      .filter((option) => !isOrganolepticCategory(option.testCategory))
+      .map((option) => option.labTestTypeId)
+
+    setSelectedDaaneTestIds(defaultSelected)
+    setInitializedDaaneSelection(true)
+  }, [
+    isDaanePdfDialogOpen,
+    initializedDaaneSelection,
+    daaneTestSelectionOptions,
+    isLoadingSuccessLotWithSpecs,
+    isSuccessLotWithSpecsError,
+    isOrganolepticCategory,
+  ])
+
   const onSubmit = async (formData: SampleForm) => {
     console.log('=== onSubmit called ===', formData)
     try {
@@ -253,6 +323,7 @@ export function CreateSamplePage() {
         // Show success dialog
         const product = selectedProducts[0]?.product
         setSuccessData({
+          lotId: lot.id,
           referenceNumber: lot.reference_number,
           brand: product?.brand || '',
           productName: product?.product_name || '',
@@ -320,6 +391,7 @@ export function CreateSamplePage() {
         // Show success dialog - for composite, show product count with line breaks
         const productNames = validProducts.map(cp => cp.product_name).join('\n')
         setSuccessData({
+          lotId: compositeLot.id,
           referenceNumber: compositeLot.reference_number,
           brand: `${validProducts.length} Products`,
           productName: productNames,
@@ -355,6 +427,7 @@ export function CreateSamplePage() {
         // Show success dialog
         const stdProduct = selectedProducts[0]?.product
         setSuccessData({
+          lotId: standardLot.id,
           referenceNumber: standardLot.reference_number,
           brand: stdProduct?.brand || '',
           productName: stdProduct?.product_name || '',
@@ -374,6 +447,76 @@ export function CreateSamplePage() {
         alert(`Validation error: ${JSON.stringify(error.response.data.detail)}`)
       }
     }
+  }
+
+  const handleDownloadCoc = async () => {
+    if (!successData) return
+    try {
+      const result = await downloadCocMutation.mutateAsync(successData.lotId)
+      toast.success("Daane COC (XLSX) downloaded")
+      if (result.limitExceeded) {
+        toast.warning(`Daane COC supports ${result.testLimit} tests. ${result.testCount} tests found; only the first ${result.testLimit} were included.`)
+      }
+    } catch (error) {
+      console.error("Failed to download Daane COC:", error)
+      toast.error("Failed to download Daane COC")
+    }
+  }
+
+  const handleDownloadCocPdf = async () => {
+    if (!successData) return
+    if (selectedDaaneTestIds.length === 0) {
+      toast.error("Select at least one test to generate the Daane COC PDF")
+      return
+    }
+    try {
+      const result = await downloadCocPdfMutation.mutateAsync({
+        lotId: successData.lotId,
+        selectedLabTestTypeIds: selectedDaaneTestIds,
+        specialInstructions: daaneSpecialInstructions,
+      })
+      toast.success("Daane COC (PDF) downloaded")
+      if (result.limitExceeded) {
+        toast.warning(`Daane COC supports ${result.testLimit} tests. ${result.testCount} tests found; only the first ${result.testLimit} were included.`)
+      }
+      setIsDaanePdfDialogOpen(false)
+    } catch (error) {
+      console.error("Failed to download Daane COC PDF:", error)
+      toast.error("Failed to download Daane COC PDF")
+    }
+  }
+
+  const handleOpenDaanePdfDialog = () => {
+    if (!successData) return
+    if (isSuccessLotWithSpecsError) {
+      void refetchSuccessLotWithSpecs()
+    }
+    setInitializedDaaneSelection(false)
+    setSelectedDaaneTestIds([])
+
+    // Auto-populate special instructions from product serving sizes
+    const servingSizes = [
+      ...new Set(
+        (successLotWithSpecs?.products ?? [])
+          .map((p) => p.serving_size)
+          .filter(Boolean) as string[]
+      ),
+    ]
+    if (servingSizes.length > 0) {
+      setDaaneSpecialInstructions(`Serving Size = ${servingSizes.sort().join(", ")}`)
+    } else {
+      setDaaneSpecialInstructions("(NO SERVING SIZE DETERMINED)")
+    }
+
+    setIsDaanePdfDialogOpen(true)
+  }
+
+  const toggleDaaneTestSelection = (labTestTypeId: number) => {
+    setSelectedDaaneTestIds((prev) =>
+      prev.includes(labTestTypeId)
+        ? prev.filter((id) => id !== labTestTypeId)
+        : [...prev, labTestTypeId]
+    )
   }
 
   const addProduct = (product: Product) => {
@@ -1506,8 +1649,18 @@ export function CreateSamplePage() {
       </Dialog>
 
       {/* Success Dialog */}
-      <Dialog open={!!successData} onOpenChange={(open) => !open && setSuccessData(null)}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={!!successData}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSuccessData(null)
+            setIsDaanePdfDialogOpen(false)
+            setInitializedDaaneSelection(false)
+            setSelectedDaaneTestIds([])
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-green-600 flex items-center gap-2 text-[18px]">
               <CheckCircle2 className="h-5 w-5" />
@@ -1515,72 +1668,100 @@ export function CreateSamplePage() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            {/* Large reference number with copy button */}
-            <div className="bg-slate-100 rounded-lg p-4 text-center">
-              <p className="text-sm text-slate-500 mb-1">Lot Reference</p>
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-2xl font-mono font-bold text-slate-900">
+          <div className="py-4 space-y-5">
+            {/* Reference number */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Lot Reference</p>
+                <p className="text-2xl font-mono font-bold text-slate-900">
                   {successData?.referenceNumber}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => {
-                    navigator.clipboard.writeText(successData?.referenceNumber || '')
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-green-600" />
-                  ) : (
-                    <Copy className="h-4 w-4 text-slate-500" />
-                  )}
-                </Button>
+                </p>
               </div>
-              {copied && (
-                <p className="text-xs text-green-600 mt-1">Copied to clipboard!</p>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-slate-200"
+                onClick={() => {
+                  navigator.clipboard.writeText(successData?.referenceNumber || '')
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 mr-2 text-green-600" />
+                ) : (
+                  <Copy className="h-4 w-4 mr-2 text-slate-500" />
+                )}
+                {copied ? "Copied" : "Copy"}
+              </Button>
             </div>
 
-            {/* Additional details */}
-            <div className="text-sm space-y-2 px-1">
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500 flex-shrink-0">Product</span>
-                <div className="text-right">
-                  <span className="font-medium text-slate-900 block">
-                    {successData?.brand}
-                  </span>
-                  <span className="text-slate-700 text-[13px] whitespace-pre-line">
-                    {successData?.productName}
-                  </span>
-                  {successData?.flavorSize && (
-                    <span className="text-slate-600 text-[13px] block">
-                      {successData.flavorSize}
-                    </span>
-                  )}
+            {/* Details */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">Product</p>
+                <p className="font-medium text-slate-900">{successData?.brand}</p>
+                <p className="text-slate-700 text-sm whitespace-pre-line">{successData?.productName}</p>
+                {successData?.flavorSize && (
+                  <p className="text-slate-600 text-sm">{successData.flavorSize}</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Lot Number</span>
+                  <span className="font-medium text-slate-900">{successData?.lotNumber}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Type</span>
+                  <span className="font-medium text-slate-900">{successData?.lotType}</span>
                 </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Lot Number</span>
-                <span className="font-medium text-slate-900">{successData?.lotNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Type</span>
-                <span className="font-medium text-slate-900">{successData?.lotType}</span>
+            </div>
+
+            {/* Downloads */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-500 mb-3">Daane COC</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  className="border-slate-200 w-full sm:w-auto"
+                  onClick={handleDownloadCoc}
+                  disabled={downloadCocMutation.isPending}
+                >
+                  {downloadCocMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download XLSX
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-slate-200 w-full sm:w-auto"
+                  onClick={handleOpenDaanePdfDialog}
+                  disabled={isLoadingSuccessLotWithSpecs}
+                >
+                  {isLoadingSuccessLotWithSpecs ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Generate Daane COC (PDF)
+                </Button>
               </div>
             </div>
           </div>
 
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="flex-col sm:flex-row sm:justify-end gap-2">
             <Button
               variant="outline"
-              className="border-slate-200"
+              className="border-slate-200 w-full sm:w-auto"
               onClick={() => {
                 setSuccessData(null)
                 setCopied(false)
+                setIsDaanePdfDialogOpen(false)
+                setSelectedDaaneTestIds([])
+                setInitializedDaaneSelection(false)
                 form.reset()
                 setSelectedProducts([])
                 setStandardProductText('')
@@ -1595,10 +1776,139 @@ export function CreateSamplePage() {
               Create Another
             </Button>
             <Button
-              className="bg-slate-900 hover:bg-slate-800 text-white"
+              className="bg-slate-900 hover:bg-slate-800 text-white w-full sm:w-auto"
               onClick={() => navigate(`/tracker?highlight=${successData?.referenceNumber}`)}
             >
               View in Tracker
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Main Lot Daane PDF selection dialog */}
+      <Dialog
+        open={isDaanePdfDialogOpen}
+        onOpenChange={(open) => {
+          setIsDaanePdfDialogOpen(open)
+          if (!open) {
+            setInitializedDaaneSelection(false)
+            setSelectedDaaneTestIds([])
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] text-slate-900">Generate Daane COC (PDF)</DialogTitle>
+            <DialogDescription>
+              Select which tests to include. Organoleptic tests are unchecked by default.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-sm font-medium text-slate-700 mb-1.5 block">
+                Special Instructions
+              </Label>
+              <Textarea
+                value={daaneSpecialInstructions}
+                onChange={(e) => setDaaneSpecialInstructions(e.target.value)}
+                placeholder="e.g., Serving Size = 30g"
+                className="min-h-[60px] resize-none text-sm"
+              />
+            </div>
+            <div className="border rounded-lg overflow-hidden max-h-[360px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Test</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Specification</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoadingSuccessLotWithSpecs ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-slate-500 py-8">
+                        Loading tests...
+                      </TableCell>
+                    </TableRow>
+                  ) : isSuccessLotWithSpecsError ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-amber-700 py-8">
+                        Failed to load tests for this sample.
+                        <Button
+                          variant="link"
+                          className="h-auto p-0 ml-2 text-amber-700"
+                          onClick={() => {
+                            void refetchSuccessLotWithSpecs()
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ) : daaneTestSelectionOptions.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-slate-500 py-8">
+                        No tests available for this sample
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    daaneTestSelectionOptions.map((test) => {
+                      const isSelected = selectedDaaneTestIds.includes(test.labTestTypeId)
+                      return (
+                        <TableRow
+                          key={test.labTestTypeId}
+                          className={`cursor-pointer ${isSelected ? "bg-emerald-50/60" : ""}`}
+                          onClick={() => toggleDaaneTestSelection(test.labTestTypeId)}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleDaaneTestSelection(test.labTestTypeId)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium text-slate-900">{test.testName}</TableCell>
+                          <TableCell className="text-slate-600">{test.testCategory || "-"}</TableCell>
+                          <TableCell className="text-slate-600">{test.specification || "-"}</TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <p className="text-xs text-slate-500">
+              {selectedDaaneTestIds.length} test{selectedDaaneTestIds.length !== 1 ? "s" : ""} selected
+            </p>
+            {selectedDaaneTestIds.length === 0 && (
+              <p className="text-xs text-amber-600">Select at least one test to generate the Daane COC PDF.</p>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              className="border-slate-200 w-full sm:w-auto"
+              onClick={() => setIsDaanePdfDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-slate-900 hover:bg-slate-800 text-white w-full sm:w-auto"
+              onClick={handleDownloadCocPdf}
+              disabled={
+                downloadCocPdfMutation.isPending ||
+                isSuccessLotWithSpecsError ||
+                selectedDaaneTestIds.length === 0 ||
+                daaneTestSelectionOptions.length === 0
+              }
+            >
+              {downloadCocPdfMutation.isPending && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              Generate PDF
             </Button>
           </DialogFooter>
         </DialogContent>

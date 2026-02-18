@@ -16,7 +16,7 @@ from app.core.security import (
     get_password_hash,
     decode_token,
 )
-from app.schemas.auth import Token, RefreshRequest, UserResponse, UserProfileUpdate, VerifyOverrideResponse
+from app.schemas.auth import Token, RefreshRequest, UserResponse, UserProfileUpdate, ChangePassword, VerifyOverrideResponse
 from app.models import User
 from app.models.enums import UserRole
 from app.config import settings
@@ -171,6 +171,30 @@ async def update_profile(
     db.commit()
     db.refresh(current_user)
     return build_user_response(current_user)
+
+
+@router.put("/me/password")
+async def change_password(
+    body: ChangePassword,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Change the current user's password."""
+    import hashlib
+
+    salt = "coa_system_salt_"
+    current_hash = hashlib.sha256(f"{salt}{body.current_password}".encode()).hexdigest()
+    if current_hash != current_user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    new_hash = hashlib.sha256(f"{salt}{body.new_password}".encode()).hexdigest()
+    current_user.password_hash = new_hash
+    db.commit()
+
+    return {"message": "Password changed successfully"}
 
 
 @router.post("/me/signature", response_model=UserResponse)

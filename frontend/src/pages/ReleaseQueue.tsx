@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
 import { Loader2, Inbox, CheckCircle2, Download, Mail, Search } from "lucide-react"
-import { toast } from "sonner"
 import {
   Table,
   TableBody,
@@ -29,7 +28,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useReleaseQueue, useRecentlyReleased, useDownloadCoa, useSendEmail } from "@/hooks/useRelease"
+import { useReleaseQueue, useRecentlyReleased, useDownloadWithTracking, useSendEmail } from "@/hooks/useRelease"
+import { formatDate } from "@/lib/date-utils"
 import type { ReleaseQueueItem, ArchiveItem } from "@/types/release"
 
 export function ReleaseQueuePage() {
@@ -41,7 +41,7 @@ export function ReleaseQueuePage() {
   const [selectedItem, setSelectedItem] = useState<ArchiveItem | null>(null)
   const { data: queue = [], isLoading } = useReleaseQueue()
   const { data: recentlyReleased = [], isLoading: isLoadingRecent } = useRecentlyReleased(recentDays)
-  const downloadCoa = useDownloadCoa()
+  const { handleDownload: downloadCoa, isDownloading } = useDownloadWithTracking()
   const sendEmail = useSendEmail()
 
   // Filter recently released based on search
@@ -57,27 +57,13 @@ export function ReleaseQueuePage() {
     )
   })
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
-  }
-
   const handleRowClick = (item: ReleaseQueueItem | ArchiveItem) => {
     navigate(`/release/${item.lot_id}/${item.product_id}`)
   }
 
-  const handleDownload = async (e: React.MouseEvent, lotId: number, productId: number) => {
+  const handleDownload = (e: React.MouseEvent, lotId: number, productId: number) => {
     e.stopPropagation() // Prevent row click navigation
-    try {
-      await downloadCoa.mutateAsync({ lotId, productId })
-      toast.success("COA downloaded successfully")
-    } catch (error) {
-      console.error("Failed to download COA:", error)
-      toast.error("Failed to download COA")
-    }
+    downloadCoa(lotId, productId)
   }
 
   const handleEmailClick = (e: React.MouseEvent, item: ArchiveItem) => {
@@ -332,10 +318,10 @@ export function ReleaseQueuePage() {
                           variant="outline"
                           size="sm"
                           onClick={(e) => handleDownload(e, item.lot_id, item.product_id)}
-                          disabled={downloadCoa.isPending}
-                          className="h-8 text-[12px]"
+                          disabled={isDownloading(item.lot_id, item.product_id)}
+                          className={`h-8 text-[12px] ${isDownloading(item.lot_id, item.product_id) ? "cursor-wait" : ""}`}
                         >
-                          {downloadCoa.isPending ? (
+                          {isDownloading(item.lot_id, item.product_id) ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
                             <Download className="h-3 w-3" />

@@ -7,10 +7,18 @@ import {
   Loader2,
   Clock,
   Building2,
+  RefreshCw,
+  ChevronDown,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   Dialog,
   DialogContent,
@@ -22,6 +30,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { CustomerQuickAdd } from "./CustomerQuickAdd"
 import { useCustomers, useEmailHistory, useSendEmail, useDownloadCoa } from "@/hooks/useRelease"
+import { useRetestRequests } from "@/hooks/useRetests"
+import { formatDate } from "@/lib/date-utils"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { ReleaseDetails, Customer, SaveDraftData } from "@/types/release"
 
 interface ReleaseActionsProps {
@@ -57,8 +68,17 @@ export function ReleaseActions({
 
   const { data: customers = [] } = useCustomers()
   const { data: emailHistory = [] } = useEmailHistory(lotId, productId)
+  const { data: retestData } = useRetestRequests(lotId)
   const sendEmail = useSendEmail()
   const downloadCoa = useDownloadCoa()
+
+  // State for retest history accordion
+  const [retestExpanded, setRetestExpanded] = useState(false)
+  const retestRequests = retestData?.items ?? []
+  // Block release for both pending AND review_required retests
+  const hasPendingRetest = retestRequests.some(
+    r => r.status === "pending" || r.status === "review_required"
+  )
 
   // Debounced auto-save
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -113,18 +133,10 @@ export function ReleaseActions({
     } catch (error: unknown) {
       console.error("Failed to approve release:", error)
       setShowApproveConfirm(false)
-      // Extract error message from axios error response
-      let message = "Failed to approve release"
-      if (error && typeof error === "object") {
-        const axiosError = error as { response?: { data?: { detail?: string }, status?: number } }
-        if (axiosError.response?.data?.detail) {
-          message = axiosError.response.data.detail
-        } else if (axiosError.response?.status === 403) {
-          message = "You don't have permission to approve releases. QC Manager or Admin role required."
-        } else if (axiosError.response?.status === 400) {
-          message = "Cannot approve release. Check Lab Info settings and user profile."
-        }
-      }
+      const message = extractApiErrorMessage(error, "Failed to approve release", {
+        403: "You don't have permission to approve releases. QC Manager or Admin role required.",
+        400: "Cannot approve release. Check Lab Info settings and user profile.",
+      })
       toast.error(message, { duration: 5000 })
     }
   }
@@ -167,14 +179,6 @@ export function ReleaseActions({
 
   const isReleased = release.status === "released"
   const selectedCustomer = customers.find((c) => c.id === customerId)
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
-  }
 
   return (
     <div className="space-y-5">
@@ -228,6 +232,72 @@ export function ReleaseActions({
           )}
         </div>
       </div>
+
+      {/* Retest History */}
+      {retestRequests.length > 0 && (
+        <div className="pt-2 border-t border-slate-200">
+          <button
+            type="button"
+            onClick={() => setRetestExpanded(!retestExpanded)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <h4 className="text-[11px] font-semibold uppercase tracking-widest text-amber-600 flex items-center gap-1.5">
+              <RefreshCw className="h-3 w-3" />
+              Retest History ({retestRequests.length})
+            </h4>
+            <ChevronDown
+              className={`h-4 w-4 text-slate-400 transition-transform ${
+                retestExpanded ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          {retestExpanded && (
+            <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
+              {retestRequests.map((request) => (
+                <div
+                  key={request.id}
+                  className="rounded-md border border-amber-200 bg-amber-50/50 p-2 text-[12px]"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-mono font-medium text-amber-800">
+                      {request.reference_number}
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                        request.status === "completed"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : request.status === "review_required"
+                          ? "bg-yellow-100 text-yellow-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {request.status === "completed" ? "Completed" : request.status === "review_required" ? "Review" : "Pending"}
+                    </span>
+                  </div>
+                  <p className="text-slate-600 text-[11px]">
+                    Tests: {request.items.map((item) => {
+                      const hasChange = item.original_value !== item.current_value &&
+                                        item.original_value !== null &&
+                                        item.current_value !== null
+                      if (hasChange) {
+                        return `${item.test_type}: ${item.original_value} → ${item.current_value}`
+                      }
+                      // Show original value even when no change yet (pending retest)
+                      if (item.original_value) {
+                        return `${item.test_type}: ${item.original_value}`
+                      }
+                      return item.test_type
+                    }).filter(Boolean).join(", ") || "—"}
+                  </p>
+                  <p className="text-slate-500 text-[10px] mt-1 truncate" title={request.reason}>
+                    {request.reason}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Customer Selection */}
       <div className="space-y-2">
@@ -289,19 +359,30 @@ export function ReleaseActions({
       {/* Action Buttons */}
       <div className="space-y-2 pt-2">
         {!isReleased && (
-          <Button
-            type="button"
-            className="w-full bg-emerald-600 hover:bg-emerald-700"
-            onClick={handleApproveClick}
-            disabled={isApproving}
-          >
-            {isApproving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            Approve & Release
-          </Button>
+          <TooltipProvider>
+            <Tooltip open={hasPendingRetest ? undefined : false}>
+              <TooltipTrigger asChild>
+                <span className={hasPendingRetest ? "cursor-not-allowed w-full" : "w-full"}>
+                  <Button
+                    type="button"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+                    onClick={handleApproveClick}
+                    disabled={isApproving || hasPendingRetest}
+                  >
+                    {isApproving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    Approve & Release
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Cannot release while retest is pending</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
 
         {isReleased && (

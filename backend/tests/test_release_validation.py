@@ -199,17 +199,23 @@ class TestReleaseValidation:
     """Test COA release validation requirements."""
 
     def test_release_fails_without_signature(
-        self, test_db, qc_user_complete, lab_info_no_signature, lot_awaiting_release, test_product
+        self, test_db, qc_user_no_profile, lab_info_with_signature, lot_awaiting_release, test_product
     ):
-        """Test that release fails when no signature is uploaded in lab info."""
-        client = make_client_with_user(test_db, qc_user_complete)
+        """Test that release fails when user has no signature uploaded."""
+        # Use a user without signature_path
+        qc_user_no_profile.full_name = "Test User"
+        qc_user_no_profile.title = "QC Manager"
+        qc_user_no_profile.signature_path = None
+        test_db.commit()
+
+        client = make_client_with_user(test_db, qc_user_no_profile)
 
         try:
             response = client.post(
                 f"/api/v1/release/{lot_awaiting_release.id}/{test_product.id}/approve"
             )
             assert response.status_code == 400
-            assert "No signature uploaded" in response.json()["detail"]
+            assert "upload your signature" in response.json()["detail"]
         finally:
             app.dependency_overrides.clear()
 
@@ -217,6 +223,12 @@ class TestReleaseValidation:
         self, test_db, qc_user_no_profile, lab_info_with_signature, lot_awaiting_release, test_product
     ):
         """Test that release fails when user has no full_name."""
+        # Ensure user has signature but no full_name
+        qc_user_no_profile.signature_path = "signatures/test.png"
+        qc_user_no_profile.full_name = None
+        qc_user_no_profile.title = "QC Manager"
+        test_db.commit()
+
         client = make_client_with_user(test_db, qc_user_no_profile)
 
         try:
@@ -232,6 +244,10 @@ class TestReleaseValidation:
         self, test_db, qc_user_no_title, lab_info_with_signature, lot_awaiting_release, test_product
     ):
         """Test that release fails when user has no title."""
+        # Ensure user has signature and full_name but no title
+        qc_user_no_title.signature_path = "signatures/test.png"
+        test_db.commit()
+
         client = make_client_with_user(test_db, qc_user_no_title)
 
         try:
@@ -253,6 +269,10 @@ class TestReleaseValidation:
         # Create the COAs output directory
         (tmp_path / "coas").mkdir(parents=True, exist_ok=True)
 
+        # Ensure user has signature_path set
+        qc_user_complete.signature_path = "signatures/test.png"
+        test_db.commit()
+
         client = make_client_with_user(test_db, qc_user_complete)
 
         try:
@@ -262,9 +282,9 @@ class TestReleaseValidation:
             # Should succeed (200) or fail for other reasons (not validation)
             # If it fails with 400, it should NOT be about signature/name/title
             if response.status_code == 400:
-                detail = response.json().get("detail", "")
-                assert "signature" not in detail.lower()
-                assert "full name" not in detail.lower()
-                assert "title" not in detail.lower()
+                detail = response.json().get("detail", "").lower()
+                assert "upload your signature" not in detail
+                assert "missing a full name" not in detail
+                assert "missing a title" not in detail
         finally:
             app.dependency_overrides.clear()

@@ -15,6 +15,8 @@ interface COAPreviewDocumentProps {
   onMfgDateChange?: (date: Date | null) => void
   onExpDateChange?: (date: Date | null) => void
   scale?: number
+  /** Map of test_result_id -> original_value for retested tests */
+  originalValuesMap?: Map<number, string | null>
 }
 
 export function COAPreviewDocument({
@@ -23,6 +25,7 @@ export function COAPreviewDocument({
   onMfgDateChange,
   onExpDateChange,
   scale = 1,
+  originalValuesMap,
 }: COAPreviewDocumentProps) {
   const [notes, setNotes] = useState(data.notes || "")
   const [isEditingNotes, setIsEditingNotes] = useState(false)
@@ -104,12 +107,12 @@ export function COAPreviewDocument({
               style={{ maxHeight: "60px", maxWidth: "200px", objectFit: "contain", marginBottom: "8px" }}
             />
           )}
-          <h1
-            className="font-bold text-slate-900"
-            style={{ fontSize: "18pt", marginBottom: "4px" }}
+          <p
+            className="text-slate-500"
+            style={{ fontSize: "9pt", marginBottom: "0", fontWeight: 600 }}
           >
             {data.company_name || "Company Name"}
-          </h1>
+          </p>
           {data.company_address && (
             <p className="text-slate-500" style={{ fontSize: "9pt" }}>
               {data.company_address}
@@ -369,7 +372,15 @@ export function COAPreviewDocument({
                       borderBottom: idx === data.tests.length - 1 ? "none" : "1px solid #e2e8f0",
                     }}
                   >
-                    {test.result} {test.unit && test.unit}
+                    <div>
+                      {test.result} {test.unit && test.unit}
+                      {/* Show original value if test was retested */}
+                      {test.id && originalValuesMap?.has(test.id) && originalValuesMap.get(test.id) !== test.result && (
+                        <div style={{ fontSize: "7pt", color: "#94a3b8", marginTop: "2px" }}>
+                          Original: {originalValuesMap.get(test.id) || "—"}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td
                     className="text-slate-900"
@@ -498,6 +509,11 @@ export function COAPreviewDocument({
               {data.released_by_title}
             </span>
           )}
+
+          {/* Email */}
+          <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+            Email: {data.released_by_email || "(Preview)"}
+          </span>
 
           {/* Date */}
           <span className="text-slate-600" style={{ fontSize: "9pt" }}>

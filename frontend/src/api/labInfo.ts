@@ -20,6 +20,8 @@ export interface LabInfo {
 export interface LabInfoUpdate {
   company_name: string
   address: string
+  phone?: string
+  email?: string
   city: string
   state: string
   zip_code: string
@@ -49,8 +51,11 @@ export const labInfoApi = {
   uploadLogo: async (file: File): Promise<LabInfo> => {
     const formData = new FormData()
     formData.append("file", file)
-    // Let axios automatically set Content-Type with correct boundary
-    const response = await api.post<LabInfo>("/settings/lab-info/logo", formData)
+    const response = await api.post<LabInfo>("/settings/lab-info/logo", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    })
     return response.data
   },
 

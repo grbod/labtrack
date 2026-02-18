@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -27,12 +27,14 @@ async def search_archive(
     db: DbSession,
     current_user: CurrentUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=100),
     product_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     lot_number: Optional[str] = None,
+    sort_by: Literal["released_at", "reference_number", "lot_number", "brand", "product_name"] = "released_at",
+    sort_order: Literal["asc", "desc"] = "desc",
 ) -> ArchiveListResponse:
     """
     Search released COAs with filters.
@@ -51,6 +53,8 @@ async def search_archive(
         lot_number=lot_number,
         skip=skip,
         limit=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
     items = [ArchiveItem.from_release(r) for r in releases]
@@ -110,24 +114,24 @@ async def download_archived_coa(
             detail="COA PDF file not found for this release",
         )
 
-    # Build file path
-    pdf_path = Path(release.coa_file_path)
+    from app.services.storage_service import get_storage_service
 
-    # If path is relative, make it relative to coa output folder
-    if not pdf_path.is_absolute():
-        pdf_path = Path(settings.coa_output_folder) / pdf_path
-
-    if not pdf_path.exists():
+    # Use storage service to check if file exists
+    storage = get_storage_service()
+    if not storage.exists(release.coa_file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="COA PDF file not found on disk",
+            detail="COA PDF file not found in storage",
         )
+
+    # Get full path by prepending upload_path
+    full_path = settings.upload_path / release.coa_file_path
 
     # Generate filename from lot number
     filename = f"COA_{release.lot.lot_number}.pdf" if release.lot else f"COA_{release.id}.pdf"
 
     return FileResponse(
-        path=str(pdf_path),
+        path=str(full_path),
         filename=filename,
         media_type="application/pdf",
     )

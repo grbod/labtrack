@@ -105,6 +105,7 @@ export interface Lot {
   generate_coa: boolean
   rejection_reason: string | null
   attached_pdfs: string[] | null  // List of uploaded PDF filenames
+  has_pending_retest: boolean  // True when retest is pending
   created_at: string
   updated_at: string | null
   products?: ProductSummary[]  // Included in list responses for Kanban display
@@ -170,6 +171,22 @@ export interface LabTestTypeCategoryCount {
   count: number
 }
 
+// Daane Labs test mapping
+export interface DaaneTestMappingItem {
+  lab_test_type_id: number
+  test_name: string
+  test_method: string | null
+  default_unit: string | null
+  daane_method: string | null
+  match_type: string
+  match_reason: string | null
+}
+
+export interface DaaneTestMappingListResponse {
+  items: DaaneTestMappingItem[]
+  total: number
+}
+
 // API response types
 export interface PaginatedResponse<T> {
   items: T[]
@@ -201,6 +218,7 @@ export interface ProductInLotWithSpecs {
   flavor: string | null
   size: string | null
   display_name: string
+  serving_size: string | null
   percentage: number | null
   test_specifications: TestSpecInProduct[]
 }
@@ -294,4 +312,46 @@ export interface ArchivedLot {
   completed_at: string
   customer_name: string | null
   rejection_reason: string | null
+}
+
+// Retest types
+export type RetestStatus = 'pending' | 'completed' | 'review_required'
+
+export interface RetestItem {
+  id: number
+  test_result_id: number
+  original_value: string | null
+  current_value: string | null
+  test_type: string | null
+}
+
+export interface RetestRequest {
+  id: number
+  lot_id: number
+  reference_number: string
+  retest_number: number
+  reason: string
+  status: RetestStatus
+  requested_by_id: number
+  requested_by_name: string | null
+  completed_at: string | null
+  created_at: string
+  items: RetestItem[]
+}
+
+export interface RetestRequestListResponse {
+  items: RetestRequest[]
+  total: number
+}
+
+export interface CreateRetestRequestData {
+  test_result_ids: number[]
+  reason: string
+}
+
+export interface RetestOriginalValue {
+  test_result_id: number
+  original_value: string | null
+  retest_reference: string
+  retest_status: RetestStatus
 }

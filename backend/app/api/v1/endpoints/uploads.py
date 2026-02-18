@@ -1,18 +1,18 @@
 """File upload endpoints for PDFs and other documents."""
 
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from app.dependencies import DbSession, CurrentUser
 from app.config import settings
 from app.models.lot import Lot
+from app.services.storage_service import get_storage_service
 
 router = APIRouter()
 
@@ -22,7 +22,7 @@ class UploadResponse(BaseModel):
 
     filename: str
     original_filename: str
-    path: str
+    key: str  # Storage key (path in R2 or local)
     size: int
     content_type: str
 
@@ -39,8 +39,8 @@ async def upload_pdf(
 
     - Validates file is a PDF
     - Generates unique filename with timestamp
-    - Saves to configured upload path
-    - If lot_id provided, adds filename to lot's attached_pdfs
+    - Saves to storage (R2 in production, local in development)
+    - If lot_id provided, adds storage key to lot's attached_pdfs
     - Returns file metadata
     """
     # Validate file type
@@ -59,20 +59,18 @@ async def upload_pdf(
             detail=f"File size exceeds maximum of {settings.max_upload_size_mb}MB",
         )
 
-    # Create upload directory if needed
-    upload_dir = Path(settings.upload_path) / "pdfs"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
     # Generate unique filename: timestamp_uuid_originalname.pdf
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_id = str(uuid.uuid4())[:8]
     safe_name = "".join(c if c.isalnum() or c in ".-_" else "_" for c in (file.filename or "document.pdf"))
     new_filename = f"{timestamp}_{unique_id}_{safe_name}"
 
-    # Save file
-    file_path = upload_dir / new_filename
-    with open(file_path, "wb") as f:
-        f.write(content)
+    # Storage key with prefix
+    storage_key = f"pdfs/{new_filename}"
+
+    # Upload to storage
+    storage = get_storage_service()
+    storage.upload(content, storage_key, content_type="application/pdf")
 
     # Associate with lot if lot_id provided
     if lot_id and db:
@@ -81,74 +79,89 @@ async def upload_pdf(
             # Initialize attached_pdfs if None
             if lot.attached_pdfs is None:
                 lot.attached_pdfs = []
-            # Add the new filename
-            lot.attached_pdfs = lot.attached_pdfs + [new_filename]
+            # Add the storage key
+            lot.attached_pdfs = lot.attached_pdfs + [storage_key]
             db.commit()
 
     return UploadResponse(
         filename=new_filename,
         original_filename=file.filename or "document.pdf",
-        path=str(file_path),
+        key=storage_key,
         size=len(content),
         content_type=file.content_type,
     )
 
 
-@router.get("/{filename}")
+@router.get("/{filename:path}")
 async def get_upload(
     filename: str,
     current_user: CurrentUser = None,
-) -> FileResponse:
-    """Get an uploaded file by filename."""
-    upload_dir = Path(settings.upload_path) / "pdfs"
-    file_path = upload_dir / filename
+):
+    """
+    Get an uploaded file by filename or storage key.
 
-    # Security: ensure file is in upload directory (prevent path traversal)
-    try:
-        file_path.resolve().relative_to(upload_dir.resolve())
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid filename",
-        )
+    For R2 storage: Returns a redirect to a presigned URL (1-hour expiry).
+    For local storage: Returns the file directly.
+    """
+    storage = get_storage_service()
 
-    if not file_path.exists():
+    # Handle both old-style filenames and new storage keys
+    if not filename.startswith("pdfs/"):
+        storage_key = f"pdfs/{filename}"
+    else:
+        storage_key = filename
+
+    # Check if file exists
+    if not storage.exists(storage_key):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found",
         )
 
-    return FileResponse(
-        path=file_path,
+    # For R2, redirect to presigned URL
+    if settings.storage_backend == "r2":
+        presigned_url = storage.get_presigned_url(storage_key)
+        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    # For local storage, serve the file directly
+    content = storage.download(storage_key)
+
+    # Get just the filename for the response
+    actual_filename = storage_key.split("/")[-1]
+
+    # For local storage, we need to return the file
+    # Create a temp response with the content
+    from fastapi.responses import Response
+    return Response(
+        content=content,
         media_type="application/pdf",
-        filename=filename,
+        headers={"Content-Disposition": f'inline; filename="{actual_filename}"'},
     )
 
 
-@router.delete("/{filename}")
+@router.delete("/{filename:path}")
 async def delete_upload(
     filename: str,
     db: DbSession = None,
     current_user: CurrentUser = None,
 ) -> dict:
     """Delete an uploaded file."""
-    upload_dir = Path(settings.upload_path) / "pdfs"
-    file_path = upload_dir / filename
+    storage = get_storage_service()
 
-    # Security: ensure file is in upload directory
-    try:
-        file_path.resolve().relative_to(upload_dir.resolve())
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid filename",
-        )
+    # Handle both old-style filenames and new storage keys
+    if not filename.startswith("pdfs/"):
+        storage_key = f"pdfs/{filename}"
+    else:
+        storage_key = filename
 
-    if not file_path.exists():
+    # Check if file exists
+    if not storage.exists(storage_key):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found",
         )
 
-    os.remove(file_path)
+    # Delete from storage
+    storage.delete(storage_key)
+
     return {"message": "File deleted successfully"}

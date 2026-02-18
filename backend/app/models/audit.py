@@ -1,9 +1,8 @@
 """Audit log and annotation models for tracking all system changes."""
 
-import gzip
 import json
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index, LargeBinary
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index
 from sqlalchemy.orm import relationship, validates
 from app.models.base import BaseModel
 from app.models.enums import AuditAction
@@ -211,8 +210,8 @@ class AuditAnnotation(BaseModel):
         user_id: User who created the annotation
         comment: Text comment (optional)
         attachment_filename: Original filename of attachment (optional)
-        attachment_data: Compressed (gzip) file contents
-        attachment_size: Original uncompressed size in bytes
+        attachment_key: Storage key for the attachment (R2/local)
+        attachment_size: Original file size in bytes
         attachment_hash: SHA256 hash of original file
         created_at: When the annotation was created
     """
@@ -228,10 +227,10 @@ class AuditAnnotation(BaseModel):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     comment = Column(Text, nullable=True)
 
-    # Attachment fields
+    # Attachment fields - now using storage key instead of blob data
     attachment_filename = Column(String(255), nullable=True)
-    attachment_data = Column(LargeBinary, nullable=True)  # Gzip compressed
-    attachment_size = Column(Integer, nullable=True)  # Original uncompressed size
+    attachment_key = Column(String(500), nullable=True)  # R2/storage key
+    attachment_size = Column(Integer, nullable=True)  # Original file size
     attachment_hash = Column(String(64), nullable=True)  # SHA256 hash
 
     # Timestamp
@@ -248,43 +247,33 @@ class AuditAnnotation(BaseModel):
         Index("idx_audit_annotation_created", "created_at"),
     )
 
-    @validates("comment", "attachment_data")
+    @validates("comment", "attachment_key")
     def validate_has_content(self, key, value):
         """Validate that annotation has either comment or attachment."""
         # This validation happens on the field level, so we can't check both
         # We'll handle this in the endpoint
         return value
 
-    def set_attachment(self, filename: str, file_content: bytes, file_hash: str):
+    def set_attachment_metadata(self, filename: str, storage_key: str, file_size: int, file_hash: str):
         """
-        Set attachment with compression.
+        Set attachment metadata after uploading to storage.
 
         Args:
             filename: Original filename
-            file_content: Uncompressed file bytes
+            storage_key: Key in storage (R2 or local)
+            file_size: File size in bytes
             file_hash: SHA256 hash of original file
         """
-        if len(file_content) > MAX_ATTACHMENT_SIZE_BYTES:
+        if file_size > MAX_ATTACHMENT_SIZE_BYTES:
             raise ValueError(
-                f"Attachment size ({len(file_content)} bytes) exceeds maximum "
+                f"Attachment size ({file_size} bytes) exceeds maximum "
                 f"({MAX_ATTACHMENT_SIZE_BYTES} bytes)"
             )
 
         self.attachment_filename = filename
-        self.attachment_size = len(file_content)
+        self.attachment_key = storage_key
+        self.attachment_size = file_size
         self.attachment_hash = file_hash
-        self.attachment_data = gzip.compress(file_content)
-
-    def get_attachment(self) -> bytes:
-        """
-        Get decompressed attachment data.
-
-        Returns:
-            Decompressed file bytes
-        """
-        if not self.attachment_data:
-            return None
-        return gzip.decompress(self.attachment_data)
 
     def __repr__(self):
         """String representation of AuditAnnotation."""

@@ -8,6 +8,8 @@ import {
   Mail,
   Filter,
   X,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react"
 import {
   Table,
@@ -27,9 +29,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { useArchive, useCustomers, useSendEmail } from "@/hooks/useRelease"
+import { useArchive, useCustomers, useSendEmail, useDownloadWithTracking } from "@/hooks/useRelease"
 import { useProducts } from "@/hooks/useProducts"
-import { releaseApi } from "@/api/release"
+import { Badge } from "@/components/ui/badge"
+import { formatDate } from "@/lib/date-utils"
 import type { ArchiveFilters, ArchiveItem } from "@/types/release"
 
 export function ArchivePage() {
@@ -40,11 +43,16 @@ export function ArchivePage() {
   const [dateTo, setDateTo] = useState("")
   const [lotNumber, setLotNumber] = useState("")
   const [showFilters, setShowFilters] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [sortBy, setSortBy] = useState<ArchiveFilters['sort_by']>('released_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   // Email dialog state
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailTarget, setEmailTarget] = useState<{ lotId: number; productId: number } | null>(null)
   const [emailRecipient, setEmailRecipient] = useState("")
+
 
   // Build filters object
   const filters: ArchiveFilters = useMemo(
@@ -55,15 +63,19 @@ export function ArchivePage() {
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       lot_number: lotNumber || undefined,
-      page_size: 50,
+      page,
+      page_size: pageSize,
+      sort_by: sortBy,
+      sort_order: sortOrder,
     }),
-    [search, productId, customerId, dateFrom, dateTo, lotNumber]
+    [search, productId, customerId, dateFrom, dateTo, lotNumber, page, pageSize, sortBy, sortOrder]
   )
 
   const { data: archiveData, isLoading } = useArchive(filters)
   const { data: productsData } = useProducts({ page_size: 500 })
   const { data: customers = [] } = useCustomers()
   const sendEmail = useSendEmail()
+  const { handleDownload, isDownloading } = useDownloadWithTracking()
 
   const hasActiveFilters = productId || customerId || dateFrom || dateTo || lotNumber
 
@@ -73,7 +85,40 @@ export function ArchivePage() {
     setDateFrom("")
     setDateTo("")
     setLotNumber("")
+    setPage(1)
   }
+
+  const handleSort = (column: ArchiveFilters['sort_by']) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(column)
+      setSortOrder('desc')
+    }
+    setPage(1)
+  }
+
+  const SortableHeader = ({
+    column,
+    label
+  }: {
+    column: ArchiveFilters['sort_by']
+    label: string
+  }) => (
+    <TableHead
+      className="text-[12px] font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 select-none"
+      onClick={() => handleSort(column)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {sortBy === column && (
+          sortOrder === 'asc'
+            ? <ChevronUp className="h-3.5 w-3.5" />
+            : <ChevronDown className="h-3.5 w-3.5" />
+        )}
+      </div>
+    </TableHead>
+  )
 
   const handleResendEmail = (item: ArchiveItem) => {
     setEmailTarget({ lotId: item.lot_id, productId: item.product_id })
@@ -96,14 +141,6 @@ export function ArchivePage() {
     } catch (error) {
       console.error("Failed to send email:", error)
     }
-  }
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
   }
 
   return (
@@ -265,18 +302,13 @@ export function ArchivePage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50/80">
-                  <TableHead className="text-[12px] font-semibold text-slate-600">
-                    Reference #
-                  </TableHead>
-                  <TableHead className="text-[12px] font-semibold text-slate-600">
-                    Product
-                  </TableHead>
-                  <TableHead className="text-[12px] font-semibold text-slate-600">
-                    Brand
-                  </TableHead>
-                  <TableHead className="text-[12px] font-semibold text-slate-600">
-                    Released Date
-                  </TableHead>
+                  <SortableHeader column="reference_number" label="Ref" />
+                  <SortableHeader column="lot_number" label="Lot" />
+                  <SortableHeader column="brand" label="Brand" />
+                  <SortableHeader column="product_name" label="Product" />
+                  <SortableHeader column="released_at" label="Released Date" />
+                  <TableHead className="text-[12px] font-semibold text-slate-600">Customer</TableHead>
+                  <TableHead className="text-[12px] font-semibold text-slate-600">Status</TableHead>
                   <TableHead className="text-[12px] font-semibold text-slate-600 text-right">
                     Actions
                   </TableHead>
@@ -288,40 +320,50 @@ export function ArchivePage() {
                     <TableCell className="font-mono text-[13px] font-medium text-slate-900">
                       {item.reference_number}
                     </TableCell>
-                    <TableCell className="text-[13px] text-slate-700">
-                      {item.product_name}
-                      {item.flavor && (
-                        <span className="text-slate-500"> - {item.flavor}</span>
-                      )}
+                    <TableCell className="font-mono text-[13px] text-slate-600">
+                      {item.lot_number || '—'}
                     </TableCell>
                     <TableCell className="text-[13px] text-slate-600">
                       {item.brand}
                     </TableCell>
+                    <TableCell className="text-[13px] text-slate-700">
+                      {item.product_name}
+                      {item.flavor && <span className="text-slate-500"> - {item.flavor}</span>}
+                      {item.size && <span className="text-slate-400 ml-1">({item.size})</span>}
+                    </TableCell>
                     <TableCell className="text-[13px] text-slate-600">
                       {formatDate(item.released_at)}
                     </TableCell>
+                    <TableCell className="text-[13px] text-slate-600">
+                      {item.customer_name || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="emerald" className="text-[11px]">Released</Badge>
+                    </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1.5">
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          asChild
                           title="Download COA"
+                          onClick={() => handleDownload(item.lot_id, item.product_id)}
+                          disabled={isDownloading(item.lot_id, item.product_id)}
+                          className={`h-8 w-8 rounded-md border border-slate-200 bg-white shadow-sm hover:bg-slate-50 hover:shadow active:shadow-none active:bg-slate-100 transition-all ${isDownloading(item.lot_id, item.product_id) ? "cursor-wait" : ""}`}
                         >
-                          <a
-                            href={releaseApi.getDownloadUrl(item.lot_id, item.product_id)}
-                            download
-                          >
-                            <Download className="h-4 w-4" />
-                          </a>
+                          {isDownloading(item.lot_id, item.product_id) ? (
+                            <Loader2 className="h-4 w-4 text-slate-600 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4 text-slate-600" />
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => handleResendEmail(item)}
                           title="Re-send email"
+                          className="h-8 w-8 rounded-md border border-slate-200 bg-white shadow-sm hover:bg-slate-50 hover:shadow active:shadow-none active:bg-slate-100 transition-all"
                         >
-                          <Mail className="h-4 w-4" />
+                          <Mail className="h-4 w-4 text-slate-600" />
                         </Button>
                       </div>
                     </TableCell>
@@ -330,11 +372,53 @@ export function ArchivePage() {
               </TableBody>
             </Table>
 
-            {/* Pagination info */}
-            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/50">
+            {/* Pagination */}
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between">
               <p className="text-[12px] text-slate-500">
-                Showing {archiveData.items.length} of {archiveData.total} results
+                Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, archiveData.total)} of {archiveData.total}
               </p>
+
+              <div className="flex items-center gap-4">
+                {/* Page size selector */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-slate-500">Rows:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value))
+                      setPage(1)
+                    }}
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px]"
+                  >
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+
+                {/* Page navigation */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-[12px] text-slate-600 min-w-[80px] text-center">
+                    Page {page} of {archiveData.total_pages || 1}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.min(archiveData.total_pages || 1, p + 1))}
+                    disabled={page >= (archiveData.total_pages || 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
           </>
         )}

@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_
 from app.models.coa_release import COARelease
 from app.models.email_history import EmailHistory
 from app.models.lot import Lot
+from app.models.product import Product
 from app.models.enums import COAReleaseStatus
 from app.services.base import BaseService
 from app.utils.logger import logger
@@ -37,6 +38,8 @@ class ArchiveService(BaseService[COARelease]):
         lot_number: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        sort_by: str = "released_at",
+        sort_order: str = "desc",
     ) -> tuple[List[COARelease], int]:
         """
         Search released COAs with filters.
@@ -88,13 +91,32 @@ class ArchiveService(BaseService[COARelease]):
         # Get total count before pagination
         total = query.count()
 
-        # Apply pagination and ordering
-        releases = (
-            query.order_by(COARelease.released_at.desc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+        # Build sort column mapping
+        sort_columns = {
+            "released_at": COARelease.released_at,
+            "reference_number": Lot.reference_number,
+            "lot_number": Lot.lot_number,
+            "brand": Product.brand,
+            "product_name": Product.product_name,
+        }
+
+        # Get sort column (default to released_at)
+        sort_column = sort_columns.get(sort_by, COARelease.released_at)
+
+        # Ensure joins exist for sorting
+        if sort_by in ["reference_number", "lot_number"] and not lot_number:
+            query = query.join(COARelease.lot)
+        if sort_by in ["brand", "product_name"]:
+            query = query.join(COARelease.product)
+
+        # Apply ordering
+        if sort_order == "asc":
+            query = query.order_by(sort_column.asc())
+        else:
+            query = query.order_by(sort_column.desc())
+
+        # Apply pagination
+        releases = query.offset(skip).limit(limit).all()
 
         return releases, total
 

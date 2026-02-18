@@ -49,6 +49,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for creating a user."""
 
+    email: EmailStr
     password: str = Field(..., min_length=6)
 
 
@@ -89,6 +90,13 @@ class UserResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class ChangePassword(BaseModel):
+    """Schema for changing the current user's password."""
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=6)
 
 
 class VerifyOverrideResponse(BaseModel):

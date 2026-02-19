@@ -2,7 +2,7 @@
 
 ## Overview
 
-This implementation integrates PydanticAI with Google's Gemini 2.5 Flash model to enhance the COA (Certificate of Analysis) PDF parsing capabilities in the existing COA Management System.
+This implementation integrates PydanticAI with Google's Gemini 2.5 Flash model to enhance the COA (Certificate of Analysis) PDF parsing capabilities in LabTrack.
 
 ## Key Features
 
@@ -23,7 +23,7 @@ This implementation integrates PydanticAI with Google's Gemini 2.5 Flash model t
 - Automatic provider selection based on GOOGLE_API_KEY environment variable
 - Preserves existing queue and confidence scoring system
 - Backward compatible with MockAIProvider
-- Enhanced error display in Streamlit UI
+- Enhanced error display in the UI
 
 ## Configuration
 

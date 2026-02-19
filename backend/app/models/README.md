@@ -1,6 +1,6 @@
-# COA Management System Database Models
+# LabTrack Database Models
 
-This directory contains all SQLAlchemy database models for the COA Management System.
+This directory contains all SQLAlchemy database models for the LabTrack.
 
 ## Models Overview
 

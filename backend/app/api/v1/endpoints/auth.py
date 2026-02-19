@@ -66,7 +66,7 @@ async def login(
 
     # Check password using SHA256 with salt (must match UserService._hash_password)
     import hashlib
-    salt = "coa_system_salt_"
+    salt = "labtrack_salt_"
     sha256_hash = hashlib.sha256(f"{salt}{form_data.password}".encode()).hexdigest()
     password_valid = sha256_hash == user.password_hash
 
@@ -182,7 +182,7 @@ async def change_password(
     """Change the current user's password."""
     import hashlib
 
-    salt = "coa_system_salt_"
+    salt = "labtrack_salt_"
     current_hash = hashlib.sha256(f"{salt}{body.current_password}".encode()).hexdigest()
     if current_hash != current_user.password_hash:
         raise HTTPException(
@@ -303,7 +303,7 @@ async def verify_override(
         )
 
     # Check password using SHA256 with salt (must match UserService._hash_password)
-    salt = "coa_system_salt_"
+    salt = "labtrack_salt_"
     sha256_hash = hashlib.sha256(f"{salt}{form_data.password}".encode()).hexdigest()
     password_valid = sha256_hash == user.password_hash
 

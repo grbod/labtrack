@@ -1,4 +1,4 @@
-"""Setup script for COA Management System."""
+"""Setup script for LabTrack."""
 
 from setuptools import setup, find_packages
 
@@ -6,14 +6,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="coa-management-system",
+    name="labtrack",
     version="0.1.0",
     author="Your Name",
     author_email="your.email@example.com",
-    description="A comprehensive Certificate of Analysis management system",
+    description="LabTrack - lab testing and COA management system",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/COA-creator",
+    url="https://github.com/yourusername/labtrack",
     packages=find_packages(include=["src", "src.*"]),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -27,7 +27,6 @@ setup(
     ],
     python_requires=">=3.9",
     install_requires=[
-        "streamlit>=1.28.0",
         "sqlalchemy>=2.0.0",
         "alembic>=1.12.0",
         "python-docx>=1.1.0",

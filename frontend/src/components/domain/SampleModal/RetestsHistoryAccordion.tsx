@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/date-utils"
 import { useRetestRequests, useDownloadRetestPdf } from "@/hooks/useRetests"
 import { RetestStatusBadge } from "../RetestStatusBadge"
-import type { RetestRequest } from "@/types"
 
 interface RetestsHistoryAccordionProps {
   /** Lot ID to fetch retest requests for */

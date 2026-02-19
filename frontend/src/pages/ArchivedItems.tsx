@@ -63,7 +63,7 @@ export function ArchivedItemsPage() {
 
   // Keyboard shortcut state for row navigation (using refs to avoid effect re-runs)
   const pendingDigitRef = useRef<string | null>(null)
-  const pendingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Samples (completed lots) query - only fetch when samples tab is active
   const samplesQuery = useArchivedLots(

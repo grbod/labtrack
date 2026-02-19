@@ -1,4 +1,4 @@
-"""Logging configuration for COA Management System."""
+"""Logging configuration for LabTrack."""
 
 import sys
 from pathlib import Path

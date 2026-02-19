@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for COA Management System.
+"""Comprehensive unit tests for LabTrack.
 
 This module contains 50 additional unit tests covering various gaps
 in the test coverage for models, services, and business logic.

@@ -455,7 +455,7 @@ export function SampleModal({
   useEffect(() => {
     if (!isOpen) return
 
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       // Don't navigate if user is typing in an input, textarea, or contenteditable
       const target = e.target as HTMLElement
       const isInputFocused =

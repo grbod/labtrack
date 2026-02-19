@@ -1,4 +1,4 @@
-"""Database models for COA Management System."""
+"""Database models for LabTrack."""
 
 # Import all models
 from app.models.base import BaseModel

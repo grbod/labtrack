@@ -10,7 +10,7 @@ from app.schemas.auth import UserCreate, UserUpdate, UserResponse
 from app.models import User
 
 # SHA256 salt must match auth.py login verification
-_PASSWORD_SALT = "coa_system_salt_"
+_PASSWORD_SALT = "labtrack_salt_"
 
 
 def _hash_password(password: str) -> str:

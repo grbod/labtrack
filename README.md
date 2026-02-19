@@ -1,6 +1,6 @@
-# COA Management System
+# LabTrack
 
-A comprehensive Certificate of Analysis (COA) management system built with Python, Streamlit, and SQLAlchemy.
+Lab testing and COA management system built with Python, FastAPI, React, and SQLAlchemy.
 
 ## Features
 
@@ -9,26 +9,23 @@ A comprehensive Certificate of Analysis (COA) management system built with Pytho
 - **AI-Powered Parsing**: Automatically extract information from COA documents
 - **Folder Monitoring**: Watch folders for new COA files and process them automatically
 - **Database Storage**: Store and retrieve COA data with full CRUD operations
-- **Web Interface**: User-friendly Streamlit interface for all operations
+- **Web Interface**: React-based frontend with modern UI
 - **API Endpoints**: RESTful API for integration with other systems
 - **Export Functionality**: Export COAs to Excel and other formats
 
 ## Project Structure
 
 ```
-COA-creator/
-├── src/                    # Main application code
-│   ├── models/            # Database models
-│   ├── services/          # Business logic
-│   ├── api/              # API endpoints
-│   ├── ui/               # Streamlit pages
-│   └── utils/            # Utility functions
-├── tests/                 # Test files
-├── templates/             # COA templates
-├── config/               # Configuration files
-├── migrations/           # Database migrations
-├── requirements.txt      # Python dependencies
-├── pyproject.toml        # Project configuration
+labtrack/
+├── backend/              # FastAPI backend
+│   ├── app/             # Application code
+│   │   ├── models/      # SQLAlchemy ORM models
+│   │   ├── services/    # Business logic
+│   │   ├── api/         # API endpoints
+│   │   └── utils/       # Utility functions
+│   └── tests/           # Pytest test suite
+├── frontend/             # React + Vite frontend
+├── templates/            # Document templates
 ├── .env.example          # Environment variables example
 └── README.md            # This file
 ```
@@ -43,8 +40,8 @@ COA-creator/
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/COA-creator.git
-cd COA-creator
+git clone https://github.com/yourusername/labtrack.git
+cd labtrack
 ```
 
 2. Create a virtual environment:
@@ -74,10 +71,14 @@ alembic upgrade head
 
 ## Usage
 
-### Running the Streamlit App
+### Running the App
 
 ```bash
-streamlit run src/ui/app.py
+# Backend
+cd backend && uvicorn app.main:app --reload --port 8009
+
+# Frontend
+cd frontend && npm run dev
 ```
 
 ### Using the CLI
@@ -174,10 +175,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Support
 
-For support, email support@coasystem.com or create an issue in the GitHub repository.
+For support, email support@labtrack.com or create an issue in the GitHub repository.
 
 ## Acknowledgments
 
-- Built with [Streamlit](https://streamlit.io/)
+- Backend built with [FastAPI](https://fastapi.tiangolo.com/)
+- Frontend built with [React](https://react.dev/) and [Vite](https://vitejs.dev/)
 - Database ORM by [SQLAlchemy](https://www.sqlalchemy.org/)
 - Document generation using [python-docx](https://python-docx.readthedocs.io/) and [ReportLab](https://www.reportlab.com/)

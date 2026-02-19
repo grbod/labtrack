@@ -67,6 +67,11 @@ export const customersApi = {
     return response.data
   },
 
+  deactivate: async (id: number): Promise<Customer> => {
+    const response = await api.post<Customer>(`/customers/${id}/deactivate`)
+    return response.data
+  },
+
   // Deprecated - use restore instead
   activate: async (id: number): Promise<Customer> => {
     const response = await api.post<Customer>(`/customers/${id}/activate`)

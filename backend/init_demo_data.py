@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize demo data for COA Management System."""
+"""Initialize demo data for LabTrack."""
 
 import sys
 from pathlib import Path
@@ -27,7 +27,7 @@ def create_demo_data():
         admin = user_service.create_user(
             db,
             username="admin",
-            email="admin@coasystem.com",
+            email="admin@labtrack.com",
             password="admin123",
             role=UserRole.ADMIN
         )
@@ -36,7 +36,7 @@ def create_demo_data():
         qc_manager = user_service.create_user(
             db,
             username="qcmanager",
-            email="qc@coasystem.com",
+            email="qc@labtrack.com",
             password="qc123",
             role=UserRole.QC_MANAGER
         )
@@ -45,7 +45,7 @@ def create_demo_data():
         lab_tech = user_service.create_user(
             db,
             username="labtech",
-            email="lab@coasystem.com",
+            email="lab@labtrack.com",
             password="lab123",
             role=UserRole.LAB_TECH
         )

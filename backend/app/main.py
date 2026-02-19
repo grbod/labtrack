@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="COA Management System API",
+    description="LabTrack API",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -39,6 +39,7 @@ app.add_middleware(
         "http://localhost:3000",  # Alternative dev port
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "https://labtrack.bodytools.work",  # Production
     ],
     allow_credentials=True,
     allow_methods=["*"],

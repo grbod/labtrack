@@ -1,0 +1,63 @@
+# LabTrack FastAPI Backend Service
+#
+# Install:
+#   sudo cp /opt/labtrack/deploy/labtrack-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable labtrack-api
+#   sudo systemctl start labtrack-api
+#
+# Manage:
+#   sudo systemctl status labtrack-api
+#   sudo systemctl restart labtrack-api
+#   sudo journalctl -u labtrack-api -f
+
+[Unit]
+Description=LabTrack FastAPI Backend
+Documentation=https://github.com/grbod/labtrack
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=labtrack
+Group=labtrack
+WorkingDirectory=/opt/labtrack/backend
+
+# Environment
+Environment="PATH=/opt/labtrack/backend/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/opt/labtrack/backend/.env
+
+# Start command
+ExecStart=/opt/labtrack/backend/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8009 \
+    --workers 1 \
+    --log-level info
+
+# Restart policy
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/labtrack/backend/data
+ReadWritePaths=/opt/labtrack/backend/uploads
+ReadWritePaths=/var/log/labtrack
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=labtrack-api
+
+[Install]
+WantedBy=multi-user.target

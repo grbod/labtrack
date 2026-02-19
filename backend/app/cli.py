@@ -1,4 +1,4 @@
-"""Command-line interface for COA Management System."""
+"""Command-line interface for LabTrack."""
 
 import click
 import asyncio
@@ -28,7 +28,7 @@ from .utils.logger import logger
 
 @click.group()
 def cli():
-    """COA Management System CLI."""
+    """LabTrack CLI."""
     pass
 
 

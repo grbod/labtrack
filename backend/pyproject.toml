@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "coa-management-system"
+name = "labtrack"
 version = "0.1.0"
 description = "A comprehensive Certificate of Analysis (COA) management system"
 authors = ["Your Name <your.email@example.com>"]

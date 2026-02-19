@@ -4,32 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a modern COA (Certificate of Analysis) Management System that replaces the legacy Excel-based workflow with a comprehensive web application. The system handles lab sample tracking, PDF parsing, test result management, approval workflows, and automated COA generation.
+LabTrack is a lab testing and COA management system that replaces the legacy Excel-based workflow with a comprehensive web application. The system handles lab sample tracking, PDF parsing, test result management, approval workflows, and automated COA generation.
 
 ## Architecture
 
 ### Technology Stack
-- **Backend**: Python 3.10+ with SQLAlchemy ORM, Pydantic settings
-- **Frontend**: Streamlit web framework
+- **Backend**: Python 3.10+ with FastAPI, SQLAlchemy ORM, Pydantic settings
+- **Frontend**: React + TypeScript + Vite + Tailwind CSS
 - **Database**: SQLite (upgradeable to PostgreSQL)
-- **AI Integration**: Mock provider (ready for OpenAI/Anthropic)
+- **AI Integration**: PydanticAI with Google Gemini (mock provider available)
 - **PDF Processing**: PyPDF2, python-docx for generation
-- **Authentication**: Custom user management with role-based access
+- **Authentication**: JWT-based with role-based access control
 
 ### Project Structure
 ```
-COA-creator/
-├── streamlit_app.py      # Main Streamlit entry point (root to avoid auto-navigation)
-├── src/
-│   ├── models/          # SQLAlchemy ORM models
-│   ├── services/        # Business logic layer
-│   ├── ui/              # Streamlit UI components
-│   │   ├── pages/       # Page modules
-│   │   └── components/  # Reusable UI components
-│   ├── utils/           # Helper utilities
-│   ├── database.py      # Database configuration
-│   └── config.py        # Application settings
-├── tests/               # Pytest test suite
+labtrack/
+├── backend/
+│   ├── app/
+│   │   ├── models/      # SQLAlchemy ORM models
+│   │   ├── services/    # Business logic layer
+│   │   ├── api/         # FastAPI endpoints
+│   │   ├── utils/       # Helper utilities
+│   │   ├── database.py  # Database configuration
+│   │   └── config.py    # Application settings
+│   └── tests/           # Pytest test suite
+├── frontend/            # React + Vite frontend
 └── templates/           # Document templates
 ```
 
@@ -62,23 +61,21 @@ COA-creator/
 
 ### Running the Application
 ```bash
-# Activate virtual environment
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8009
 
-# Run Streamlit app (from root directory)
-streamlit run streamlit_app.py
+# Frontend
+cd frontend
+npm install
+npm run dev
 
-# Initialize database with demo data
-python init_demo_data.py
+# Run backend tests
+cd backend && python -m pytest tests/ -v
 
-# Run tests
-pytest tests/ -v
-
-# Format code
-black src/ tests/
-
-# Lint code
-flake8 src/ tests/ --max-line-length 88 --extend-ignore E203,W503
+# Run frontend build
+cd frontend && npm run build
 ```
 
 ### Default Login Credentials

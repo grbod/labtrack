@@ -1,1 +1,1 @@
-"""Tests for COA Management System."""
+"""Tests for LabTrack."""

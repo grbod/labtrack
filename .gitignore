@@ -160,8 +160,25 @@ watch_folder/
 temp/
 tmp/
 
-# Streamlit
-.streamlit/secrets.toml
+# Security - certificates and credentials
+*.pem
+*.key
+*.cert
+*.crt
+credentials.json
+service-account*.json
+token.json
+
+# Business data files (root level only)
+/*.xlsx
+/*.PDF
+/*.pdf
+/*.docx
+COA Reports/
+COAs/
+
+# Node
+node_modules/
 
 # macOS
 .DS_Store

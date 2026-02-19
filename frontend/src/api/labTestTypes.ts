@@ -73,6 +73,10 @@ export const labTestTypesApi = {
     return response.data
   },
 
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/lab-test-types/${id}`)
+  },
+
   archive: async (id: number, data: ArchiveRequest): Promise<LabTestType> => {
     const response = await api.delete<LabTestType>(`/lab-test-types/${id}`, { data })
     return response.data

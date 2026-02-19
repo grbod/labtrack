@@ -1,4 +1,4 @@
-# Product Requirements Document: COA Management System
+# Product Requirements Document: LabTrack
 
 ## 1. Executive Summary
 
@@ -166,7 +166,7 @@ CREATE TABLE coa_history (
    - Consistent formatting and branding
    - PDF and DOCX output formats
 
-5. **Streamlit Web Interface**
+5. **Web Interface (React + FastAPI)**
    - User-friendly dashboard
    - Product and sample management
    - PDF parsing queue monitoring
@@ -307,7 +307,7 @@ CREATE TABLE coa_history (
 - **PDF Processing**: PyPDF2, pdfplumber
 - **COA Generation**: python-docx, ReportLab
 - **File Watching**: watchdog
-- **Web Framework**: Streamlit
+- **Web Framework**: FastAPI (backend) + React/Vite (frontend)
 - **CLI**: Click framework
 - **Testing**: pytest
 
@@ -322,11 +322,11 @@ CREATE TABLE coa_history (
 - COA generation: < 10 seconds per document
 - Support for 100+ COAs per day
 - Database queries: < 100ms response time
-- Streamlit app: < 2 second page loads
+- Web app: < 2 second page loads
 
 ## 6. User Interface
 
-### 6.1 Streamlit Web Interface
+### 6.1 Web Interface
 
 #### Dashboard Page
 - Overview statistics (pending samples, completed COAs, etc.)
@@ -385,21 +385,21 @@ CREATE TABLE coa_history (
 ### 6.2 CLI Commands (for automation)
 ```bash
 # Product management
-coa-system product add --brand "Truvani" --name "Organic Whey Protein" --flavor "Vanilla"
-coa-system product list
-coa-system product update <id> --display-name "Organic Whey Protein Powder"
+labtrack product add --brand "Truvani" --name "Organic Whey Protein" --flavor "Vanilla"
+labtrack product list
+labtrack product update <id> --display-name "Organic Whey Protein Powder"
 
 # Sample creation
-coa-system sample create --product <id> --type parent_lot --quantity 10000
-coa-system sample create-sublots --parent <lot_number> --count 5 --quantity 2000
+labtrack sample create --product <id> --type parent_lot --quantity 10000
+labtrack sample create-sublots --parent <lot_number> --count 5 --quantity 2000
 
 # Manual operations
-coa-system parse-pdf <filename>
-coa-system generate-coa --lot <lot_number>
-coa-system status --pending
+labtrack parse-pdf <filename>
+labtrack generate-coa --lot <lot_number>
+labtrack status --pending
 
 # Reporting
-coa-system report --from 2024-01-01 --to 2024-12-31
+labtrack report --from 2024-01-01 --to 2024-12-31
 ```
 
 ## 7. Success Metrics
@@ -424,31 +424,31 @@ coa-system report --from 2024-01-01 --to 2024-12-31
 ### Phase 1: Foundation (Weeks 1-2)
 - Database setup and schema implementation
 - Product catalog with standardized entries
-- Basic Streamlit app structure
+- Basic app structure
 
 ### Phase 2: Sample Management (Weeks 3-4)
 - Sample creation with reference numbers
 - Parent-sublot relationship handling
 - Status tracking system
-- Streamlit UI for sample management
+- UI for sample management
 
 ### Phase 3: PDF Integration (Weeks 5-6)
 - PDF watching service
 - AI integration for parsing
 - Result storage and validation
-- Streamlit UI for PDF processing queue
+- UI for PDF processing queue
 
 ### Phase 4: COA Generation (Weeks 7-8)
 - Template development
 - Automated generation logic
 - Output folder management
-- Streamlit UI for COA preview/generation
+- UI for COA preview/generation
 
 ### Phase 5: Polish & Testing (Weeks 9-10)
 - Error handling and edge cases
 - Performance optimization
 - User documentation
-- Streamlit UI refinements
+- UI refinements
 
 ## 9. Risks and Mitigation
 
@@ -458,13 +458,13 @@ coa-system report --from 2024-01-01 --to 2024-12-31
 - **Data Migration**: Provide tools to import historical data
 
 ### 9.2 Business Risks
-- **User Adoption**: Streamlit provides familiar web interface
+- **User Adoption**: Modern web interface with familiar patterns
 - **Regulatory Compliance**: Ensure audit trails meet requirements
 - **Lab Integration**: Work closely with labs on reference number implementation
 
 ## 10. Future Enhancements
 
-- Mobile-responsive Streamlit interface
+- Mobile-responsive interface
 - Email notifications for COA completion
 - Integration with ERP/inventory systems
 - Customer portal for COA access

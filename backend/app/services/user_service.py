@@ -375,7 +375,7 @@ class UserService(BaseService[User]):
             Hashed password
         """
         # Add salt for better security
-        salt = "coa_system_salt_"  # In production, use random salt per user
+        salt = "labtrack_salt_"  # In production, use random salt per user
         return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
 
     def _verify_password(self, plain_password: str, hashed_password: str) -> bool:

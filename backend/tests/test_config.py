@@ -42,13 +42,13 @@ def test_env_override():
 
     # Set a test environment variable
     original_value = os.environ.get("APP_NAME")
-    os.environ["APP_NAME"] = "Test COA System"
+    os.environ["APP_NAME"] = "Test LabTrack"
 
     # Re-import to get new settings
     reload(app.config)
     from app.config import settings
 
-    assert settings.app_name == "Test COA System"
+    assert settings.app_name == "Test LabTrack"
 
     # Clean up - restore original or delete
     if original_value:

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides an ultra-detailed implementation plan for adding Lab Test Types and Product Test Specifications to the COA Management System. This will enable products to have pre-defined testing requirements with specifications, required/optional designations, and automatic validation during the approval process.
+This document provides an ultra-detailed implementation plan for adding Lab Test Types and Product Test Specifications to LabTrack. This will enable products to have pre-defined testing requirements with specifications, required/optional designations, and automatic validation during the approval process.
 
 ## Table of Contents
 
@@ -1022,7 +1022,7 @@ def validate_lot_for_approval(
 ```python
 """Lab Test Types management page."""
 
-import streamlit as st
+# NOTE: Originally planned for Streamlit; now implemented in React frontend
 from sqlalchemy.orm import Session
 import pandas as pd
 from src.services.lab_test_type_service import LabTestTypeService
@@ -1942,7 +1942,7 @@ menu_items = {
     }
 }
 
-# Or in streamlit_app.py
+# Or in the main app entry point
 if page == "Lab Test Types":
     from src.ui.pages import lab_test_types
     lab_test_types.show(db)

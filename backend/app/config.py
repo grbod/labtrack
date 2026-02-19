@@ -1,4 +1,4 @@
-"""Configuration settings for the COA Management System."""
+"""Configuration settings for LabTrack."""
 
 from typing import Optional
 from pathlib import Path
@@ -10,14 +10,14 @@ class Settings(BaseSettings):
     """Application settings."""
 
     # Application
-    app_name: str = Field(default="COA Management System", env="APP_NAME")
+    app_name: str = Field(default="LabTrack", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
     environment: str = Field(default="development", env="ENVIRONMENT")
     app_env: str = Field(default="development", env="APP_ENV")
 
     # Database
     database_url: str = Field(
-        default="sqlite:///./coa_management.db", env="DATABASE_URL"
+        default="sqlite:///./labtrack.db", env="DATABASE_URL"
     )
 
     # Security
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, env="SMTP_PORT")
     smtp_user: Optional[str] = Field(default=None, env="SMTP_USER")
     smtp_password: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
-    from_email: str = Field(default="noreply@coasystem.com", env="FROM_EMAIL")
+    from_email: str = Field(default="noreply@labtrack.com", env="FROM_EMAIL")
 
     # Feature flags
     enable_email_notifications: bool = Field(default=False, env="ENABLE_EMAIL")

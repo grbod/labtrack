@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import { motion } from "framer-motion"
-import { toast } from "sonner"
 import { ArrowLeft, Loader2, AlertCircle, GripVertical, Keyboard } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"

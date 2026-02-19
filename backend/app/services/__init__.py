@@ -1,4 +1,4 @@
-"""Services for the COA Management System."""
+"""Services for LabTrack."""
 
 from .base import BaseService
 from .product_service import ProductService

@@ -38,7 +38,6 @@ import { UserManagementTab } from "@/components/domain/UserManagementTab"
 import { ImageCropper } from "@/components/ui/image-cropper"
 import { toast } from "sonner"
 import type { EmailTemplateVariable } from "@/types/emailTemplate"
-import type { User } from "@/types"
 
 type SettingsTab = "display" | "system" | "user" | "email" | "coa-style" | "lab-mapping" | "user-management"
 
@@ -80,7 +79,6 @@ export function SettingsPage() {
   // Lab info from backend
   const {
     labInfo,
-    isLoading: labInfoLoading,
     updateMutation: updateLabInfoMutation,
     uploadLogoMutation,
     deleteLogoMutation,

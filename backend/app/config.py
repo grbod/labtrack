@@ -12,8 +12,11 @@ class Settings(BaseSettings):
     # Application
     app_name: str = Field(default="LabTrack", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
-    environment: str = Field(default="development", env="APP_ENV")
     app_env: str = Field(default="development", env="APP_ENV")
+
+    @property
+    def environment(self) -> str:
+        return self.app_env
 
     # Database
     database_url: str = Field(

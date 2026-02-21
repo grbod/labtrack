@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # Application
     app_name: str = Field(default="LabTrack", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
-    environment: str = Field(default="development", env="ENVIRONMENT")
+    environment: str = Field(default="development", env="APP_ENV")
     app_env: str = Field(default="development", env="APP_ENV")
 
     # Database

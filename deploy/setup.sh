@@ -92,10 +92,15 @@ cp "${APP_DIR}/deploy/labtrack-api.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable labtrack-api
 
-# 8. Install nginx configuration
+# 8. Install nginx configuration (copy, not symlink — certbot modifies it in-place)
 echo "[8/8] Installing nginx configuration..."
-ln -sf "${APP_DIR}/deploy/nginx.conf" "/etc/nginx/sites-available/${APP_NAME}"
-ln -sf "/etc/nginx/sites-available/${APP_NAME}" "/etc/nginx/sites-enabled/${APP_NAME}"
+if [ ! -f "/etc/nginx/sites-available/${APP_NAME}" ]; then
+    cp "${APP_DIR}/deploy/nginx.conf" "/etc/nginx/sites-available/${APP_NAME}"
+    ln -sf "/etc/nginx/sites-available/${APP_NAME}" "/etc/nginx/sites-enabled/${APP_NAME}"
+    echo "  Nginx config installed (run certbot after setup to add SSL)"
+else
+    echo "  Nginx config already exists, skipping (preserves certbot SSL)"
+fi
 
 # Test nginx config
 if nginx -t 2>/dev/null; then

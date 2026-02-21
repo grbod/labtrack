@@ -16,6 +16,10 @@ on:
         default: 'false'
         type: boolean
 
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.11'
@@ -106,6 +110,13 @@ jobs:
             # Run database migrations (init_db creates tables if needed)
             python -c "from app.database import init_db; init_db()"
 
+            # Update systemd service file if changed
+            if ! diff -q /opt/labtrack/deploy/labtrack-api.service /etc/systemd/system/labtrack-api.service &>/dev/null; then
+              sudo cp /opt/labtrack/deploy/labtrack-api.service /etc/systemd/system/labtrack-api.service
+              sudo systemctl daemon-reload
+              echo "Systemd service file updated"
+            fi
+
             # Restart API service
             sudo systemctl restart labtrack-api
 
@@ -126,16 +137,32 @@ jobs:
       - name: Verify deployment
         run: |
           ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            # Check API is running
+            # Check API service is running
             if systemctl is-active --quiet labtrack-api; then
               echo "API service is running"
             else
               echo "ERROR: API service is not running"
+              sudo journalctl -u labtrack-api --no-pager -n 20
               exit 1
             fi
 
             # Check nginx config
             sudo nginx -t
+
+            # Health check with retry (service may need a moment to start)
+            for i in 1 2 3; do
+              if curl -sf http://127.0.0.1:8009/api/health > /dev/null 2>&1; then
+                echo "Health check passed"
+                break
+              fi
+              if [ "$i" -eq 3 ]; then
+                echo "ERROR: Health check failed after 3 attempts"
+                curl -s http://127.0.0.1:8009/api/health || true
+                exit 1
+              fi
+              echo "Health check attempt $i failed, retrying in 3s..."
+              sleep 3
+            done
 
             echo "Deployment verified successfully"
           EOF

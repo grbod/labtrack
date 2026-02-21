@@ -31,6 +31,7 @@ def get_db():
 def init_db():
     """Initialize database tables and seed default data."""
     try:
+        import app.models  # noqa: F401 — register all models with Base.metadata
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
     except Exception as e:

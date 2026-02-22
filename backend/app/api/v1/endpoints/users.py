@@ -1,20 +1,13 @@
 """User management endpoints."""
 
-import hashlib
 from typing import List
 
 from fastapi import APIRouter, HTTPException, status
 
 from app.dependencies import DbSession, AdminUser
 from app.schemas.auth import UserCreate, UserUpdate, UserResponse
+from app.core.security import get_password_hash
 from app.models import User
-
-# SHA256 salt must match auth.py login verification
-_PASSWORD_SALT = "labtrack_salt_"
-
-
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(f"{_PASSWORD_SALT}{password}".encode()).hexdigest()
 
 router = APIRouter()
 
@@ -49,12 +42,12 @@ async def create_user(
             detail="Username already registered",
         )
 
-    # Create user with SHA256+salt password (matches login verification)
+    # Create user with bcrypt password
     user = User(
         username=user_in.username,
         email=user_in.email,
         full_name=user_in.full_name,
-        password_hash=_hash_password(user_in.password),
+        password_hash=get_password_hash(user_in.password),
         role=user_in.role,
         active=True,
     )
@@ -99,7 +92,7 @@ async def update_user(
     # Update fields
     update_data = user_in.model_dump(exclude_unset=True)
     if "password" in update_data:
-        update_data["password_hash"] = _hash_password(update_data.pop("password"))
+        update_data["password_hash"] = get_password_hash(update_data.pop("password"))
     # Map schema field is_active to model column active
     if "is_active" in update_data:
         update_data["active"] = update_data.pop("is_active")

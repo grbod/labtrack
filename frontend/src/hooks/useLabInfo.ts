@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { labInfoApi, type LabInfo, type LabInfoUpdate } from "@/api/labInfo"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 /**
  * Hook for managing lab info settings.
@@ -24,6 +26,9 @@ export function useLabInfo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["labInfo"] })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update lab info"))
+    },
   })
 
   // Upload logo mutation
@@ -32,6 +37,9 @@ export function useLabInfo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["labInfo"] })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to upload logo"))
+    },
   })
 
   // Delete logo mutation
@@ -39,6 +47,9 @@ export function useLabInfo() {
     mutationFn: () => labInfoApi.deleteLogo(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["labInfo"] })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete logo"))
     },
   })
 

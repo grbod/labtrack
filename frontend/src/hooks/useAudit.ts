@@ -3,6 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   getAuditTrail,
   getAnnotations,
@@ -14,6 +15,7 @@ import {
   type AuditLogFilters,
   type ExportMetadata,
 } from "../api/audit";
+import { extractApiErrorMessage } from "@/lib/api-utils";
 
 /**
  * Query key factory for audit queries
@@ -63,6 +65,9 @@ export function useAddCommentAnnotation() {
   return useMutation({
     mutationFn: ({ auditId, comment }: { auditId: number; comment: string }) =>
       addAnnotationComment(auditId, comment),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to add comment"));
+    },
     onSuccess: (_, { auditId }) => {
       // Invalidate annotations for this audit entry
       queryClient.invalidateQueries({
@@ -92,6 +97,9 @@ export function useAddAttachmentAnnotation() {
       file: File;
       comment?: string;
     }) => addAnnotationAttachment(auditId, file, comment),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to add attachment"));
+    },
     onSuccess: (_, { auditId }) => {
       // Invalidate annotations for this audit entry
       queryClient.invalidateQueries({
@@ -119,6 +127,9 @@ export function useDownloadAttachment() {
       annotationId: number;
       filename: string;
     }) => downloadAttachment(auditId, annotationId, filename),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download attachment"));
+    },
   });
 }
 
@@ -134,6 +145,9 @@ export function useExportAuditCsv() {
       filters?: AuditLogFilters;
       metadata?: ExportMetadata;
     }) => exportAuditCsv(filters, metadata),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to export audit CSV"));
+    },
   });
 }
 
@@ -149,5 +163,8 @@ export function useExportAuditPdf() {
       filters?: AuditLogFilters;
       metadata?: ExportMetadata;
     }) => exportAuditPdf(filters, metadata),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to export audit PDF"));
+    },
   });
 }

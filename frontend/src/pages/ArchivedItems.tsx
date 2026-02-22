@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Archive, Package, FlaskConical, Users, Search, Loader2, RotateCcw, Beaker, Keyboard } from "lucide-react"
 import { format } from "date-fns"
 
+import { toast } from "sonner"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -102,6 +104,9 @@ export function ArchivedItemsPage() {
       queryClient.invalidateQueries({ queryKey: ["products"] })
       setRestoreDialog(null)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to restore product"))
+    },
   })
 
   const restoreLabTestMutation = useMutation({
@@ -111,6 +116,9 @@ export function ArchivedItemsPage() {
       queryClient.invalidateQueries({ queryKey: ["labTestTypes"] })
       setRestoreDialog(null)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to restore lab test type"))
+    },
   })
 
   const restoreCustomerMutation = useMutation({
@@ -119,6 +127,9 @@ export function ArchivedItemsPage() {
       queryClient.invalidateQueries({ queryKey: ["archivedCustomers"] })
       queryClient.invalidateQueries({ queryKey: ["customers"] })
       setRestoreDialog(null)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to restore customer"))
     },
   })
 

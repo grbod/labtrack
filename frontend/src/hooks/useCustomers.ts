@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import {
   customersApi,
   type CustomerFilters,
   type CreateCustomerData,
   type UpdateCustomerData,
 } from "@/api/customers"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 export const customerKeys = {
   all: ["customers"] as const,
@@ -37,6 +39,9 @@ export function useCreateCustomer() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create customer"))
+    },
   })
 }
 
@@ -50,6 +55,9 @@ export function useUpdateCustomer() {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() })
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(variables.id) })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update customer"))
+    },
   })
 }
 
@@ -60,6 +68,9 @@ export function useDeactivateCustomer() {
     mutationFn: (id: number) => customersApi.deactivate(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to deactivate customer"))
     },
   })
 }
@@ -72,6 +83,9 @@ export function useActivateCustomer() {
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: customerKeys.lists() })
       queryClient.invalidateQueries({ queryKey: customerKeys.detail(id) })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to activate customer"))
     },
   })
 }

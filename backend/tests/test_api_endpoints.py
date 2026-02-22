@@ -79,14 +79,14 @@ def admin_user(test_db):
 @pytest.fixture
 def auth_headers(test_user):
     """Get authorization headers for test user."""
-    token = create_access_token(data={"sub": str(test_user.id), "type": "access"})
+    token = create_access_token(subject=test_user.id)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
 def admin_headers(admin_user):
     """Get authorization headers for admin user."""
-    token = create_access_token(data={"sub": str(admin_user.id), "type": "access"})
+    token = create_access_token(subject=admin_user.id)
     return {"Authorization": f"Bearer {token}"}
 
 

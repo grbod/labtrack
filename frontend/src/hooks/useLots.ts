@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { lotsApi, type LotFilters, type ArchivedLotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
 import { releaseKeys } from "@/hooks/useRelease"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { LotStatus } from "@/types"
 
 export const lotKeys = {
@@ -52,6 +54,9 @@ export function useCreateLot() {
 
   return useMutation({
     mutationFn: (data: CreateLotData) => lotsApi.create(data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create lot"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
@@ -65,6 +70,9 @@ export function useUpdateLot() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: UpdateLotData }) =>
       lotsApi.update(id, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update lot"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
@@ -87,6 +95,9 @@ export function useUpdateLotStatus() {
       rejectionReason?: string
       overrideReason?: string
     }) => lotsApi.updateStatus(id, status, rejectionReason, overrideReason),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update lot status"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.id) })
@@ -106,6 +117,9 @@ export function useSubmitForReview() {
   return useMutation({
     mutationFn: ({ id, overrideUserId }: { id: number; overrideUserId?: number }) =>
       lotsApi.submitForReview(id, overrideUserId),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to submit lot for review"))
+    },
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
@@ -121,6 +135,9 @@ export function useResubmitLot() {
 
   return useMutation({
     mutationFn: (id: number) => lotsApi.resubmit(id),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to resubmit lot"))
+    },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
@@ -134,6 +151,9 @@ export function useDeleteLot() {
 
   return useMutation({
     mutationFn: (id: number) => lotsApi.delete(id),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete lot"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
@@ -156,6 +176,9 @@ export function useCreateSublotsBulk() {
   return useMutation({
     mutationFn: ({ lotId, sublots }: { lotId: number; sublots: SublotData[] }) =>
       lotsApi.createSublotsBulk(lotId, sublots),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to bulk create sublots"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: lotKeys.sublots(variables.lotId) })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })

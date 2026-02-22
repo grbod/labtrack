@@ -1,12 +1,17 @@
 import { useMutation } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { daaneCocApi } from "@/api/daaneCoc"
 import { downloadBlob } from "@/lib/utils"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 export function useDownloadLotDaaneCoc() {
   return useMutation({
     mutationFn: (lotId: number) => daaneCocApi.downloadLotCoc(lotId),
     onSuccess: ({ blob, filename }) => {
       downloadBlob(blob, filename)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download lot COC"))
     },
   })
 }
@@ -25,6 +30,9 @@ export function useDownloadLotDaaneCocPdf() {
     onSuccess: ({ blob, filename }) => {
       downloadBlob(blob, filename)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download lot COC PDF"))
+    },
   })
 }
 
@@ -33,6 +41,9 @@ export function useDownloadRetestDaaneCoc() {
     mutationFn: (requestId: number) => daaneCocApi.downloadRetestCoc(requestId),
     onSuccess: ({ blob, filename }) => {
       downloadBlob(blob, filename)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download retest COC"))
     },
   })
 }
@@ -48,6 +59,9 @@ export function useDownloadRetestDaaneCocPdf() {
     }) => daaneCocApi.downloadRetestCocPdf(requestId, specialInstructions),
     onSuccess: ({ blob, filename }) => {
       downloadBlob(blob, filename)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download retest COC PDF"))
     },
   })
 }

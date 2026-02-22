@@ -130,21 +130,20 @@ class User(BaseModel):
         return action in permissions.get(self.role, [])
 
     def set_password(self, password):
-        """Set user password (placeholder - should use proper hashing)."""
-        # In production, use bcrypt or similar
-        import hashlib
+        """Set user password using bcrypt."""
+        from app.core.security import get_password_hash
 
-        self.password_hash = hashlib.sha256(password.encode()).hexdigest()
+        self.password_hash = get_password_hash(password)
 
     def check_password(self, password):
-        """Check password (placeholder - should use proper hashing)."""
+        """Check password using bcrypt."""
         if not self.active:
             return False
         if not self.password_hash:
             return False
-        import hashlib
+        from app.core.security import verify_password
 
-        return self.password_hash == hashlib.sha256(password.encode()).hexdigest()
+        return verify_password(password, self.password_hash)
 
     def deactivate(self):
         """Deactivate user account."""

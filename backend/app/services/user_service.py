@@ -2,13 +2,13 @@
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-import hashlib
 import secrets
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models.user import User
 from app.models.enums import UserRole
 from app.services.base import BaseService
+from app.core.security import get_password_hash, verify_password_with_migration
 from app.utils.logger import logger
 
 
@@ -106,8 +106,8 @@ class UserService(BaseService[User]):
             logger.warning(f"Authentication failed - inactive user: {username}")
             return None
 
-        # Verify password
-        if not self._verify_password(password, user.password_hash):
+        # Verify password (bcrypt first, SHA256 fallback with transparent re-hash)
+        if not verify_password_with_migration(password, user.password_hash, user, db):
             logger.warning(f"Authentication failed - invalid password: {username}")
             return None
 
@@ -147,11 +147,11 @@ class UserService(BaseService[User]):
             admin = self.get(db, changed_by_user_id)
             if not admin or not admin.is_admin:
                 # Not admin, must verify old password
-                if not self._verify_password(old_password, user.password_hash):
+                if not verify_password_with_migration(old_password, user.password_hash, user, db):
                     raise ValueError("Invalid current password")
         else:
             # User changing own password, must verify
-            if not self._verify_password(old_password, user.password_hash):
+            if not verify_password_with_migration(old_password, user.password_hash, user, db):
                 raise ValueError("Invalid current password")
 
         # Hash new password
@@ -362,34 +362,10 @@ class UserService(BaseService[User]):
 
         return user.has_permission(action)
 
-    def _hash_password(self, password: str) -> str:
-        """
-        Hash password using SHA256.
-
-        Note: In production, use bcrypt or similar.
-
-        Args:
-            password: Plain text password
-
-        Returns:
-            Hashed password
-        """
-        # Add salt for better security
-        salt = "labtrack_salt_"  # In production, use random salt per user
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-
-    def _verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        """
-        Verify password against hash.
-
-        Args:
-            plain_password: Plain text password
-            hashed_password: Hashed password to compare
-
-        Returns:
-            True if password matches
-        """
-        return self._hash_password(plain_password) == hashed_password
+    @staticmethod
+    def _hash_password(password: str) -> str:
+        """Hash password using bcrypt via core/security."""
+        return get_password_hash(password)
 
     def get_user_stats(self, db: Session) -> Dict[str, Any]:
         """

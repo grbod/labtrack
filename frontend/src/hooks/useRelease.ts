@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { releaseApi, customerApi } from "@/api/release"
 import { downloadBlob } from "@/lib/utils"
 import { toast } from "sonner"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { ArchiveFilters, SaveDraftData, CreateCustomerData } from "@/types/release"
 
 export const releaseKeys = {
@@ -89,6 +90,9 @@ export function useSaveDraft() {
       productId: number
       data: SaveDraftData
     }) => releaseApi.saveDraft(lotId, productId, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to save draft"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: releaseKeys.detail(variables.lotId, variables.productId),
@@ -113,6 +117,9 @@ export function useApproveRelease() {
       customerId?: number
       notes?: string
     }) => releaseApi.approve(lotId, productId, customerId, notes),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to approve release"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
       queryClient.invalidateQueries({
@@ -140,6 +147,9 @@ export function useSendEmail() {
       productId: number
       recipientEmail: string
     }) => releaseApi.sendEmail(lotId, productId, recipientEmail),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to send email"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: releaseKeys.emailHistory(variables.lotId, variables.productId),
@@ -154,6 +164,9 @@ export function useDownloadCoa() {
     mutationFn: async ({ lotId, productId }: { lotId: number; productId: number }) => {
       const { blob, filename } = await releaseApi.downloadCoaBlob(lotId, productId)
       downloadBlob(blob, filename)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download COA"))
     },
   })
 }
@@ -195,6 +208,9 @@ export function useRegenerateCoa() {
     mutationFn: async ({ lotId, productId }: { lotId: number; productId: number }) => {
       await releaseApi.regenerateCoa(lotId, productId)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to regenerate COA"))
+    },
   })
 }
 
@@ -212,6 +228,9 @@ export function useCreateCustomer() {
 
   return useMutation({
     mutationFn: (data: CreateCustomerData) => customerApi.create(data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create customer"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: customerKeys.list() })
     },

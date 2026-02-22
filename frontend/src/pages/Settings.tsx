@@ -37,6 +37,7 @@ import { COACategoryOrderEditor } from "@/components/domain/COACategoryOrderEdit
 import { UserManagementTab } from "@/components/domain/UserManagementTab"
 import { ImageCropper } from "@/components/ui/image-cropper"
 import { toast } from "sonner"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { EmailTemplateVariable } from "@/types/emailTemplate"
 
 type SettingsTab = "display" | "system" | "user" | "email" | "coa-style" | "lab-mapping" | "user-management"
@@ -150,6 +151,9 @@ export function SettingsPage() {
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 2000)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update email template"))
+    },
   })
 
   // Reset to defaults mutation
@@ -159,6 +163,9 @@ export function SettingsPage() {
       setEmailSubject(data.subject)
       setEmailBody(data.body)
       queryClient.invalidateQueries({ queryKey: ["emailTemplate"] })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to reset email template"))
     },
   })
 

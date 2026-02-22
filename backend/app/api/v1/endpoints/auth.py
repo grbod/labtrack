@@ -5,14 +5,15 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.dependencies import DbSession, CurrentUser
+from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    verify_password,
+    verify_password_with_migration,
     get_password_hash,
     decode_token,
 )
@@ -49,7 +50,9 @@ def build_user_response(user: User) -> UserResponse:
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: DbSession,
 ) -> Token:
@@ -64,13 +67,8 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check password using SHA256 with salt (must match UserService._hash_password)
-    import hashlib
-    salt = "labtrack_salt_"
-    sha256_hash = hashlib.sha256(f"{salt}{form_data.password}".encode()).hexdigest()
-    password_valid = sha256_hash == user.password_hash
-
-    if not password_valid:
+    # Verify password (bcrypt first, SHA256 fallback with transparent re-hash)
+    if not verify_password_with_migration(form_data.password, user.password_hash, user, db):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -174,24 +172,21 @@ async def update_profile(
 
 
 @router.put("/me/password")
+@limiter.limit("5/minute")
 async def change_password(
+    request: Request,
     body: ChangePassword,
     current_user: CurrentUser,
     db: DbSession,
 ) -> dict:
     """Change the current user's password."""
-    import hashlib
-
-    salt = "labtrack_salt_"
-    current_hash = hashlib.sha256(f"{salt}{body.current_password}".encode()).hexdigest()
-    if current_hash != current_user.password_hash:
+    if not verify_password_with_migration(body.current_password, current_user.password_hash, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect",
         )
 
-    new_hash = hashlib.sha256(f"{salt}{body.new_password}".encode()).hexdigest()
-    current_user.password_hash = new_hash
+    current_user.password_hash = get_password_hash(body.new_password)
     db.commit()
 
     return {"message": "Password changed successfully"}
@@ -279,7 +274,9 @@ async def logout() -> dict:
 
 
 @router.post("/verify-override", response_model=VerifyOverrideResponse)
+@limiter.limit("10/minute")
 async def verify_override(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: DbSession,
 ) -> VerifyOverrideResponse:
@@ -289,8 +286,6 @@ async def verify_override(
     Used when a user needs to override a restriction (e.g., submitting without PDF).
     Only admin or qc_manager roles are allowed to override.
     """
-    import hashlib
-
     # Find user by username
     user = db.query(User).filter(User.username == form_data.username).first()
 
@@ -302,12 +297,8 @@ async def verify_override(
             message="Invalid credentials",
         )
 
-    # Check password using SHA256 with salt (must match UserService._hash_password)
-    salt = "labtrack_salt_"
-    sha256_hash = hashlib.sha256(f"{salt}{form_data.password}".encode()).hexdigest()
-    password_valid = sha256_hash == user.password_hash
-
-    if not password_valid:
+    # Verify password (bcrypt first, SHA256 fallback with transparent re-hash)
+    if not verify_password_with_migration(form_data.password, user.password_hash, user, db):
         return VerifyOverrideResponse(
             valid=False,
             user_id=None,

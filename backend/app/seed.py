@@ -1,7 +1,6 @@
 """Database seeding for first-time startup."""
 
 import csv
-import hashlib
 from pathlib import Path
 
 from sqlalchemy import text
@@ -9,15 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.models import User, LabTestType, Product
 from app.models.enums import UserRole
+from app.core.security import get_password_hash
 from app.utils.logger import logger
 
 SEED_TESTS_CSV = Path(__file__).parent.parent / "seed_tests.csv"
 PRODUCT_CSV = Path(__file__).parent.parent.parent / "product_seed_data.csv"
-
-
-def _hash_password(password: str) -> str:
-    """Hash a password using SHA256 with the application salt."""
-    return hashlib.sha256(f"labtrack_salt_{password}".encode()).hexdigest()
 
 
 def _build_users() -> list[User]:
@@ -27,7 +22,7 @@ def _build_users() -> list[User]:
             username="admin",
             email="admin@labtrack.com",
             role=UserRole.ADMIN,
-            password_hash=_hash_password("admin123"),
+            password_hash=get_password_hash("admin123"),
             active=True,
             full_name="Greg Simek",
             title="President",
@@ -36,7 +31,7 @@ def _build_users() -> list[User]:
             username="qcmanager",
             email="qc@labtrack.com",
             role=UserRole.QC_MANAGER,
-            password_hash=_hash_password("qc123"),
+            password_hash=get_password_hash("qc123"),
             active=True,
             full_name="Tatyana Villegas",
             title="Quality Assurance Manager",
@@ -45,7 +40,7 @@ def _build_users() -> list[User]:
             username="labtech",
             email="lab@labtrack.com",
             role=UserRole.LAB_TECH,
-            password_hash=_hash_password("lab123"),
+            password_hash=get_password_hash("lab123"),
             active=True,
         ),
     ]

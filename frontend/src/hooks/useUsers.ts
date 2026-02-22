@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { usersApi, type UserUpdate, type UserCreateData } from "@/api/users"
 import { authApi } from "@/api/client"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 // Query keys
 export const userKeys = {
@@ -42,6 +44,9 @@ export function useUpdateUser() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.all })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update user"))
+    },
   })
 }
 
@@ -55,6 +60,9 @@ export function useCreateUser() {
     mutationFn: (data: UserCreateData) => usersApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.list() })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create user"))
     },
   })
 }
@@ -70,6 +78,9 @@ export function useDeleteUser() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.list() })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete user"))
+    },
   })
 }
 
@@ -80,5 +91,8 @@ export function useChangePassword() {
   return useMutation({
     mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
       authApi.changePassword(currentPassword, newPassword),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to change password"))
+    },
   })
 }

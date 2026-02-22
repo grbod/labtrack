@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import {
   labTestTypesApi,
   type LabTestTypeFilters,
@@ -6,6 +7,7 @@ import {
   type UpdateLabTestTypeData,
   type BulkImportLabTestTypeRow,
 } from "@/api/labTestTypes"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 export const labTestTypeKeys = {
   all: ["labTestTypes"] as const,
@@ -47,6 +49,9 @@ export function useCreateLabTestType() {
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.lists() })
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create lab test type"))
+    },
   })
 }
 
@@ -61,6 +66,9 @@ export function useUpdateLabTestType() {
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.detail(variables.id) })
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update lab test type"))
+    },
   })
 }
 
@@ -73,6 +81,9 @@ export function useDeleteLabTestType() {
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.lists() })
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete lab test type"))
+    },
   })
 }
 
@@ -84,6 +95,9 @@ export function useBulkImportLabTestTypes() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.lists() })
       queryClient.invalidateQueries({ queryKey: labTestTypeKeys.categories() })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to bulk import lab test types"))
     },
   })
 }

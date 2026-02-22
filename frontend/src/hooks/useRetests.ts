@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { retestsApi } from "@/api/retests"
 import { lotKeys } from "@/hooks/useLots"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { CreateRetestRequestData } from "@/types"
 
 /** Invalidate all lot-related queries after retest changes */
@@ -69,6 +71,9 @@ export function useCreateRetestRequest() {
         queryClient.invalidateQueries({ queryKey: retestKeys.testResultHistory(testResultId) })
       })
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create retest request"))
+    },
   })
 }
 
@@ -87,6 +92,9 @@ export function useCompleteRetestRequest() {
       // Invalidate lot data to update has_pending_retest flag
       invalidateLotQueries(queryClient, result.lot_id)
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to complete retest request"))
+    },
   })
 }
 
@@ -96,5 +104,8 @@ export function useCompleteRetestRequest() {
 export function useDownloadRetestPdf() {
   return useMutation({
     mutationFn: (requestId: number) => retestsApi.downloadPdf(requestId),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download retest PDF"))
+    },
   })
 }

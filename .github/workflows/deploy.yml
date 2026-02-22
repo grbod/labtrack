@@ -107,7 +107,7 @@ jobs:
             source venv/bin/activate
             pip install -r requirements.txt --quiet
 
-            # Run database migrations (init_db creates tables if needed)
+            # Run database migrations (auto-stamps on first Alembic deploy)
             python -c "from app.database import init_db; init_db()"
 
             # Update systemd service file if changed

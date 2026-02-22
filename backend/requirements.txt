@@ -4,7 +4,7 @@ uvicorn[standard]>=0.27.0
 sqlalchemy>=2.0.0
 alembic>=1.12.0
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
 python-multipart>=0.0.6
 
 # Document generation
@@ -38,6 +38,9 @@ black>=23.0.0
 flake8>=6.0.0
 isort>=5.12.0
 mypy>=1.5.0
+
+# Rate limiting
+slowapi>=0.1.9
 
 # Utilities
 python-dotenv>=1.0.0

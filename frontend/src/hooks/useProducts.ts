@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import {
   productsApi,
   type ProductFilters,
@@ -10,6 +11,7 @@ import {
   type UpdateTestSpecData,
   type BulkImportProductRow,
 } from "@/api/products"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 
 export const productKeys = {
   all: ["products"] as const,
@@ -49,6 +51,9 @@ export function useCreateProduct() {
 
   return useMutation({
     mutationFn: (data: CreateProductData) => productsApi.create(data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create product"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
       queryClient.invalidateQueries({ queryKey: productKeys.brands() })
@@ -62,6 +67,9 @@ export function useUpdateProduct() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: UpdateProductData }) =>
       productsApi.update(id, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update product"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
       queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.id) })
@@ -75,6 +83,9 @@ export function useArchiveProduct() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       productsApi.archive(id, { reason }),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to archive product"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ["archivedProducts"] })
@@ -87,6 +98,9 @@ export function useRestoreProduct() {
 
   return useMutation({
     mutationFn: (id: number) => productsApi.restore(id),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to restore product"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ["archivedProducts"] })
@@ -101,6 +115,9 @@ export function useDeleteProduct() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       productsApi.archive(id, { reason }),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete product"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
     },
@@ -122,6 +139,9 @@ export function useCreateSize() {
   return useMutation({
     mutationFn: ({ productId, data }: { productId: number; data: CreateSizeData }) =>
       productsApi.createSize(productId, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create size"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
@@ -136,6 +156,9 @@ export function useUpdateSize() {
   return useMutation({
     mutationFn: ({ productId, sizeId, data }: { productId: number; sizeId: number; data: UpdateSizeData }) =>
       productsApi.updateSize(productId, sizeId, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update size"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
@@ -150,6 +173,9 @@ export function useDeleteSize() {
   return useMutation({
     mutationFn: ({ productId, sizeId }: { productId: number; sizeId: number }) =>
       productsApi.deleteSize(productId, sizeId),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete size"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.sizes(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
@@ -181,6 +207,9 @@ export function useCreateTestSpec() {
   return useMutation({
     mutationFn: ({ productId, data }: { productId: number; data: CreateTestSpecData }) =>
       productsApi.createTestSpec(productId, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to create test spec"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.testSpecs(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
@@ -194,6 +223,9 @@ export function useUpdateTestSpec() {
   return useMutation({
     mutationFn: ({ productId, specId, data }: { productId: number; specId: number; data: UpdateTestSpecData }) =>
       productsApi.updateTestSpec(productId, specId, data),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to update test spec"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.testSpecs(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
@@ -207,6 +239,9 @@ export function useDeleteTestSpec() {
   return useMutation({
     mutationFn: ({ productId, specId }: { productId: number; specId: number }) =>
       productsApi.deleteTestSpec(productId, specId),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete test spec"))
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: productKeys.testSpecs(variables.productId) })
       queryClient.invalidateQueries({ queryKey: productKeys.detail(variables.productId) })
@@ -219,6 +254,9 @@ export function useBulkImportProducts() {
 
   return useMutation({
     mutationFn: (rows: BulkImportProductRow[]) => productsApi.bulkImport(rows),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to bulk import products"))
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productKeys.lists() })
       queryClient.invalidateQueries({ queryKey: productKeys.brands() })

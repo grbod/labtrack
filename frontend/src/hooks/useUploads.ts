@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { uploadsApi, type UploadResponse } from "@/api/uploads"
+import { extractApiErrorMessage } from "@/lib/api-utils"
 import { testResultKeys } from "./useTestResults"
 import { lotKeys } from "./useLots"
 
@@ -21,6 +23,9 @@ export function useUploadPdf() {
         queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(variables.lotId) })
       }
     },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to upload PDF"))
+    },
   })
 }
 
@@ -34,6 +39,9 @@ export function useDeleteUpload() {
     mutationFn: (filename: string) => uploadsApi.deleteUpload(filename),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: testResultKeys.lists() })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to delete upload"))
     },
   })
 }

@@ -1,15 +1,13 @@
 """Security utilities for authentication and authorization."""
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
+import bcrypt as _bcrypt
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 
 from app.config import settings
-
-# Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Token settings
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
@@ -17,13 +15,32 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a plain password against a bcrypt hash."""
+    return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def get_password_hash(password: str) -> str:
     """Hash a password using bcrypt."""
-    return pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+
+# Legacy SHA256 salt — used only for migration from old hashes
+_SHA256_SALT = "labtrack_salt_"
+
+
+def verify_password_with_migration(plain_password: str, hashed_password: str, user, db) -> bool:
+    """Check bcrypt first, then SHA256 fallback. Re-hash on SHA256 match."""
+    # bcrypt hashes always start with $2b$ (or $2a$)
+    if hashed_password.startswith(("$2b$", "$2a$")):
+        return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    # SHA256 fallback for unmigrated passwords
+    sha256_hash = hashlib.sha256(f"{_SHA256_SALT}{plain_password}".encode()).hexdigest()
+    if sha256_hash == hashed_password:
+        # Transparently upgrade to bcrypt
+        user.password_hash = get_password_hash(plain_password)
+        db.commit()
+        return True
+    return False
 
 
 def create_access_token(

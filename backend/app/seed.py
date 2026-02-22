@@ -6,13 +6,14 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import User, LabTestType, Product
+from app.models import User, LabTestType, Product, ProductTestSpecification
 from app.models.enums import UserRole
 from app.core.security import get_password_hash
 from app.utils.logger import logger
 
 SEED_TESTS_CSV = Path(__file__).parent.parent / "seed_tests.csv"
 PRODUCT_CSV = Path(__file__).parent.parent.parent / "product_seed_data.csv"
+PRODUCT_TEST_MAPPING_CSV = Path(__file__).parent.parent / "product_test_mapping.csv"
 
 
 def _build_users() -> list[User]:
@@ -99,6 +100,86 @@ def _load_products() -> list[Product]:
     return products
 
 
+def _load_product_test_specs(session: Session) -> int:
+    """Load product-test specifications from the mapping CSV.
+
+    Must be called AFTER products and lab test types have been committed,
+    since we look them up by name to resolve IDs. Does NOT commit -- the
+    caller is responsible for committing the session.
+
+    Returns the number of specs added to the session.
+    """
+    if not PRODUCT_TEST_MAPPING_CSV.exists():
+        logger.warning(
+            f"Product test mapping CSV not found at {PRODUCT_TEST_MAPPING_CSV}, "
+            "skipping product test specs"
+        )
+        return 0
+
+    # Build lookup dicts: (brand, product_name, flavor) -> product_id
+    products = session.query(Product).all()
+    product_lookup: dict[tuple, int] = {}
+    for p in products:
+        key = (p.brand.lower(), p.product_name.lower(), (p.flavor or "").lower())
+        product_lookup[key] = p.id
+
+    # Build lookup dict: test_name -> lab_test_type_id
+    test_types = session.query(LabTestType).all()
+    test_lookup: dict[str, int] = {t.test_name.lower(): t.id for t in test_types}
+
+    specs: list[ProductTestSpecification] = []
+    skipped = 0
+
+    with open(PRODUCT_TEST_MAPPING_CSV, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            tests_str = row.get("Required Tests", "").strip()
+            specs_str = row.get("Specifications", "").strip()
+            if not tests_str:
+                continue
+
+            brand = row["Brand"].strip()
+            product_name = row["Product"].strip()
+            flavor = row.get("Flavor", "").strip()
+
+            product_key = (brand.lower(), product_name.lower(), flavor.lower())
+            product_id = product_lookup.get(product_key)
+            if product_id is None:
+                logger.warning(
+                    f"Product not found for spec seeding: "
+                    f"brand={brand!r}, product={product_name!r}, flavor={flavor!r}"
+                )
+                skipped += 1
+                continue
+
+            test_names = [t.strip() for t in tests_str.split(";")]
+            specifications = [s.strip() for s in specs_str.split(";")] if specs_str else []
+
+            for i, test_name in enumerate(test_names):
+                test_id = test_lookup.get(test_name.lower())
+                if test_id is None:
+                    logger.warning(f"Test type '{test_name}' not found, skipping")
+                    continue
+
+                spec_value = specifications[i] if i < len(specifications) else "TBD"
+                specs.append(
+                    ProductTestSpecification(
+                        product_id=product_id,
+                        lab_test_type_id=test_id,
+                        specification=spec_value,
+                        is_required=True,
+                    )
+                )
+
+    if specs:
+        session.add_all(specs)
+
+    if skipped:
+        logger.warning(f"Skipped {skipped} rows with unmatched products")
+
+    return len(specs)
+
+
 def seed_if_empty(engine) -> None:
     """Seed the database with default data if it has not been seeded yet.
 
@@ -110,7 +191,15 @@ def seed_if_empty(engine) -> None:
     try:
         user_count = session.execute(text("SELECT COUNT(*) FROM users")).scalar()
         if user_count > 0:
-            logger.info("Database already seeded, skipping")
+            # Check if product test specs need backfill (e.g. after a partial seed)
+            spec_count = session.execute(
+                text("SELECT COUNT(*) FROM product_test_specifications")
+            ).scalar()
+            if spec_count == 0:
+                logger.info("No product test specs found, backfilling...")
+                created = _load_product_test_specs(session)
+                session.commit()
+                logger.info(f"Backfilled {created} product test specs")
             return
 
         users = _build_users()
@@ -123,10 +212,15 @@ def seed_if_empty(engine) -> None:
 
         session.commit()
 
+        # Load product-test specs after products and test types are committed
+        spec_count = _load_product_test_specs(session)
+        session.commit()
+
         logger.info(
             f"Database seeded: {len(users)} users, "
             f"{len(test_types)} lab test types, "
-            f"{len(products)} products"
+            f"{len(products)} products, "
+            f"{spec_count} product test specs"
         )
     except Exception:
         session.rollback()

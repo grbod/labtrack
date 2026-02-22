@@ -234,7 +234,7 @@ export function SampleModal({
   )
 
   // Fetch lab test types for additional tests autocomplete
-  const { data: labTestTypesData } = useLabTestTypes({ page_size: 200 })
+  const { data: labTestTypesData } = useLabTestTypes({ page_size: 500 })
 
   // Fetch retest requests for original value display
   const { data: retestData } = useRetestRequests(lot?.id ?? 0)

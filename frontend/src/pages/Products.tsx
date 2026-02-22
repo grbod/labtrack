@@ -296,7 +296,7 @@ export function ProductsPage() {
 
   // Test specs hooks
   const { data: testSpecs } = useProductTestSpecs(selectedProductForSpecs?.id ?? 0)
-  const { data: labTestTypes } = useLabTestTypes({ page_size: 100 })
+  const { data: labTestTypes } = useLabTestTypes({ page_size: 500 })
   const createTestSpecMutation = useCreateTestSpec()
   const updateTestSpecMutation = useUpdateTestSpec()
   const deleteTestSpecMutation = useDeleteTestSpec()

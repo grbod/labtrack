@@ -17,6 +17,7 @@ class LabInfoUpdate(BaseModel):
     state: str = Field("", max_length=50)
     zip_code: str = Field("", max_length=20)
     require_pdf_for_submission: Optional[bool] = None
+    show_spec_preview_on_sample: Optional[bool] = None
 
 
 class LabInfoResponse(BaseModel):
@@ -34,6 +35,7 @@ class LabInfoResponse(BaseModel):
     signature_url: Optional[str] = None  # Computed full URL for signature
     signer_name: Optional[str] = None
     require_pdf_for_submission: bool = True
+    show_spec_preview_on_sample: bool = True
     created_at: datetime
     updated_at: Optional[datetime] = None
 

@@ -51,6 +51,7 @@ import {
   useUpdateTestSpec,
   useDeleteTestSpec,
 } from "@/hooks/useProducts"
+import { productsApi } from "@/api/products"
 import { useAuthStore } from "@/store/auth"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -548,6 +549,34 @@ export function ProductsPage() {
     setEditingSpecCell(null)
     setIsTestSpecsDialogOpen(true)
   }
+
+  // Handle ?editSpecs=<productId> URL param (from Create Sample spec preview)
+  useEffect(() => {
+    const editSpecsId = searchParams.get('editSpecs')
+    if (!editSpecsId || isLoading) return
+
+    const productId = parseInt(editSpecsId, 10)
+    if (isNaN(productId)) {
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    // Try current page first, fall back to API fetch
+    const localProduct = data?.items?.find(p => p.id === productId)
+    if (localProduct) {
+      openTestSpecsDialog(localProduct)
+      setSearchParams({}, { replace: true })
+    } else {
+      productsApi.get(productId).then(product => {
+        openTestSpecsDialog(product)
+      }).catch(() => {
+        // Product not found, silently ignore
+      }).finally(() => {
+        setSearchParams({}, { replace: true })
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, isLoading, data?.items])
 
   // Handler for selecting test type in add row
   const handleAddRowSelectTestType = (labTest: LabTestType) => {

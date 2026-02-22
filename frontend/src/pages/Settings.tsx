@@ -65,6 +65,7 @@ export function SettingsPage() {
   const [state, setState] = useState("")
   const [zipCode, setZipCode] = useState("")
   const [requirePdfForSubmission, setRequirePdfForSubmission] = useState(true)
+  const [showSpecPreviewOnSample, setShowSpecPreviewOnSample] = useState(true)
   const [labInfoDirty, setLabInfoDirty] = useState(false)
   const [labInfoAutoSaveSuccess, setLabInfoAutoSaveSuccess] = useState(false)
 
@@ -195,6 +196,7 @@ export function SettingsPage() {
       setState(labInfo.state)
       setZipCode(labInfo.zip_code)
       setRequirePdfForSubmission(labInfo.require_pdf_for_submission)
+      setShowSpecPreviewOnSample(labInfo.show_spec_preview_on_sample)
       setLabInfoDirty(false) // Reset dirty flag when data syncs from API
     }
   }, [labInfo])
@@ -241,6 +243,7 @@ export function SettingsPage() {
         state,
         zip_code: zipCode,
         require_pdf_for_submission: requirePdfForSubmission,
+        show_spec_preview_on_sample: showSpecPreviewOnSample,
       })
 
       setLabInfoDirty(false) // Reset dirty flag on successful save
@@ -1108,6 +1111,25 @@ export function SettingsPage() {
                   </Label>
                   <p className="text-[11px] text-slate-500">
                     When enabled, at least one lab PDF must be attached before submitting for approval. Admin or QC Manager can override.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Switch
+                  id="showSpecPreview"
+                  checked={showSpecPreviewOnSample}
+                  onCheckedChange={(checked) => {
+                    setShowSpecPreviewOnSample(checked)
+                    setLabInfoDirty(true)
+                  }}
+                  className="mt-0.5"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="showSpecPreview" className="text-[13px] font-semibold text-slate-700">
+                    Show Test Spec Preview on Sample Creation
+                  </Label>
+                  <p className="text-[11px] text-slate-500">
+                    Shows a slide-in panel with the product's test specifications when a product is selected on the Create Sample page.
                   </p>
                 </div>
               </div>

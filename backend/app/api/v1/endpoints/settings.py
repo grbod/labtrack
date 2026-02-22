@@ -174,6 +174,7 @@ def _build_lab_info_response(lab_info) -> LabInfoResponse:
         signature_url=lab_info_service.get_signature_url(lab_info.signature_path),
         signer_name=lab_info.signer_name,
         require_pdf_for_submission=lab_info.require_pdf_for_submission,
+        show_spec_preview_on_sample=lab_info.show_spec_preview_on_sample,
         created_at=lab_info.created_at,
         updated_at=lab_info.updated_at,
     )
@@ -251,6 +252,7 @@ async def update_lab_info(
         state=lab_info_in.state,
         zip_code=lab_info_in.zip_code,
         require_pdf_for_submission=lab_info_in.require_pdf_for_submission,
+        show_spec_preview_on_sample=lab_info_in.show_spec_preview_on_sample,
         user_id=current_user.id,
     )
     return _build_lab_info_response(lab_info)

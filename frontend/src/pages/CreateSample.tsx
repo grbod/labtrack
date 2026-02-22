@@ -23,10 +23,12 @@ import {
 } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ProductAutocomplete } from "@/components/form/ProductAutocomplete"
+import { SpecPreviewPanel } from "@/components/domain/SpecPreviewPanel"
 
 import { useProducts } from "@/hooks/useProducts"
 import { useCreateLot, useCreateSublotsBulk, useLotWithSpecs } from "@/hooks/useLots"
 import { useDownloadLotDaaneCoc, useDownloadLotDaaneCocPdf } from "@/hooks/useDaaneCoc"
+import { useLabInfo } from "@/hooks/useLabInfo"
 import type { Product, LotType } from "@/types"
 
 // User-selectable lot types (excludes sublot which is created automatically)
@@ -137,6 +139,16 @@ export function CreateSamplePage() {
   const [selectedDaaneTestIds, setSelectedDaaneTestIds] = useState<number[]>([])
   const [initializedDaaneSelection, setInitializedDaaneSelection] = useState(false)
   const [daaneSpecialInstructions, setDaaneSpecialInstructions] = useState("")
+
+  // Spec preview panel state
+  const [specPreviewProduct, setSpecPreviewProduct] = useState<Product | null>(null)
+  const { labInfo } = useLabInfo()
+
+  const showSpecPreview = useCallback((product: Product) => {
+    if (labInfo?.show_spec_preview_on_sample) {
+      setSpecPreviewProduct(product)
+    }
+  }, [labInfo?.show_spec_preview_on_sample])
 
   // Helper to format flavor and size for success dialog
   const formatFlavorSize = (product: { flavor?: string | null; size?: string | null }) => {
@@ -590,6 +602,7 @@ export function CreateSamplePage() {
                   : cp
                 )
               )
+              showSpecPreview(product)
             }}
             onChange={(text) => {
               // Clear product_id when user starts typing (always editable)
@@ -1054,6 +1067,7 @@ export function CreateSamplePage() {
                         onSelect={(product) => {
                           setSelectedProducts([{ product }])
                           setStandardProductText(product.display_name)
+                          showSpecPreview(product)
                         }}
                         onChange={(text) => {
                           setStandardProductText(text)
@@ -1251,6 +1265,7 @@ export function CreateSamplePage() {
                           onSelect={(product) => {
                             setSelectedProducts([{ product }])
                             setParentProductText(product.display_name)
+                            showSpecPreview(product)
                           }}
                           onChange={(text) => {
                             setParentProductText(text)
@@ -1947,6 +1962,12 @@ export function CreateSamplePage() {
         </DialogContent>
       </Dialog>
       </motion.div>
+
+      <SpecPreviewPanel
+        product={specPreviewProduct}
+        onDismiss={() => setSpecPreviewProduct(null)}
+        onChangeSpecs={(id) => window.open(`/products?editSpecs=${id}`, '_blank')}
+      />
     </div>
   )
 }

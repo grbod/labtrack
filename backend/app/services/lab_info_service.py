@@ -68,6 +68,7 @@ class LabInfoService(BaseService[LabInfo]):
         state: str,
         zip_code: str,
         require_pdf_for_submission: bool = None,
+        show_spec_preview_on_sample: bool = None,
         user_id: int = None,
     ) -> LabInfo:
         """
@@ -105,6 +106,8 @@ class LabInfoService(BaseService[LabInfo]):
 
         if require_pdf_for_submission is not None:
             update_data["require_pdf_for_submission"] = require_pdf_for_submission
+        if show_spec_preview_on_sample is not None:
+            update_data["show_spec_preview_on_sample"] = show_spec_preview_on_sample
 
         return self.update(
             db=db,

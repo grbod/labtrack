@@ -35,6 +35,7 @@ class LabInfo(BaseModel):
 
     # Submission settings
     require_pdf_for_submission = Column(Boolean, nullable=False, default=True)  # Require PDF before submit
+    show_spec_preview_on_sample = Column(Boolean, nullable=False, default=True)  # Show spec preview on sample creation
 
     # Default values
     DEFAULT_COMPANY_NAME = "Your Company Name"

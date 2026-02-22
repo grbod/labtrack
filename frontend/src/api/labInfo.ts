@@ -13,6 +13,7 @@ export interface LabInfo {
   signature_url: string | null
   signer_name: string | null
   require_pdf_for_submission: boolean
+  show_spec_preview_on_sample: boolean
   created_at: string
   updated_at: string
 }
@@ -26,6 +27,7 @@ export interface LabInfoUpdate {
   state: string
   zip_code: string
   require_pdf_for_submission?: boolean
+  show_spec_preview_on_sample?: boolean
 }
 
 export const labInfoApi = {

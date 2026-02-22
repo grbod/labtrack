@@ -26,7 +26,7 @@ async def list_lab_test_types(
     db: DbSession,
     current_user: CurrentUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
     category: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -251,7 +251,7 @@ async def list_archived_lab_test_types(
     db: DbSession,
     current_user: AdminUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
 ) -> LabTestTypeListResponse:
     """List archived lab test types (admin only)."""

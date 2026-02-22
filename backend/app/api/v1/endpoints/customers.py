@@ -22,7 +22,7 @@ async def list_customers(
     db: DbSession,
     current_user: CurrentUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
     include_inactive: bool = False,
 ) -> CustomerListResponse:
@@ -240,7 +240,7 @@ async def list_archived_customers(
     db: DbSession,
     current_user: AdminUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
 ) -> CustomerListResponse:
     """List archived customers (admin only)."""

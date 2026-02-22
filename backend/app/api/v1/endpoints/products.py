@@ -54,7 +54,7 @@ async def list_products(
     db: DbSession,
     current_user: CurrentUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
     brand: Optional[str] = None,
     include_archived: bool = Query(False, description="Include archived products"),
@@ -306,7 +306,7 @@ async def list_archived_products(
     db: DbSession,
     current_user: AdminUser,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=500),
     search: Optional[str] = None,
 ) -> ProductListResponse:
     """List archived products (admin only)."""

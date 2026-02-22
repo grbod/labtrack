@@ -135,7 +135,8 @@ The "Sample Tracker" page displays all submitted samples/lots with their workflo
 
 ### Core Models
 - **User**: Authentication and roles
-- **Product**: Standardized product catalog
+- **Product**: Standardized product catalog (204 products, 40 brands)
+- **ProductTestSpecification**: Links products to required lab tests with acceptance criteria (954 specs seeded from legacy COA register)
 - **Lot**: Production lots with parent/sublot relationships
 - **TestResult**: Lab test results with approval status
 - **ParsingQueue**: PDF parsing queue and status
@@ -147,12 +148,35 @@ The "Sample Tracker" page displays all submitted samples/lots with their workflo
 - **LotStatus**: PENDING, TESTED, APPROVED, RELEASED, REJECTED
 - **TestResultStatus**: DRAFT, REVIEWED, APPROVED
 
+## Seed Data
+
+The database is seeded on first startup via `backend/app/seed.py`:
+- **Users**: 3 default users (admin, qcmanager, labtech)
+- **Lab test types**: 235 types from `backend/seed_tests.csv`
+- **Products**: 204 products from `product_seed_data.csv`
+- **Product test specs**: 954 specs from `backend/product_test_mapping.csv` (links products to their required tests with acceptance criteria like "Negative", "< 10,000 CFU/g", "< 0.5 ppm")
+
+Seed files:
+- `product_seed_data.csv` - Brand, Product, Flavor columns
+- `backend/seed_tests.csv` - Lab test type definitions
+- `backend/product_test_mapping.csv` - Product-to-test mappings with specifications (derived from legacy `newcoaregister.csv`)
+
+The seed has a **backfill mechanism**: if the DB has users but no product test specs (e.g. after a partial seed failure), `seed_if_empty()` will automatically populate the missing specs on next startup.
+
+For existing databases, use the standalone script:
+```bash
+cd backend && python scripts/seed_product_test_specs.py
+```
+
 ## Testing
 
-Run tests with coverage:
+Run tests with coverage (use the venv Python):
 ```bash
-pytest tests/ -v --cov=src --cov-report=html
+cd backend
+.venv/bin/python -m pytest tests/ -v
 ```
+
+Note: 5 test files have pre-existing import errors (`slowapi` not installed, `test_result_service` module missing) — these are unrelated to seed functionality. All other 274 tests pass.
 
 ## Development Guidelines
 
@@ -161,6 +185,14 @@ pytest tests/ -v --cov=src --cov-report=html
 3. **Add audit trails** - Use BaseService for automatic audit logging
 4. **Validate user permissions** - Check roles before sensitive operations
 5. **Handle errors gracefully** - Show user-friendly messages in the UI
+
+## Deployment
+
+- **VPS**: 155.138.211.71 (Vultr)
+- **Project path**: `/opt/labtrack`
+- **Backend**: uvicorn on port 8009 at `/opt/labtrack/backend`
+- **Database**: `/opt/labtrack/backend/labtrack.db`
+- **Auto-deploy**: pushes to `main` are automatically pulled to VPS
 
 ## Future Enhancements
 

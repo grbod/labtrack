@@ -73,9 +73,9 @@ source venv/bin/activate
 python -c "from app.database import init_db; init_db()" 2>/dev/null || echo "  Database init will run on first start"
 deactivate
 
-# Create data, uploads, and COAs directories
-mkdir -p "${BACKEND_DIR}/data" "${BACKEND_DIR}/uploads" "${BACKEND_DIR}/COAs"
-chown -R "${APP_NAME}:${APP_NAME}" "${BACKEND_DIR}/data" "${BACKEND_DIR}/uploads" "${BACKEND_DIR}/COAs"
+# Create data, uploads, COAs, and exports directories
+mkdir -p "${BACKEND_DIR}/data" "${BACKEND_DIR}/uploads" "${BACKEND_DIR}/COAs" "${BACKEND_DIR}/exports"
+chown -R "${APP_NAME}:${APP_NAME}" "${BACKEND_DIR}/data" "${BACKEND_DIR}/uploads" "${BACKEND_DIR}/COAs" "${BACKEND_DIR}/exports"
 
 # 6. Create web directory for frontend
 echo "[6/8] Setting up web directory..."

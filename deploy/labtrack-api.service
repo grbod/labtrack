@@ -53,6 +53,7 @@ ProtectHome=true
 ReadWritePaths=/opt/labtrack/backend/data
 ReadWritePaths=/opt/labtrack/backend/uploads
 ReadWritePaths=/opt/labtrack/backend/COAs
+ReadWritePaths=/opt/labtrack/backend/exports
 ReadWritePaths=/var/log/labtrack
 
 # Logging

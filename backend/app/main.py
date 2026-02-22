@@ -3,13 +3,15 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.config import settings
 from app.database import init_db
+from app.utils.logger import logger
 
 
 @asynccontextmanager
@@ -54,6 +56,18 @@ uploads_path = settings.upload_path
 if not os.path.exists(uploads_path):
     os.makedirs(uploads_path, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Prevent stack traces from leaking to clients in production."""
+    if settings.debug:
+        raise exc
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/api/health")

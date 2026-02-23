@@ -132,9 +132,18 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
   const [pdfDataList, setPdfDataList] = useState<PdfData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [partialError, setPartialError] = useState<string | null>(null)
   const [containerWidth, setContainerWidth] = useState<number>(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+  const objectUrlsRef = useRef<string[]>([])
+
+  const revokeTrackedUrls = useCallback(() => {
+    for (const url of objectUrlsRef.current) {
+      URL.revokeObjectURL(url)
+    }
+    objectUrlsRef.current = []
+  }, [])
 
   // Track container width with ResizeObserver using callback ref pattern
   const setContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -183,41 +192,84 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
   // Fetch all PDFs
   useEffect(() => {
     if (sourcePdfs.length === 0) {
+      revokeTrackedUrls()
+      setPdfDataList([])
+      setError(null)
+      setPartialError(null)
       setLoading(false)
       return
     }
 
+    let cancelled = false
+
     const fetchAllPdfs = async () => {
       setLoading(true)
       setError(null)
+      setPartialError(null)
 
       try {
-        const results: PdfData[] = []
-
-        for (const filename of sourcePdfs) {
+        const promises = sourcePdfs.map(async (filename) => {
           const blob = await releaseApi.getSourcePdfBlob(lotId, productId, filename)
           const url = URL.createObjectURL(blob)
-          results.push({ filename, url, numPages: 0 })
+          return { filename, url, numPages: 0 } as PdfData
+        })
+
+        const settled = await Promise.allSettled(promises)
+        if (cancelled) {
+          settled.forEach((result) => {
+            if (result.status === "fulfilled" && result.value.url) {
+              URL.revokeObjectURL(result.value.url)
+            }
+          })
+          return
         }
 
-        setPdfDataList(results)
+        const succeeded: PdfData[] = []
+        const failed: string[] = []
+
+        settled.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            succeeded.push(result.value)
+          } else {
+            failed.push(sourcePdfs[index])
+          }
+        })
+
+        revokeTrackedUrls()
+        objectUrlsRef.current = succeeded.map((pdf) => pdf.url)
+        setPdfDataList(succeeded)
+
+        if (failed.length > 0) {
+          if (succeeded.length === 0) {
+            setError(`Failed to load ${failed.length} document(s)`)
+          } else {
+            setPartialError(`${failed.length} of ${sourcePdfs.length} documents failed to load`)
+          }
+        }
       } catch (err) {
+        if (cancelled) {
+          return
+        }
         setError(err instanceof Error ? err.message : "Failed to load PDFs")
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
 
-    fetchAllPdfs()
+    void fetchAllPdfs()
 
-    // Cleanup URLs on unmount
     return () => {
-      pdfDataList.forEach((pdf) => {
-        if (pdf.url) URL.revokeObjectURL(pdf.url)
-      })
+      cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lotId, productId, sourcePdfs])
+  }, [lotId, productId, sourcePdfs, revokeTrackedUrls])
+
+  useEffect(() => {
+    return () => {
+      revokeTrackedUrls()
+    }
+  }, [revokeTrackedUrls])
 
   const handleDocumentLoadSuccess = useCallback((index: number, numPages: number) => {
     setPdfDataList((prev) =>
@@ -274,6 +326,11 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
 
   return (
     <div ref={setContainerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
+      {partialError && (
+        <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+          {partialError}
+        </div>
+      )}
       {pdfDataList.map((pdf, pdfIndex) => (
         <div key={pdf.filename}>
           {/* Document separator with filename */}

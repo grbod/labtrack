@@ -1,11 +1,10 @@
 """Archive management endpoints for released COAs."""
 
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, List, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse, Response
 
 from app.dependencies import DbSession, CurrentUser
 from app.config import settings
@@ -95,7 +94,7 @@ async def download_archived_coa(
     id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """
     Download the COA PDF file for an archived release.
 
@@ -124,16 +123,18 @@ async def download_archived_coa(
             detail="COA PDF file not found in storage",
         )
 
-    # Get full path by prepending upload_path
-    full_path = settings.upload_path / release.coa_file_path
-
     # Generate filename from lot number
     filename = f"COA_{release.lot.lot_number}.pdf" if release.lot else f"COA_{release.id}.pdf"
 
-    return FileResponse(
-        path=str(full_path),
-        filename=filename,
+    if settings.storage_backend == "r2":
+        presigned_url = storage.get_presigned_url(release.coa_file_path)
+        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    content = storage.download(release.coa_file_path)
+    return Response(
+        content=content,
         media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
     )
 
 

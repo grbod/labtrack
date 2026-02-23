@@ -789,7 +789,15 @@ export function CreateSamplePage() {
       ),
       size: 35,
     }),
-  ], [editingCompositeCell, productsData, removeCompositeProduct])
+  ], [
+    compositeProducts,
+    editingCompositeCell,
+    isProductsLoading,
+    nextCompositeId,
+    productsData,
+    removeCompositeProduct,
+    showSpecPreview,
+  ])
 
   // TanStack Table instance for Composite Products
   const compositeTable = useReactTable({

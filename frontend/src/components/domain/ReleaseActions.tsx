@@ -65,6 +65,12 @@ export function ReleaseActions({
   const [showSuccessDialog, setShowSuccessDialog] = useState(false)
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
+  const [approveError, setApproveError] = useState<string | null>(null)
+
+  // Clear stale error when navigating between release items
+  useEffect(() => {
+    setApproveError(null)
+  }, [lotId, productId])
 
   const { data: customers = [] } = useCustomers()
   const { data: emailHistory = [] } = useEmailHistory(lotId, productId)
@@ -126,6 +132,7 @@ export function ReleaseActions({
   }
 
   const handleApproveConfirm = async () => {
+    setApproveError(null)
     try {
       await onApprove(customerId ?? undefined, notes || undefined)
       setShowApproveConfirm(false)
@@ -135,8 +142,9 @@ export function ReleaseActions({
       setShowApproveConfirm(false)
       const message = extractApiErrorMessage(error, "Failed to approve release", {
         403: "You don't have permission to approve releases. QC Manager or Admin role required.",
-        400: "Cannot approve release. Check Lab Info settings and user profile.",
+        400: "Cannot approve release. Check the error details below.",
       })
+      setApproveError(message)
       toast.error(message, { duration: 5000 })
     }
   }
@@ -358,6 +366,34 @@ export function ReleaseActions({
 
       {/* Action Buttons */}
       <div className="space-y-2 pt-2">
+        {approveError && (
+          <div className="rounded-md border border-red-200 bg-red-50 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-red-800">Release Failed</p>
+                <p className="mt-1 text-xs text-red-700">{approveError}</p>
+                {/signature/i.test(approveError) && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="mt-1 h-auto p-0 text-xs text-red-700 hover:text-red-800"
+                    onClick={() => window.open("/settings", "_blank")}
+                  >
+                    Upload signature in Settings
+                  </Button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="text-[11px] font-medium text-red-700 hover:text-red-800"
+                onClick={() => setApproveError(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {!isReleased && (
           <TooltipProvider>
             <Tooltip open={hasPendingRetest ? undefined : false}>

@@ -1,10 +1,9 @@
 """COA Release management endpoints."""
 
-from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import joinedload
 
 from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
@@ -41,13 +40,57 @@ release_service = ReleaseService()
 audit_service = AuditService()
 
 
+def _normalize_pdf_storage_key(filename: str) -> str:
+    """
+    Normalize PDF identifiers into a storage key.
+
+    Handles legacy values such as bare filenames or filesystem-like paths by
+    converting them to `pdfs/<name>.pdf` keys.
+    """
+    key = filename.lstrip("/\\")
+    marker = "pdfs/"
+    if marker in key:
+        return key[key.index(marker):]
+    return f"pdfs/{key}"
+
+
+def _get_pdf_from_storage(
+    storage_key: str,
+    *,
+    response_filename: str,
+    inline: bool,
+    missing_detail: str = "PDF file not found in storage",
+) -> Response:
+    """Fetch a PDF from configured storage and return an HTTP response."""
+    from app.services.storage_service import get_storage_service
+
+    storage = get_storage_service()
+    if not storage.exists(storage_key):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=missing_detail,
+        )
+
+    if settings.storage_backend == "r2":
+        presigned_url = storage.get_presigned_url(storage_key)
+        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    content = storage.download(storage_key)
+    disposition = "inline" if inline else "attachment"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"{disposition}; filename=\"{response_filename}\""},
+    )
+
+
 def _get_coa_pdf_response(
     db: DbSession,
     release_id: int,
     inline: bool = True,
-) -> FileResponse:
+) -> Response:
     """
-    Helper to get COA PDF as FileResponse.
+    Helper to get COA PDF from configured storage.
 
     Args:
         db: Database session
@@ -55,7 +98,7 @@ def _get_coa_pdf_response(
         inline: If True, display inline (preview). If False, force download.
 
     Returns:
-        FileResponse with the PDF
+        PDF response (local stream or R2 redirect)
     """
     # Verify the release exists
     coa_release = (
@@ -75,27 +118,11 @@ def _get_coa_pdf_response(
         # Get or generate the PDF (returns storage key, not full path)
         storage_key = coa_generation_service.get_or_generate_pdf(db, release_id)
 
-        # Get full path by prepending upload_path
-        full_path = settings.upload_path / storage_key
-
-        # Verify file exists
-        if not full_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="PDF file generation failed",
-            )
-
-        # Return PDF with appropriate disposition
-        disposition = "inline" if inline else "attachment"
         filename = f"COA_{coa_release.lot.lot_number}.pdf"
-
-        return FileResponse(
-            path=str(full_path),
-            media_type="application/pdf",
-            filename=filename,
-            headers={
-                "Content-Disposition": f"{disposition}; filename=\"{filename}\""
-            }
+        return _get_pdf_from_storage(
+            storage_key,
+            response_filename=filename,
+            inline=inline,
         )
 
     except ValueError as e:
@@ -121,7 +148,7 @@ async def preview_coa(
     release_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """Generate and return COA PDF for inline preview."""
     return _get_coa_pdf_response(db, release_id, inline=True)
 
@@ -131,7 +158,7 @@ async def download_coa(
     release_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """Download the COA PDF as an attachment."""
     return _get_coa_pdf_response(db, release_id, inline=False)
 
@@ -585,7 +612,7 @@ async def preview_coa_by_lot_product(
     product_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """
     Generate and return COA PDF preview for a lot+product pair.
     Works whether or not a COARelease record exists yet.
@@ -620,8 +647,6 @@ async def preview_coa_by_lot_product(
         )
 
     try:
-        from app.services.storage_service import get_storage_service
-
         # Check if COARelease exists with a valid file
         existing_release = (
             db.query(COARelease)
@@ -633,29 +658,21 @@ async def preview_coa_by_lot_product(
         )
 
         if existing_release and existing_release.coa_file_path:
-            storage = get_storage_service()
-            if storage.exists(existing_release.coa_file_path):
-                full_path = settings.upload_path / existing_release.coa_file_path
-                return FileResponse(
-                    path=str(full_path),
-                    media_type="application/pdf",
-                    filename=f"COA_{lot.lot_number}.pdf",
-                    headers={
-                        "Content-Disposition": f"inline; filename=\"COA_{lot.lot_number}.pdf\""
-                    }
+            return _get_pdf_from_storage(
+                existing_release.coa_file_path,
+                response_filename=f"COA_{lot.lot_number}.pdf",
+                inline=True,
+                missing_detail=(
+                    f"COA preview file for lot '{lot.lot_number}' and product '{product_id}' "
+                    "not found in storage"
                 )
-
+            )
         # Generate preview PDF on-the-fly (returns storage key)
         storage_key = coa_generation_service.generate_preview(db, lot_id, product_id)
-        full_path = settings.upload_path / storage_key
-
-        return FileResponse(
-            path=str(full_path),
-            media_type="application/pdf",
-            filename=f"COA_{lot.lot_number}_preview.pdf",
-            headers={
-                "Content-Disposition": f"inline; filename=\"COA_{lot.lot_number}_preview.pdf\""
-            }
+        return _get_pdf_from_storage(
+            storage_key,
+            response_filename=f"COA_{lot.lot_number}_preview.pdf",
+            inline=True,
         )
 
     except Exception as e:
@@ -671,14 +688,12 @@ async def download_coa_by_lot_product(
     product_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """
     Download COA PDF for a lot+product pair.
     Only works if a COARelease exists and has been released.
     """
     from app.models.enums import COAReleaseStatus
-    from app.services.storage_service import get_storage_service
-
     # Get the COARelease
     coa_release = (
         db.query(COARelease)
@@ -703,24 +718,10 @@ async def download_coa_by_lot_product(
             detail="COA PDF file path not set",
         )
 
-    # Use storage service to check if file exists
-    storage = get_storage_service()
-    if not storage.exists(coa_release.coa_file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="COA PDF file not found in storage",
-        )
-
-    # Get full path by prepending upload_path
-    full_path = settings.upload_path / coa_release.coa_file_path
-
-    return FileResponse(
-        path=str(full_path),
-        media_type="application/pdf",
-        filename=f"COA_{coa_release.lot.lot_number}.pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename=\"COA_{coa_release.lot.lot_number}.pdf\""
-        }
+    return _get_pdf_from_storage(
+        coa_release.coa_file_path,
+        response_filename=f"COA_{coa_release.lot.lot_number}.pdf",
+        inline=False,
     )
 
 
@@ -966,16 +967,16 @@ async def get_preview_data_by_lot_product(
     )
 
 
-@router.get("/{lot_id}/{product_id}/source-pdfs/{filename}")
+@router.get("/{lot_id}/{product_id}/source-pdfs/{filename:path}")
 async def get_source_pdf_by_lot_product(
     lot_id: int,
     product_id: int,
     filename: str,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """
-    Get a source PDF file for a lot+product pair.
+    Get a source PDF file for a lot+product pair from configured storage.
     """
     from app.models import LotProduct
 
@@ -999,27 +1000,20 @@ async def get_source_pdf_by_lot_product(
 
     # Get source PDFs
     source_pdfs = release_service.get_source_pdfs(db, lot_id)
-    if filename not in source_pdfs:
+    normalized_sources = {_normalize_pdf_storage_key(src) for src in source_pdfs}
+    storage_key = _normalize_pdf_storage_key(filename)
+    if storage_key not in normalized_sources:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Source PDF not found",
         )
 
-    # Build the file path
-    pdf_path = Path(settings.upload_path) / "pdfs" / filename
-    if not pdf_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source PDF file not found on disk",
-        )
-
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename=filename,
-        headers={
-            "Content-Disposition": f"inline; filename=\"{filename}\""
-        }
+    response_filename = storage_key.rsplit("/", 1)[-1]
+    return _get_pdf_from_storage(
+        storage_key,
+        response_filename=response_filename,
+        inline=True,
+        missing_detail=f"Source PDF file '{filename}' not found in storage",
     )
 
 
@@ -1306,17 +1300,17 @@ async def get_release(
     return response
 
 
-@router.get("/{id}/source-pdfs/{filename}")
+@router.get("/{id}/source-pdfs/{filename:path}")
 async def get_source_pdf(
     id: int,
     filename: str,
     db: DbSession,
     current_user: CurrentUser,
-) -> FileResponse:
+) -> Response:
     """
     Serve a source PDF file.
 
-    Downloads the PDF file from the uploads/pdfs directory.
+    Reads from configured storage (R2 or local filesystem).
     """
     # Verify release exists
     release = release_service.get(db, id)
@@ -1328,25 +1322,19 @@ async def get_source_pdf(
 
     # Verify the PDF is associated with this release's lot
     source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
-    if filename not in source_pdfs:
+    normalized_sources = {_normalize_pdf_storage_key(src) for src in source_pdfs}
+    storage_key = _normalize_pdf_storage_key(filename)
+    if storage_key not in normalized_sources:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="PDF not associated with this release",
         )
 
-    # Build file path
-    pdf_path = Path(settings.upload_path) / "pdfs" / filename
-
-    if not pdf_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="PDF file not found",
-        )
-
-    return FileResponse(
-        path=str(pdf_path),
-        filename=filename,
-        media_type="application/pdf",
+    response_filename = storage_key.rsplit("/", 1)[-1]
+    return _get_pdf_from_storage(
+        storage_key,
+        response_filename=response_filename,
+        inline=True,
     )
 
 

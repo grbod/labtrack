@@ -338,19 +338,55 @@ export function SmartResultInput({
       )
 
     case 'number':
-      return (
-        <Input
-          ref={inputRef as React.RefObject<HTMLInputElement>}
-          type="number"
-          step="any"
-          value={localValue}
-          onChange={(e) => setLocalValue(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          className={cn("h-8 text-sm border-blue-500 focus-visible:ring-blue-500", className)}
-          placeholder="0"
-        />
-      )
+      {
+        const prefixMatch = localValue.match(/^\s*([<>])\s*(.*)$/)
+        // Auto-initialize prefix from spec when value is empty (e.g., spec "< 100" → default "<")
+        const specPrefix = !localValue.trim() ? (specification.trim().match(/^([<>])/) ?? [])[1] || "" : ""
+        const currentPrefix = prefixMatch ? prefixMatch[1] : specPrefix
+        const numericPart = prefixMatch ? prefixMatch[2] : localValue
+
+        return (
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              tabIndex={-1}
+              className={cn(
+                "h-8 w-7 shrink-0 rounded-l-md border border-r-0 text-xs font-mono",
+                "hover:bg-slate-100 transition-colors",
+                currentPrefix
+                  ? "bg-blue-50 text-blue-700 border-blue-500"
+                  : "bg-slate-50 text-slate-400 border-slate-200"
+              )}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const nextPrefix = currentPrefix === "<" ? ">" : currentPrefix === ">" ? "" : "<"
+                const nextValue = nextPrefix ? `${nextPrefix}${numericPart}` : numericPart
+                setLocalValue(nextValue)
+                onChange(nextValue)
+              }}
+            >
+              {currentPrefix || "="}
+            </button>
+            <Input
+              ref={inputRef as React.RefObject<HTMLInputElement>}
+              type="number"
+              step="any"
+              value={numericPart}
+              onChange={(e) => {
+                const nextValue = currentPrefix ? `${currentPrefix}${e.target.value}` : e.target.value
+                setLocalValue(nextValue)
+              }}
+              onBlur={handleBlur}
+              onKeyDown={handleKeyDown}
+              className={cn(
+                "h-8 text-sm border-blue-500 focus-visible:ring-blue-500 rounded-l-none",
+                className
+              )}
+              placeholder="0"
+            />
+          </div>
+        )
+      }
 
     default:
       return (

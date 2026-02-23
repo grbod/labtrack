@@ -158,7 +158,7 @@ export function CreateSamplePage() {
     return parts.length > 0 ? parts.join(' ') : null
   }
 
-  const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 100 })
+  const { data: productsData, isLoading: isProductsLoading } = useProducts({ page_size: 500 })
   const createMutation = useCreateLot()
   const createSublotsMutation = useCreateSublotsBulk()
   const {

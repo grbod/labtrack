@@ -35,7 +35,7 @@ AUTH_CREDENTIALS = {
 TEST_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "Total Plate Count": ("Total Plate Count", "CFU/g"),
     "Yeast/Mold": ("Yeast & Mold", "CFU/g"),
-    "E. Coli": ("E. coli", "Present/Absent"),
+    "E. Coli": ("Escherichia coli", "Present/Absent"),
     "Salmonella": ("Salmonella spp.", "Present/Absent"),
     "Gluten": ("Gluten", "ppm"),
     "Arsenic": ("Arsenic", "ppm"),
@@ -232,27 +232,68 @@ class LabTrackClient:
             return len(result)
         return 0
 
+    def fetch_product_specs(self, product_id: int) -> dict[str, dict[str, str | None]]:
+        """Fetch test specifications for a product. Returns {test_name: {specification, method, unit}}.
+
+        Results are cached to avoid re-fetching for the same product.
+        """
+        if not hasattr(self, "_specs_cache"):
+            self._specs_cache: dict[int, dict[str, dict[str, str | None]]] = {}
+
+        if product_id in self._specs_cache:
+            return self._specs_cache[product_id]
+
+        if self.dry_run:
+            return {}
+
+        resp = self.session.get(
+            f"{self.base_url}/products/{product_id}/test-specifications",
+        )
+        if not resp.ok:
+            print(f"  WARNING: Could not fetch specs for product {product_id}")
+            return {}
+
+        specs: dict[str, dict[str, str | None]] = {}
+        for s in resp.json():
+            specs[s["test_name"]] = {
+                "specification": s.get("specification"),
+                "method": s.get("test_method"),
+                "unit": s.get("test_unit"),
+            }
+
+        self._specs_cache[product_id] = specs
+        return specs
+
 
 # ---------------------------------------------------------------------------
 # Test result extraction
 # ---------------------------------------------------------------------------
 
-def build_test_results(row: dict[str, str]) -> list[dict[str, Any]]:
+def build_test_results(
+    row: dict[str, str],
+    product_specs: dict[str, dict[str, str | None]],
+) -> list[dict[str, Any]]:
     """Extract non-empty test results from a CSV row.
 
     Returns a list of dicts matching the TestResultBase schema
-    (test_type, result_value, unit).
+    (test_type, result_value, unit, specification, method).
     """
     results: list[dict[str, Any]] = []
     for csv_col, (test_type, unit) in TEST_COLUMN_MAP.items():
         raw_value = row.get(csv_col, "").strip()
         if not raw_value:
             continue
-        results.append({
+        spec_info = product_specs.get(test_type, {})
+        result: dict[str, Any] = {
             "test_type": test_type,
             "result_value": raw_value,
-            "unit": unit,
-        })
+            "unit": spec_info.get("unit") or unit,
+        }
+        if spec_info.get("specification"):
+            result["specification"] = spec_info["specification"]
+        if spec_info.get("method"):
+            result["method"] = spec_info["method"]
+        results.append(result)
     return results
 
 
@@ -379,7 +420,8 @@ def _process_parent_lot(
             print(f"  Created {created} sublots")
 
     # Step 3: Create test results (use first row's values - identical across group)
-    test_results = build_test_results(rows[0])
+    product_specs = client.fetch_product_specs(product_id) if product_id else {}
+    test_results = build_test_results(rows[0], product_specs)
     if client.dry_run:
         if test_results:
             print(f"  [DRY RUN] POST /test-results/bulk -> {len(test_results)} tests")
@@ -434,7 +476,8 @@ def _process_standard_lot(
         counters["lots"] += 1
 
     # Step 2: Create test results
-    test_results = build_test_results(row)
+    product_specs = client.fetch_product_specs(product_id) if product_id else {}
+    test_results = build_test_results(row, product_specs)
     if client.dry_run:
         if test_results:
             print(f"  [DRY RUN] POST /test-results/bulk -> {len(test_results)} tests")

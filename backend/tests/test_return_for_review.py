@@ -310,7 +310,7 @@ def api_product_with_specs(api_db):
     return product
 
 
-def _api_lot_all_passing(api_db, product, ref, status):
+def _api_lot_all_passing(api_db, product, ref, status, omit_test=None):
     lot = Lot(
         lot_number="RFR-" + ref,
         lot_type=LotType.STANDARD,
@@ -355,6 +355,8 @@ def _api_lot_all_passing(api_db, product, ref, status):
         ),
     ]
     for r in results:
+        if omit_test and r.test_type == omit_test:
+            continue
         api_db.add(r)
     api_db.commit()
     api_db.refresh(lot)
@@ -455,6 +457,36 @@ class TestReturnForReviewEndpoint:
         body = resp.json()
         assert body["status"] == "awaiting_release"
         assert body["return_response_note"] == "Data entry mistake; corrected"
+
+    def test_submit_returned_lot_with_note_but_missing_test_keeps_hold(
+        self, api_db, qc_user, api_product_with_specs
+    ):
+        """If a returned lot still can't reach UNDER_REVIEW (missing required
+        test), submitting WITH a note must 400 without persisting the note or
+        releasing the return hold."""
+        lot = _api_lot_all_passing(
+            api_db,
+            api_product_with_specs,
+            "260201-806",
+            LotStatus.NEEDS_ATTENTION,
+            omit_test="Protein",  # required test missing
+        )
+        lot.return_reason = "Wrong lot number on COC"
+        lot.return_response_note = None
+        api_db.commit()
+
+        client = _make_client(qc_user)
+        resp = client.post(
+            f"/api/v1/lots/{lot.id}/submit-for-review",
+            json={"return_response_note": "fixed"},
+        )
+        assert resp.status_code == 400, resp.text
+
+        # The note must NOT have leaked to the DB and the hold stays intact
+        api_db.expire_all()
+        api_db.refresh(lot)
+        assert lot.return_response_note is None
+        assert lot.status == LotStatus.NEEDS_ATTENTION
 
     def test_submit_normal_lot_unaffected(
         self, api_db, qc_user, api_product_with_specs

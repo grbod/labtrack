@@ -823,8 +823,20 @@ async def submit_for_review(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A response note is required: explain what happened and how it was addressed",
             )
+
+        # Set the note IN MEMORY ONLY so the pure calculator can see past the
+        # return hold; nothing is persisted until we know the lot can submit.
         lot.return_response_note = note.strip()
-        db.flush()
+        calculation = LotService().calculate_lot_status(db, lot)
+        if calculation.new_status != LotStatus.UNDER_REVIEW:
+            # The lot still isn't submittable (e.g. missing/failing tests).
+            # Discard the in-memory note so the return hold stays intact.
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot submit: {calculation.reason}",
+            )
+
         AuditService().log_action(
             db=db,
             table_name="lots",
@@ -925,6 +937,7 @@ async def return_lot_for_review(
     old_values = {
         "status": lot.status.value,
         "return_reason": lot.return_reason,
+        "return_response_note": lot.return_response_note,
     }
 
     try:
@@ -949,6 +962,7 @@ async def return_lot_for_review(
         new_values={
             "status": lot.status.value,
             "return_reason": lot.return_reason,
+            "return_response_note": None,
         },
         reason=f"Returned for review: {lot.return_reason}",
     )

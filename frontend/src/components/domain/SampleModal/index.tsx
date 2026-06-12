@@ -327,6 +327,8 @@ export function SampleModal({
         approved_at: null,
         created_at: "",
         updated_at: null,
+        lab_test_type_id: spec.lab_test_type_id,
+        include_on_coa: true,
         specificationObj: spec,
         passFailStatus: null, // Pending - no result yet
         isFlagged: false,
@@ -510,23 +512,48 @@ export function SampleModal({
     [updateTestResultMutation, createTestResultMutation, mergedTestSpecs, lot, queryClient]
   )
 
-  // Handle adding a new ad-hoc test
+  // Handle adding a new ad-hoc test (autofills from the LabTestType definition)
   const handleAddTest = useCallback(
-    async (testName: string) => {
+    async (testName: string, labTestTypeId: number) => {
       if (!lot) return
+      const labTestType = labTestTypesData?.items.find((lt) => lt.id === labTestTypeId)
       try {
         await createTestResultMutation.mutateAsync({
           lot_id: lot.id,
           test_type: testName,
-          result_value: undefined,
-          unit: undefined,
+          lab_test_type_id: labTestTypeId,
+          unit: labTestType?.default_unit ?? undefined,
+          specification: labTestType?.default_specification ?? undefined,
+          method: labTestType?.test_method ?? undefined,
+          include_on_coa: true,
         })
         toast.success("Test added")
+        queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+        await queryClient.refetchQueries({ queryKey: lotKeys.detailWithSpecs(lot.id) })
       } catch {
         toast.error("Failed to add test")
       }
     },
-    [lot, createTestResultMutation]
+    [lot, createTestResultMutation, labTestTypesData, queryClient]
+  )
+
+  // Handle toggling include_on_coa for an ad-hoc test
+  const handleToggleCoa = useCallback(
+    async (id: number, include: boolean) => {
+      try {
+        await updateTestResultMutation.mutateAsync({
+          id,
+          data: { include_on_coa: include },
+        })
+        queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+        if (lot) {
+          await queryClient.refetchQueries({ queryKey: lotKeys.detailWithSpecs(lot.id) })
+        }
+      } catch {
+        toast.error("Failed to update COA setting")
+      }
+    },
+    [updateTestResultMutation, lot, queryClient]
   )
 
   // Handle deleting an ad-hoc test
@@ -793,6 +820,7 @@ export function SampleModal({
                 onUpdateResult={handleUpdateResult}
                 onAddTest={handleAddTest}
                 onDeleteResult={handleDeleteResult}
+                onToggleCoa={handleToggleCoa}
                 disabled={isLocked}
                 savingRowId={savingRowId}
                 triggerRef={additionalTriggerRef}

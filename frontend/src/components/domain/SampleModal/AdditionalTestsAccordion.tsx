@@ -2,6 +2,7 @@ import { useState, useMemo, type KeyboardEvent, type Ref } from "react"
 import { ChevronDown, Plus, X, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,6 +23,8 @@ interface AdditionalTestsAccordionProps {
   onAddTest: (testName: string, labTestTypeId: number) => Promise<void>
   /** Callback when a test is deleted */
   onDeleteResult?: (id: number) => Promise<void>
+  /** Callback when include_on_coa is toggled for a row */
+  onToggleCoa?: (id: number, include: boolean) => Promise<void>
   /** Whether the accordion is disabled */
   disabled?: boolean
   /** ID of the row currently being saved */
@@ -48,6 +51,7 @@ export function AdditionalTestsAccordion({
   onUpdateResult,
   onAddTest,
   onDeleteResult,
+  onToggleCoa,
   disabled = false,
   savingRowId,
   triggerRef,
@@ -110,10 +114,10 @@ export function AdditionalTestsAccordion({
       </CollapsibleTrigger>
 
       <CollapsibleContent>
-        <div className="border border-t-0 border-slate-200 rounded-b-lg overflow-hidden">
-          {/* Additional tests table with delete buttons */}
+        <div className="border border-t-0 border-slate-200 rounded-b-lg">
+          {/* Additional tests table with action buttons overlay */}
           {additionalTests.length > 0 && (
-            <div className="relative">
+            <div className="relative overflow-hidden rounded-b-lg">
               <TestResultsTable
                 testResults={additionalTests}
                 productSpecs={[]}
@@ -121,22 +125,34 @@ export function AdditionalTestsAccordion({
                 disabled={disabled}
                 savingRowId={savingRowId}
               />
-              {/* Delete buttons overlay - positioned at the end of each row */}
-              {!disabled && onDeleteResult && (
+              {/* Action buttons overlay - COA toggle + conditional delete */}
+              {!disabled && (onDeleteResult || onToggleCoa) && (
                 <div className="absolute top-0 right-0 flex flex-col" style={{ marginTop: '41px' }}>
                   {additionalTests.map((test) => (
                     <div
                       key={test.id}
-                      className="h-[41px] flex items-center pr-2"
+                      className="h-[41px] flex items-center gap-1 pr-2"
                     >
-                      <button
-                        type="button"
-                        onClick={() => onDeleteResult(test.id)}
-                        className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                        title="Remove test"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {onToggleCoa && (
+                        <Checkbox
+                          checked={test.include_on_coa !== false}
+                          onCheckedChange={(checked) =>
+                            onToggleCoa(test.id, checked === true)
+                          }
+                          title="Include on COA"
+                          className="h-4 w-4"
+                        />
+                      )}
+                      {onDeleteResult && !test.result_value?.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteResult(test.id)}
+                          className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          title="Remove test"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

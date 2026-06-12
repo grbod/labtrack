@@ -163,6 +163,8 @@ export interface TestResult {
   approved_at: string | null
   created_at: string
   updated_at: string | null
+  lab_test_type_id: number | null
+  include_on_coa: boolean
   // Extended fields
   lot_number?: string
   lot_reference?: string

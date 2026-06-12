@@ -21,6 +21,8 @@ export interface CreateTestResultData {
   notes?: string
   pdf_source?: string
   confidence_score?: number
+  lab_test_type_id?: number
+  include_on_coa?: boolean
 }
 
 export interface UpdateTestResultData {
@@ -32,6 +34,8 @@ export interface UpdateTestResultData {
   method?: string
   notes?: string
   pdf_source?: string
+  lab_test_type_id?: number
+  include_on_coa?: boolean
 }
 
 export interface BulkCreateData {

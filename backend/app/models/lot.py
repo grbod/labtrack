@@ -51,6 +51,8 @@ class Lot(BaseModel):
     has_pending_retest = Column(Boolean, default=False, nullable=False)  # True when retest is pending
     daane_po_number = Column(String(20), nullable=True)  # Daane COC PO number
     coc_storage_key = Column(String(255), nullable=True)  # Archived COC PDF
+    return_reason = Column(Text, nullable=True)  # Set when returned from release queue
+    return_response_note = Column(Text, nullable=True)  # Required response before re-approval
 
     # Relationships
     sublots = relationship(
@@ -128,7 +130,7 @@ class Lot(BaseModel):
             LotStatus.PARTIAL_RESULTS: [LotStatus.NEEDS_ATTENTION, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
             LotStatus.NEEDS_ATTENTION: [LotStatus.UNDER_REVIEW, LotStatus.APPROVED, LotStatus.REJECTED],  # APPROVED requires override_reason
             LotStatus.UNDER_REVIEW: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION, LotStatus.REJECTED],
-            LotStatus.AWAITING_RELEASE: [LotStatus.APPROVED, LotStatus.REJECTED],
+            LotStatus.AWAITING_RELEASE: [LotStatus.APPROVED, LotStatus.REJECTED, LotStatus.NEEDS_ATTENTION],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.REJECTED],
             LotStatus.RELEASED: [],  # Terminal state
             LotStatus.REJECTED: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION],  # Can resubmit for QC review

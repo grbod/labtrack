@@ -514,6 +514,22 @@ class LotService(BaseService[Lot]):
                 failing_tests=[],
             )
 
+        # A lot returned from the release queue stays in NEEDS_ATTENTION until
+        # the return is answered with a response note (resolved at submit time).
+        if (
+            old_status == LotStatus.NEEDS_ATTENTION
+            and lot.return_reason
+            and not lot.return_response_note
+        ):
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=LotStatus.NEEDS_ATTENTION,
+                reason="Returned for review; awaiting response note",
+                missing_tests=[],
+                failing_tests=[],
+            )
+
         required_specs: Dict[str, ProductTestSpecification] = {}
         for lot_product in lot.lot_products:
             if not lot_product.product:

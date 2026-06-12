@@ -85,6 +85,8 @@ class LotResponse(BaseModel):
     attached_pdfs: Optional[List[str]] = None  # List of uploaded PDF filenames
     has_pending_retest: bool = False  # True when retest is pending
     coc_storage_key: Optional[str] = None  # Archived COC PDF
+    return_reason: Optional[str] = None
+    return_response_note: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

@@ -108,6 +108,8 @@ export interface Lot {
   attached_pdfs: string[] | null  // List of uploaded PDF filenames
   has_pending_retest: boolean  // True when retest is pending
   coc_storage_key: string | null
+  return_reason: string | null
+  return_response_note: string | null
   created_at: string
   updated_at: string | null
   products?: ProductSummary[]  // Included in list responses for Kanban display

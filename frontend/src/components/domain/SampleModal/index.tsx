@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
 import SimpleBar from "simplebar-react"
 import "simplebar-react/dist/simplebar.min.css"
@@ -113,6 +114,10 @@ export function SampleModal({
   const [overridePassword, setOverridePassword] = useState("")
   const [overrideError, setOverrideError] = useState<string | null>(null)
   const [isVerifyingOverride, setIsVerifyingOverride] = useState(false)
+
+  // Return-response dialog state (for lots returned-unresolved from Release Queue)
+  const [showReturnResponseDialog, setShowReturnResponseDialog] = useState(false)
+  const [returnResponseNote, setReturnResponseNote] = useState("")
 
   // Focus helpers for custom tab order
   const focusSaveButton = useCallback(() => {
@@ -269,6 +274,11 @@ export function SampleModal({
   // Derived state - use lotWithSpecs status if available (fresh data), fallback to lot prop
   const currentStatus = lotWithSpecs?.status ?? lot?.status
   const isLocked = currentStatus === "approved" || currentStatus === "released"
+
+  // Returned-unresolved: came back from Release Queue with a reason, no response note yet
+  const returnSource = lotWithSpecs ?? lot
+  const returnReason = returnSource?.return_reason ?? null
+  const isReturned = !!returnReason && !returnSource?.return_response_note
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -629,10 +639,14 @@ export function SampleModal({
   const attachedPdfs: string[] = lotWithSpecs?.attached_pdfs || []
 
   // Internal function to actually perform the submission
-  const performSubmission = useCallback(async (overrideUserId?: number) => {
+  const performSubmission = useCallback(async (overrideUserId?: number, note?: string) => {
     if (!lot) return
     try {
-      await submitForReviewMutation.mutateAsync({ id: lot.id, overrideUserId })
+      await submitForReviewMutation.mutateAsync({
+        id: lot.id,
+        overrideUserId,
+        returnResponseNote: note,
+      })
 
       // Show success dialog instead of toast
       setSubmittedLotRef(lot.reference_number)
@@ -642,6 +656,14 @@ export function SampleModal({
       toast.error("Failed to submit for review")
     }
   }, [lot, submitForReviewMutation])
+
+  // Confirm the return-response dialog: submit with the note
+  const handleReturnResponseConfirm = useCallback(async () => {
+    if (!returnResponseNote.trim()) return
+    await performSubmission(undefined, returnResponseNote.trim())
+    setShowReturnResponseDialog(false)
+    setReturnResponseNote("")
+  }, [returnResponseNote, performSubmission])
 
   // Handle submit for review (moves from under_review to awaiting_release)
   const handleSubmitForReview = useCallback(async () => {
@@ -654,6 +676,13 @@ export function SampleModal({
     })
     if (!lot) {
       console.error("No lot available")
+      return
+    }
+
+    // Returned-unresolved: require a response note before submitting
+    if (isReturned) {
+      setReturnResponseNote("")
+      setShowReturnResponseDialog(true)
       return
     }
 
@@ -672,7 +701,7 @@ export function SampleModal({
     // No PDF required or PDFs are attached - submit directly
     console.log("Proceeding with submission")
     await performSubmission()
-  }, [lot, currentStatus, labInfo, attachedPdfs.length, performSubmission])
+  }, [lot, currentStatus, labInfo, attachedPdfs.length, performSubmission, isReturned])
 
   // Handle override verification and submission
   const handleOverrideSubmit = useCallback(async () => {
@@ -788,6 +817,14 @@ export function SampleModal({
             </div>
           ) : (
             <>
+              {/* Returned-for-review banner */}
+              {isReturned && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-800">Returned for review</p>
+                  <p className="mt-0.5 text-sm text-amber-700">{returnReason}</p>
+                </div>
+              )}
+
               {/* Filter pills */}
               <FilterPills
                 filter={filter}
@@ -1087,6 +1124,65 @@ export function SampleModal({
                 }}
               >
                 Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Return-response Dialog (for returned-unresolved lots) */}
+        <Dialog
+          open={showReturnResponseDialog}
+          onOpenChange={(open) => {
+            if (!open) {
+              setShowReturnResponseDialog(false)
+              setReturnResponseNote("")
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-[440px]">
+            <DialogHeader>
+              <DialogTitle>Respond to return</DialogTitle>
+            </DialogHeader>
+            {returnReason && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-[11px] font-medium text-amber-800">Return reason</p>
+                <p className="mt-0.5 text-[13px] text-amber-700">{returnReason}</p>
+              </div>
+            )}
+            <div className="space-y-2 py-1">
+              <Label htmlFor="returnResponseNote" className="text-[12px]">
+                What happened and how was it addressed?
+              </Label>
+              <Textarea
+                id="returnResponseNote"
+                value={returnResponseNote}
+                onChange={(e) => setReturnResponseNote(e.target.value)}
+                placeholder="Data entry mistake, corrected the lot number"
+                rows={3}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowReturnResponseDialog(false)
+                  setReturnResponseNote("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleReturnResponseConfirm}
+                disabled={!returnResponseNote.trim() || submitForReviewMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {submitForReviewMutation.isPending && (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                Submit for Review
               </Button>
             </DialogFooter>
           </DialogContent>

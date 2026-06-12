@@ -123,9 +123,15 @@ export const lotsApi = {
     return response.data
   },
 
-  submitForReview: async (id: number, overrideUserId?: number): Promise<Lot> => {
-    const params = overrideUserId ? { override_user_id: overrideUserId } : {}
-    const response = await api.post<Lot>(`/lots/${id}/submit-for-review`, null, { params })
+  submitForReview: async (
+    id: number,
+    opts?: { overrideUserId?: number; returnResponseNote?: string }
+  ): Promise<Lot> => {
+    const params = opts?.overrideUserId ? { override_user_id: opts.overrideUserId } : {}
+    const body = opts?.returnResponseNote
+      ? { return_response_note: opts.returnResponseNote }
+      : null
+    const response = await api.post<Lot>(`/lots/${id}/submit-for-review`, body, { params })
     return response.data
   },
 

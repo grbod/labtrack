@@ -115,8 +115,15 @@ export function useSubmitForReview() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, overrideUserId }: { id: number; overrideUserId?: number }) =>
-      lotsApi.submitForReview(id, overrideUserId),
+    mutationFn: ({
+      id,
+      overrideUserId,
+      returnResponseNote,
+    }: {
+      id: number
+      overrideUserId?: number
+      returnResponseNote?: string
+    }) => lotsApi.submitForReview(id, { overrideUserId, returnResponseNote }),
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to submit lot for review"))
     },

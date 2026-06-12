@@ -166,13 +166,17 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
   const product = lot.products?.[0] ?? null
   const hasMultipleProducts = (lot.products?.length ?? 0) > 1
 
+  // Returned-unresolved: came back from Release Queue, no response note yet
+  const isReturned = !!lot.return_reason && !lot.return_response_note
+
   return (
     <div
       onClick={onClick}
       className={cn(
         "cursor-pointer rounded-lg border bg-white p-2.5 shadow-sm",
         "hover:border-slate-300 hover:shadow",
-        borderClass
+        borderClass,
+        isReturned && "bg-amber-50 border-amber-300"
       )}
       style={glowStyle}
       role="button"
@@ -234,12 +238,28 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
         </div>
       )}
 
+      {/* Returned-for-review reason */}
+      {isReturned && (
+        <p
+          className="mt-1 text-[11px] text-amber-700 line-clamp-2"
+          title={lot.return_reason ?? undefined}
+        >
+          ↩ {lot.return_reason}
+        </p>
+      )}
+
       {/* Footer: Lab Ref + Badges */}
       <div className="mt-1.5 flex items-center justify-between">
         <p className="text-[11px] text-slate-600">
           Lab Ref <span className="font-mono font-medium">{lot.reference_number}</span>
         </p>
         <div className="flex items-center gap-1">
+          {/* Returned Badge */}
+          {isReturned && (
+            <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+              Returned
+            </span>
+          )}
           {/* Retest Pending Badge */}
           {lot.has_pending_retest && (
             <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">

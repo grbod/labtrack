@@ -663,12 +663,23 @@ async def submit_for_review(
     override_user_id: Optional[int] = Query(None, description="User ID who authorized the override (when submitting without PDF)"),
 ) -> LotResponse:
     """Submit a lot for QC review (moves from under_review to awaiting_release)."""
+    from app.services.lot_service import LotService
+
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
     if not lot:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lot not found",
         )
+
+    # A lot can be stale in NEEDS_ATTENTION after a failed result is corrected.
+    # Recalculate here so submission is based on current result/spec data.
+    if lot.status in [
+        LotStatus.AWAITING_RESULTS,
+        LotStatus.PARTIAL_RESULTS,
+        LotStatus.NEEDS_ATTENTION,
+    ]:
+        lot = LotService().recalculate_lot_status(db, lot_id, user_id=current_user.id)
 
     # Must be in under_review status to submit
     if lot.status != LotStatus.UNDER_REVIEW:

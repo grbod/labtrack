@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.database import Base
 from app.dependencies import get_db, get_current_user
-from app.models import User, Product, Lot, LotProduct, LabTestType, TestResult
+from app.models import User, Product, Lot, LotProduct, LabTestType, ProductTestSpecification, TestResult
 from app.models.enums import UserRole, LotType, LotStatus, TestResultStatus
 from app.core.security import create_access_token
 
@@ -361,6 +361,77 @@ class TestLotEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "under_review"
+
+    def test_submit_for_review_recalculates_stale_needs_attention(
+        self, client, test_db, test_product
+    ):
+        """Submitting a stale needs_attention lot recalculates pass/fail first."""
+        tpc = LabTestType(
+            test_name="Total Plate Count",
+            test_category="Microbiological",
+            default_unit="CFU/g",
+            test_method="AOAC 990.12",
+            is_active=True,
+        )
+        ecoli = LabTestType(
+            test_name="E. coli",
+            test_category="Microbiological",
+            default_unit="Present/Absent",
+            test_method="AOAC 991.14",
+            is_active=True,
+        )
+        test_db.add_all([tpc, ecoli])
+        test_db.commit()
+
+        test_db.add_all([
+            ProductTestSpecification(
+                product_id=test_product.id,
+                lab_test_type_id=tpc.id,
+                specification="< 10000",
+                is_required=True,
+            ),
+            ProductTestSpecification(
+                product_id=test_product.id,
+                lab_test_type_id=ecoli.id,
+                specification="Negative",
+                is_required=True,
+            ),
+        ])
+
+        lot = Lot(
+            lot_number="STALE001",
+            reference_number="241201-099",
+            lot_type=LotType.STANDARD,
+            status=LotStatus.NEEDS_ATTENTION,
+            mfg_date=date.today(),
+            exp_date=date(2027, 12, 31),
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        test_db.add(LotProduct(lot_id=lot.id, product_id=test_product.id))
+        test_db.add_all([
+            TestResult(
+                lot_id=lot.id,
+                test_type="Total Plate Count",
+                result_value="<100",
+                unit="CFU/g",
+                status=TestResultStatus.DRAFT,
+            ),
+            TestResult(
+                lot_id=lot.id,
+                test_type="E. coli",
+                result_value="Negative",
+                unit="Present/Absent",
+                status=TestResultStatus.DRAFT,
+            ),
+        ])
+        test_db.commit()
+
+        response = client.post(f"/api/v1/lots/{lot.id}/submit-for-review")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "awaiting_release"
 
     def test_delete_lot(self, client, test_lot):
         """Test deleting a lot."""

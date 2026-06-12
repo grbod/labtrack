@@ -125,6 +125,12 @@ export function useApproveRelease() {
       queryClient.invalidateQueries({
         queryKey: releaseKeys.detail(variables.lotId, variables.productId),
       })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.previewData(variables.lotId, variables.productId),
+      })
+      // Final release updates the parent lot status; refresh tracker/count consumers.
+      queryClient.invalidateQueries({ queryKey: ["lots"] })
+      queryClient.invalidateQueries({ queryKey: ["lots", "statusCounts"] })
       // Invalidate all recently released queries to refresh the list
       queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "recently-released"] })
       // Invalidate archived lots (audit trail) so it refreshes with new released items

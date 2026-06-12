@@ -130,7 +130,7 @@ export function ReleaseQueuePage() {
               No COAs awaiting release
             </p>
             <p className="mt-1 text-[13px] text-slate-500">
-              Approved samples will appear here for final release
+              Submitted samples will appear here for final release
             </p>
           </div>
         ) : (

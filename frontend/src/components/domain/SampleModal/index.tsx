@@ -31,7 +31,6 @@ import { SendForRetestDialog } from "@/components/domain/SendForRetestDialog"
 
 import type {
   Lot,
-  LotStatus,
   TestResultRow,
   TestFilterStatus,
   TestSpecInProduct,
@@ -106,8 +105,6 @@ export function SampleModal({
   // Retest dialog state
   const [showRetestDialog, setShowRetestDialog] = useState(false)
   const [isAdditionalExpanded, setIsAdditionalExpanded] = useState(false)
-  const [openedFromStatus, setOpenedFromStatus] = useState<LotStatus | null>(null)
-  const openedFromLotIdRef = useRef<number | null>(null)
 
   // Override modal state
   const [showOverrideModal, setShowOverrideModal] = useState(false)
@@ -266,27 +263,9 @@ export function SampleModal({
   // Lab info for PDF requirement setting
   const { labInfo } = useLabInfo()
 
-  // Snapshot status when modal opens or lot changes (prevents auto-updates from enabling actions mid-session)
-  useEffect(() => {
-    if (!isOpen) {
-      openedFromLotIdRef.current = null
-      setOpenedFromStatus(null)
-      return
-    }
-    if (!lot) {
-      setOpenedFromStatus(null)
-      return
-    }
-    if (openedFromLotIdRef.current !== lot.id) {
-      openedFromLotIdRef.current = lot.id
-      setOpenedFromStatus(lot.status)
-    }
-  }, [isOpen, lot?.id, lot?.status])
-
   // Derived state - use lotWithSpecs status if available (fresh data), fallback to lot prop
   const currentStatus = lotWithSpecs?.status ?? lot?.status
   const isLocked = currentStatus === "approved" || currentStatus === "released"
-  const openedFromUnderReview = openedFromStatus === "under_review"
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -388,8 +367,7 @@ export function SampleModal({
   }, [testResultRows])
 
   const canSubmitForReview =
-    openedFromUnderReview &&
-    currentStatus === "under_review" &&
+    (currentStatus === "under_review" || currentStatus === "needs_attention") &&
     allTestsPassing
 
   // Separate spec tests from additional tests
@@ -1019,13 +997,13 @@ export function SampleModal({
             <DialogHeader>
               <DialogTitle className="text-emerald-600 flex items-center gap-2 text-[18px]">
                 <CheckCircle2 className="h-5 w-5" />
-                Moved to Final QA Approval
+                Moved to Release Queue
               </DialogTitle>
             </DialogHeader>
 
             <div className="py-4">
               <p className="text-sm text-slate-600">
-                Sample <span className="font-mono font-semibold text-slate-900">{submittedLotRef}</span> has been submitted for final approval.
+                Sample <span className="font-mono font-semibold text-slate-900">{submittedLotRef}</span> has been submitted for final COA release.
               </p>
             </div>
 

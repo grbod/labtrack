@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Define theme colors using Tailwind v4 @theme directive */
 @theme {
   --color-background: hsl(0 0% 100%);
@@ -25,6 +27,170 @@
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Kanagawa Dragon dark theme
+   Tailwind v4 compiles color utilities to var(--color-*) at use-site, so
+   remapping those variables under .dark re-themes every existing class.
+   Dragon anchors:
+     surfaces  bg0 #0d0c0c  bg1 #12120f  bg2 #1D1C19  bg3 #181616
+               bg4 #282727  bg5 #393836  bg6 #625e5a
+     text      white #c5c9c5  gray #a6a69c  gray2 #9e9b93
+               gray3 #7a8382  ash #737c73
+     accents   blue #8ba4b0  red #c4746e  green #8a9a7b  yellow #c4b28a
+               violet #8992a7  orange #b6927b  teal #949fb5  pink #a292a3
+   ───────────────────────────────────────────────────────────────────────── */
+.dark {
+  /* ── Inverted neutrals (slate / gray / zinc / neutral / stone) ── */
+  --color-white: #181616;
+
+  --color-slate-50: #1d1c19;
+  --color-slate-100: #282727;
+  --color-slate-200: #393836;
+  --color-slate-300: #625e5a;
+  --color-slate-400: #737c73;
+  --color-slate-500: #9e9b93;
+  --color-slate-600: #a6a69c;
+  --color-slate-700: #c5c9c5;
+  --color-slate-800: #c5c9c5;
+  --color-slate-900: #c5c9c5;
+  --color-slate-950: #c5c9c5;
+
+  /* gray mirrors slate (used by some utilities) */
+  --color-gray-50: #1d1c19;
+  --color-gray-100: #282727;
+  --color-gray-200: #393836;
+  --color-gray-300: #625e5a;
+  --color-gray-400: #737c73;
+  --color-gray-500: #9e9b93;
+  --color-gray-600: #a6a69c;
+  --color-gray-700: #c5c9c5;
+  --color-gray-800: #c5c9c5;
+  --color-gray-900: #c5c9c5;
+  --color-gray-950: #c5c9c5;
+
+  /* ── Blue → dragonBlue2 #8ba4b0 ── */
+  --color-blue-50: color-mix(in srgb, #8ba4b0 14%, #181616);
+  --color-blue-100: color-mix(in srgb, #8ba4b0 22%, #181616);
+  --color-blue-200: color-mix(in srgb, #8ba4b0 32%, #181616);
+  --color-blue-300: color-mix(in srgb, #8ba4b0 50%, #181616);
+  --color-blue-400: #8ba4b0;
+  --color-blue-500: #8ba4b0;
+  --color-blue-600: #8ba4b0;
+  --color-blue-700: #a3bcc8;
+  --color-blue-800: #a3bcc8;
+
+  /* ── Sky / Indigo → #8ba4b0 (same dragon blue family) ── */
+  --color-sky-50: color-mix(in srgb, #8ba4b0 14%, #181616);
+  --color-sky-100: color-mix(in srgb, #8ba4b0 22%, #181616);
+  --color-sky-200: color-mix(in srgb, #8ba4b0 32%, #181616);
+  --color-sky-700: #a3bcc8;
+
+  --color-indigo-50: color-mix(in srgb, #8992a7 14%, #181616);
+  --color-indigo-100: color-mix(in srgb, #8992a7 22%, #181616);
+  --color-indigo-200: color-mix(in srgb, #8992a7 32%, #181616);
+  --color-indigo-600: #8992a7;
+  --color-indigo-700: #a1a9bb;
+  --color-indigo-800: #a1a9bb;
+
+  /* ── Red / Rose → dragonRed #c4746e ── */
+  --color-red-50: color-mix(in srgb, #c4746e 14%, #181616);
+  --color-red-100: color-mix(in srgb, #c4746e 22%, #181616);
+  --color-red-200: color-mix(in srgb, #c4746e 32%, #181616);
+  --color-red-400: #c4746e;
+  --color-red-500: #c4746e;
+  --color-red-600: #c4746e;
+  --color-red-700: #d68f89;
+  --color-red-800: #d68f89;
+  --color-red-900: #d68f89;
+
+  /* ── Green / Emerald → dragonGreen2 #8a9a7b ── */
+  --color-green-50: color-mix(in srgb, #8a9a7b 14%, #181616);
+  --color-green-100: color-mix(in srgb, #8a9a7b 22%, #181616);
+  --color-green-200: color-mix(in srgb, #8a9a7b 32%, #181616);
+  --color-green-600: #8a9a7b;
+  --color-green-700: #9fb592;
+  --color-green-800: #9fb592;
+
+  --color-emerald-50: color-mix(in srgb, #8a9a7b 14%, #181616);
+  --color-emerald-100: color-mix(in srgb, #8a9a7b 22%, #181616);
+  --color-emerald-200: color-mix(in srgb, #8a9a7b 32%, #181616);
+  --color-emerald-500: #8a9a7b;
+  --color-emerald-600: #8a9a7b;
+  --color-emerald-700: #9fb592;
+  --color-emerald-800: #9fb592;
+
+  /* ── Amber / Yellow → dragonYellow #c4b28a ── */
+  --color-amber-50: color-mix(in srgb, #c4b28a 14%, #181616);
+  --color-amber-100: color-mix(in srgb, #c4b28a 22%, #181616);
+  --color-amber-200: color-mix(in srgb, #c4b28a 32%, #181616);
+  --color-amber-300: color-mix(in srgb, #c4b28a 50%, #181616);
+  --color-amber-400: #c4b28a;
+  --color-amber-500: #c4b28a;
+  --color-amber-600: #c4b28a;
+  --color-amber-700: #d6c69e;
+  --color-amber-800: #d6c69e;
+  --color-amber-900: #d6c69e;
+
+  --color-yellow-50: color-mix(in srgb, #c4b28a 14%, #181616);
+  --color-yellow-100: color-mix(in srgb, #c4b28a 22%, #181616);
+  --color-yellow-700: #d6c69e;
+
+  /* ── Violet / Purple → dragonViolet #8992a7 ── */
+  --color-violet-50: color-mix(in srgb, #8992a7 14%, #181616);
+  --color-violet-100: color-mix(in srgb, #8992a7 22%, #181616);
+  --color-violet-200: color-mix(in srgb, #8992a7 32%, #181616);
+  --color-violet-600: #8992a7;
+  --color-violet-700: #a1a9bb;
+  --color-violet-800: #a1a9bb;
+
+  --color-purple-50: color-mix(in srgb, #8992a7 14%, #181616);
+  --color-purple-100: color-mix(in srgb, #8992a7 22%, #181616);
+  --color-purple-700: #a1a9bb;
+  --color-purple-800: #a1a9bb;
+
+  /* ── Pink / Fuchsia → dragonPink #a292a3 ── */
+  --color-pink-100: color-mix(in srgb, #a292a3 22%, #181616);
+  --color-pink-700: #b8aab9;
+
+  /* ── Orange → dragonOrange #b6927b ── */
+  --color-orange-50: color-mix(in srgb, #b6927b 14%, #181616);
+  --color-orange-100: color-mix(in srgb, #b6927b 22%, #181616);
+  --color-orange-200: color-mix(in srgb, #b6927b 32%, #181616);
+  --color-orange-400: #b6927b;
+  --color-orange-600: #b6927b;
+  --color-orange-700: #c9a893;
+
+  /* ── Teal / Cyan → dragonTeal #949fb5 ── */
+  --color-teal-100: color-mix(in srgb, #949fb5 22%, #181616);
+  --color-teal-700: #aab2c4;
+
+  --color-cyan-100: color-mix(in srgb, #949fb5 22%, #181616);
+  --color-cyan-600: #949fb5;
+  --color-cyan-700: #aab2c4;
+  --color-cyan-800: #aab2c4;
+
+  /* ── shadcn-ish semantic tokens (hsl() literals in @theme) ── */
+  --color-background: #12120f;
+  --color-foreground: #c5c9c5;
+  --color-card: #181616;
+  --color-card-foreground: #c5c9c5;
+  --color-popover: #0d0c0c;
+  --color-popover-foreground: #c5c9c5;
+  --color-primary: #c5c9c5;
+  --color-primary-foreground: #181616;
+  --color-secondary: #282727;
+  --color-secondary-foreground: #c5c9c5;
+  --color-muted: #282727;
+  --color-muted-foreground: #9e9b93;
+  --color-accent: #282727;
+  --color-accent-foreground: #c5c9c5;
+  --color-destructive: #c4746e;
+  --color-destructive-foreground: #181616;
+  --color-border: #393836;
+  --color-input: #393836;
+  --color-ring: #8ba4b0;
 }
 
 /* Base styles */
@@ -127,6 +293,34 @@ body {
 
 .simplebar-scrollbar.simplebar-visible::before {
   opacity: 1 !important;
+}
+
+/* ── Dark overrides for hardcoded scrollbar / simplebar literals ── */
+.dark .scrollbar-visible {
+  scrollbar-color: rgba(197, 201, 197, 0.28) rgba(197, 201, 197, 0.06);
+}
+.dark .scrollbar-visible::-webkit-scrollbar-track {
+  background: rgba(197, 201, 197, 0.06);
+}
+.dark .scrollbar-visible::-webkit-scrollbar-thumb {
+  background: rgba(197, 201, 197, 0.28);
+}
+.dark .scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(197, 201, 197, 0.45);
+}
+
+.dark .simplebar-track.simplebar-vertical::before {
+  background: #282727 !important;
+}
+.dark .simplebar-scrollbar::before {
+  background: #393836 !important;
+}
+.dark .simplebar-track.simplebar-vertical:hover .simplebar-scrollbar::before,
+.dark .simplebar-scrollbar:hover::before {
+  background: #625e5a !important;
+}
+.dark .simplebar-scrollbar:active::before {
+  background: #737c73 !important;
 }
 
 /* Enterprise-grade compact styles */

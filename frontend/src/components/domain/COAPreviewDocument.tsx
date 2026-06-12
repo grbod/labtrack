@@ -206,7 +206,7 @@ export function COAPreviewDocument({
           {/* Editable Manufacturing Date */}
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Manufacturing Date
@@ -242,7 +242,7 @@ export function COAPreviewDocument({
           {/* Editable Expiration Date */}
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Expiration Date
@@ -445,7 +445,7 @@ export function COAPreviewDocument({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               onBlur={handleNotesBlur}
-              className="w-full bg-transparent resize-none outline-none text-amber-900"
+              className="w-full bg-transparent resize-none outline-none text-[#78350f]"
               style={{
                 fontSize: "9pt",
                 minHeight: "60px",
@@ -459,14 +459,14 @@ export function COAPreviewDocument({
                 setIsEditingNotes(true)
                 setTimeout(() => notesRef.current?.focus(), 0)
               }}
-              className="cursor-text min-h-[40px] text-amber-900 whitespace-pre-wrap"
+              className="cursor-text min-h-[40px] text-[#78350f] whitespace-pre-wrap"
               style={{ fontSize: "9pt" }}
             >
               {notes || (
-                <span className="text-amber-600/60 italic">Click to add notes...</span>
+                <span className="text-[#d97706]/60 italic">Click to add notes...</span>
               )}
               <Pencil
-                className="absolute top-2 right-2 h-4 w-4 text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-2 right-2 h-4 w-4 text-[#fbbf24] opacity-0 group-hover:opacity-100 transition-opacity"
                 style={{ width: "14px", height: "14px" }}
               />
             </div>

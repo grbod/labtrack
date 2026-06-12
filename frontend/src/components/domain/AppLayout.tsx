@@ -1,11 +1,13 @@
 import { Outlet, Navigate, Link } from "react-router-dom"
 import { useAuthStore } from "@/store/auth"
 import { Sidebar } from "./Sidebar"
-import { Bell, HelpCircle, LogOut, Settings } from "lucide-react"
+import { Bell, HelpCircle, LogOut, Moon, Settings, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useTheme } from "@/hooks/useTheme"
 
 export function AppLayout() {
   const { isAuthenticated, user, logout } = useAuthStore()
+  const { theme, toggleTheme } = useTheme()
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
@@ -21,6 +23,15 @@ export function AppLayout() {
             <span className="text-sm font-medium text-slate-500 tracking-wide">Quality Assurance</span>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="h-9 w-9 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100/80 rounded-lg transition-colors"
+            >
+              {theme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+            </Button>
             <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100/80 rounded-lg transition-colors">
               <HelpCircle className="h-[18px] w-[18px]" />
             </Button>

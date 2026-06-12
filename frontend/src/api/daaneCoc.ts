@@ -100,4 +100,15 @@ export const daaneCocApi = {
 
     return { blob: response.data, filename, ...getLimitInfo(response.headers) }
   },
+
+  downloadCocArchive: async (lotId: number): Promise<{ blob: Blob; filename: string }> => {
+    const response = await api.get(`/lots/${lotId}/coc-archive`, { responseType: "blob" })
+    const contentDisposition = response.headers["content-disposition"]
+    let filename = `daane-coc-${lotId}.pdf`
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="?([^";\n]+)"?/)
+      if (match?.[1]) filename = match[1]
+    }
+    return { blob: response.data, filename }
+  },
 }

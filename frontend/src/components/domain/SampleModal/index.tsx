@@ -5,7 +5,7 @@ import { useDropzone } from "react-dropzone"
 import { useNavigate } from "react-router-dom"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw } from "lucide-react"
+import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
@@ -28,6 +28,7 @@ import { useLabInfo } from "@/hooks/useLabInfo"
 import { useAuthStore } from "@/store/auth"
 import { calculatePassFail } from "@/lib/spec-validation"
 import { SendForRetestDialog } from "@/components/domain/SendForRetestDialog"
+import { useDownloadCocArchive } from "@/hooks/useDaaneCoc"
 
 import type {
   Lot,
@@ -260,6 +261,7 @@ export function SampleModal({
   const uploadMutation = useUploadPdf()
   const submitForReviewMutation = useSubmitForReview()
   const recalculateLotStatusMutation = useRecalculateLotStatus()
+  const downloadCocArchive = useDownloadCocArchive()
 
   // Lab info for PDF requirement setting
   const { labInfo } = useLabInfo()
@@ -1125,8 +1127,8 @@ export function SampleModal({
         {/* Footer */}
         <DialogFooter className="flex-shrink-0 border-t border-slate-200 px-6 py-4">
           <div className="flex w-full items-center justify-between">
-            {/* Left side - Send for Retest button */}
-            <div>
+            {/* Left side - Send for Retest + Chain of Custody buttons */}
+            <div className="flex items-center gap-2">
               {canRequestRetest && hasFailingTests && !isLocked && (
                 <Button
                   type="button"
@@ -1136,6 +1138,22 @@ export function SampleModal({
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Send for Retest
+                </Button>
+              )}
+              {lot && !(["released", "rejected"].includes(lotWithSpecs?.status ?? lot.status) && !lotWithSpecs?.coc_storage_key) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="default"
+                  onClick={() => downloadCocArchive.mutate(lot.id)}
+                  disabled={downloadCocArchive.isPending}
+                >
+                  {downloadCocArchive.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileDown className="h-4 w-4 mr-2" />
+                  )}
+                  Chain of Custody
                 </Button>
               )}
             </div>

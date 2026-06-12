@@ -65,3 +65,15 @@ export function useDownloadRetestDaaneCocPdf() {
     },
   })
 }
+
+export function useDownloadCocArchive() {
+  return useMutation({
+    mutationFn: (lotId: number) => daaneCocApi.downloadCocArchive(lotId),
+    onSuccess: ({ blob, filename }) => {
+      downloadBlob(blob, filename)
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to download chain of custody", { 404: "Chain of custody not available" }))
+    },
+  })
+}

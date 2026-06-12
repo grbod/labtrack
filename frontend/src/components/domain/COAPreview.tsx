@@ -190,7 +190,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
       </div>
 
       {/* WYSIWYG Preview */}
-      <div ref={setRefs} className="flex-1 overflow-auto bg-slate-100 p-1">
+      <div ref={setRefs} className="document-preview flex-1 overflow-auto bg-slate-100 p-1">
         <div
           style={{
             // Set width to scaled document width so it centers properly

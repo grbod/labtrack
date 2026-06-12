@@ -324,6 +324,14 @@ body {
   background: #737c73 !important;
 }
 
+/* Printable-document previews: keep paper light but dim it in dark mode */
+.document-preview {
+  background-color: #ffffff; /* paper is always white, not themed */
+}
+.dark .document-preview {
+  filter: brightness(0.85) sepia(0.04);
+}
+
 /* Enterprise-grade compact styles */
 .table-compact tr {
   height: 2rem;

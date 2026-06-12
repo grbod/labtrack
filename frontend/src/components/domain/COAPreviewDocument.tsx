@@ -81,7 +81,7 @@ export function COAPreviewDocument({
 
   return (
     <div
-      className="bg-white shadow-lg origin-top-left transition-transform duration-200"
+      className="document-preview shadow-lg origin-top-left transition-transform duration-200"
       style={{
         width: `${8.5 * 96}px`, // 8.5 inches at 96 DPI (816px)
         minHeight: `${11 * 96}px`, // 11 inches at 96 DPI (1056px)
@@ -108,18 +108,18 @@ export function COAPreviewDocument({
             />
           )}
           <p
-            className="text-slate-500"
+            className="text-[#64748b]"
             style={{ fontSize: "9pt", marginBottom: "0", fontWeight: 600 }}
           >
             {data.company_name || "Company Name"}
           </p>
           {data.company_address && (
-            <p className="text-slate-500" style={{ fontSize: "9pt" }}>
+            <p className="text-[#64748b]" style={{ fontSize: "9pt" }}>
               {data.company_address}
             </p>
           )}
           {(data.company_phone || data.company_email) && (
-            <p className="text-slate-500" style={{ fontSize: "9pt" }}>
+            <p className="text-[#64748b]" style={{ fontSize: "9pt" }}>
               {data.company_phone && `Tel: ${data.company_phone}`}
               {data.company_phone && data.company_email && " | "}
               {data.company_email && `Email: ${data.company_email}`}
@@ -128,15 +128,15 @@ export function COAPreviewDocument({
         </div>
         <div className="text-right">
           <h2
-            className="font-bold text-slate-900 uppercase tracking-wider"
+            className="font-bold text-[#0f172a] uppercase tracking-wider"
             style={{ fontSize: "14pt" }}
           >
             Certificate of Analysis
           </h2>
-          <p className="text-slate-500 mt-1" style={{ fontSize: "9pt" }}>
+          <p className="text-[#64748b] mt-1" style={{ fontSize: "9pt" }}>
             Document #: COA-{data.reference_number}
           </p>
-          <p className="text-slate-500" style={{ fontSize: "9pt" }}>
+          <p className="text-[#64748b]" style={{ fontSize: "9pt" }}>
             Generated: {data.generated_date}
           </p>
         </div>
@@ -152,7 +152,7 @@ export function COAPreviewDocument({
         }}
       >
         <h3
-          className="font-semibold text-slate-900 uppercase tracking-wide mb-3"
+          className="font-semibold text-[#0f172a] uppercase tracking-wide mb-3"
           style={{ fontSize: "11pt", letterSpacing: "0.5px" }}
         >
           Product Information
@@ -160,45 +160,45 @@ export function COAPreviewDocument({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Product Name
             </span>
-            <span className="font-medium text-slate-900" style={{ fontSize: "10pt" }}>
+            <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
               {data.product_name || "N/A"}
             </span>
           </div>
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Brand
             </span>
-            <span className="font-medium text-slate-900" style={{ fontSize: "10pt" }}>
+            <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
               {data.brand || "N/A"}
             </span>
           </div>
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Lot Number
             </span>
-            <span className="font-medium text-slate-900" style={{ fontSize: "10pt" }}>
+            <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
               {data.lot_number || "N/A"}
             </span>
           </div>
           <div>
             <span
-              className="font-semibold text-slate-500 uppercase block"
+              className="font-semibold text-[#64748b] uppercase block"
               style={{ fontSize: "8pt", letterSpacing: "0.5px" }}
             >
               Reference Number
             </span>
-            <span className="font-medium text-slate-900" style={{ fontSize: "10pt" }}>
+            <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
               {data.reference_number || "N/A"}
             </span>
           </div>
@@ -214,16 +214,16 @@ export function COAPreviewDocument({
             <Popover open={mfgDateOpen} onOpenChange={setMfgDateOpen}>
               <PopoverTrigger asChild>
                 <button
-                  className="group flex items-center gap-1 font-medium text-slate-900 hover:text-blue-600 transition-colors"
+                  className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
                   style={{ fontSize: "10pt" }}
                 >
                   <span
-                    className="border-b border-dashed border-slate-300 group-hover:border-blue-400"
+                    className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
                   >
                     {data.mfg_date || "Not set"}
                   </span>
                   <Calendar
-                    className="h-3 w-3 text-slate-400 group-hover:text-blue-500"
+                    className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
                     style={{ width: "12px", height: "12px" }}
                   />
                 </button>
@@ -250,16 +250,16 @@ export function COAPreviewDocument({
             <Popover open={expDateOpen} onOpenChange={setExpDateOpen}>
               <PopoverTrigger asChild>
                 <button
-                  className="group flex items-center gap-1 font-medium text-slate-900 hover:text-blue-600 transition-colors"
+                  className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
                   style={{ fontSize: "10pt" }}
                 >
                   <span
-                    className="border-b border-dashed border-slate-300 group-hover:border-blue-400"
+                    className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
                   >
                     {data.exp_date || "Not set"}
                   </span>
                   <Calendar
-                    className="h-3 w-3 text-slate-400 group-hover:text-blue-500"
+                    className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
                     style={{ width: "12px", height: "12px" }}
                   />
                 </button>
@@ -280,7 +280,7 @@ export function COAPreviewDocument({
       {/* Test Results Section */}
       <div className="mb-6">
         <h3
-          className="font-semibold text-slate-900 uppercase tracking-wide mb-3"
+          className="font-semibold text-[#0f172a] uppercase tracking-wide mb-3"
           style={{ fontSize: "11pt", letterSpacing: "0.5px" }}
         >
           Test Results
@@ -296,7 +296,7 @@ export function COAPreviewDocument({
           <thead>
             <tr style={{ backgroundColor: "#f1f5f9" }}>
               <th
-                className="text-left font-semibold text-slate-600 uppercase"
+                className="text-left font-semibold text-[#475569] uppercase"
                 style={{
                   padding: "10px 12px",
                   fontSize: "8pt",
@@ -308,7 +308,7 @@ export function COAPreviewDocument({
                 Test Name
               </th>
               <th
-                className="text-left font-semibold text-slate-600 uppercase"
+                className="text-left font-semibold text-[#475569] uppercase"
                 style={{
                   padding: "10px 12px",
                   fontSize: "8pt",
@@ -320,7 +320,7 @@ export function COAPreviewDocument({
                 Result
               </th>
               <th
-                className="text-left font-semibold text-slate-600 uppercase"
+                className="text-left font-semibold text-[#475569] uppercase"
                 style={{
                   padding: "10px 12px",
                   fontSize: "8pt",
@@ -332,7 +332,7 @@ export function COAPreviewDocument({
                 Specification
               </th>
               <th
-                className="text-left font-semibold text-slate-600 uppercase"
+                className="text-left font-semibold text-[#475569] uppercase"
                 style={{
                   padding: "10px 12px",
                   fontSize: "8pt",
@@ -355,7 +355,7 @@ export function COAPreviewDocument({
                   }}
                 >
                   <td
-                    className="text-slate-900"
+                    className="text-[#0f172a]"
                     style={{
                       padding: "10px 12px",
                       fontSize: "9pt",
@@ -365,7 +365,7 @@ export function COAPreviewDocument({
                     {test.name}
                   </td>
                   <td
-                    className="text-slate-900"
+                    className="text-[#0f172a]"
                     style={{
                       padding: "10px 12px",
                       fontSize: "9pt",
@@ -383,7 +383,7 @@ export function COAPreviewDocument({
                     </div>
                   </td>
                   <td
-                    className="text-slate-900"
+                    className="text-[#0f172a]"
                     style={{
                       padding: "10px 12px",
                       fontSize: "9pt",
@@ -393,7 +393,7 @@ export function COAPreviewDocument({
                     {test.specification}
                   </td>
                   <td
-                    className={test.status === "Pass" ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold"}
+                    className={test.status === "Pass" ? "text-[#059669] font-semibold" : "text-[#dc2626] font-semibold"}
                     style={{
                       padding: "10px 12px",
                       fontSize: "9pt",
@@ -408,7 +408,7 @@ export function COAPreviewDocument({
               <tr>
                 <td
                   colSpan={4}
-                  className="text-center text-slate-500 italic"
+                  className="text-center text-[#64748b] italic"
                   style={{
                     padding: "20px",
                     fontSize: "9pt",
@@ -425,7 +425,7 @@ export function COAPreviewDocument({
       {/* Notes Section (Editable) */}
       <div className="mb-6">
         <h3
-          className="font-semibold text-slate-900 uppercase tracking-wide mb-2"
+          className="font-semibold text-[#0f172a] uppercase tracking-wide mb-2"
           style={{ fontSize: "11pt", letterSpacing: "0.5px" }}
         >
           Notes
@@ -477,7 +477,7 @@ export function COAPreviewDocument({
       {/* Authorization Section */}
       <div className="mb-6 pt-4" style={{ borderTop: "1px solid #e2e8f0" }}>
         <h3
-          className="font-semibold text-slate-900 uppercase tracking-wide mb-3"
+          className="font-semibold text-[#0f172a] uppercase tracking-wide mb-3"
           style={{ fontSize: "11pt", letterSpacing: "0.5px" }}
         >
           Authorization
@@ -499,24 +499,24 @@ export function COAPreviewDocument({
           )}
 
           {/* Name */}
-          <span className="text-slate-900 font-medium" style={{ fontSize: "10pt" }}>
+          <span className="text-[#0f172a] font-medium" style={{ fontSize: "10pt" }}>
             {data.released_by}
           </span>
 
           {/* Title */}
           {data.released_by_title && (
-            <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+            <span className="text-[#475569]" style={{ fontSize: "9pt" }}>
               {data.released_by_title}
             </span>
           )}
 
           {/* Email */}
-          <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+          <span className="text-[#475569]" style={{ fontSize: "9pt" }}>
             Email: {data.released_by_email || "(Preview)"}
           </span>
 
           {/* Date */}
-          <span className="text-slate-600" style={{ fontSize: "9pt" }}>
+          <span className="text-[#475569]" style={{ fontSize: "9pt" }}>
             Date: {data.released_at || data.generated_date}
           </span>
         </div>
@@ -524,7 +524,7 @@ export function COAPreviewDocument({
 
       {/* Disclaimer Footer */}
       <div
-        className="text-center text-slate-500"
+        className="text-center text-[#64748b]"
         style={{
           backgroundColor: "#f8fafc",
           border: "1px solid #e2e8f0",

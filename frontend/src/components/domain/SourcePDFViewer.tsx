@@ -325,7 +325,7 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
   }
 
   return (
-    <div ref={setContainerRef} className="w-full h-full overflow-y-auto overflow-x-hidden">
+    <div ref={setContainerRef} className="document-preview w-full h-full overflow-y-auto overflow-x-hidden">
       {partialError && (
         <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
           {partialError}

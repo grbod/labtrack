@@ -50,6 +50,7 @@ class Lot(BaseModel):
     attached_pdfs = Column(JSON, nullable=True, default=list)  # List of uploaded PDF filenames
     has_pending_retest = Column(Boolean, default=False, nullable=False)  # True when retest is pending
     daane_po_number = Column(String(20), nullable=True)  # Daane COC PO number
+    coc_storage_key = Column(String(255), nullable=True)  # Archived COC PDF
 
     # Relationships
     sublots = relationship(

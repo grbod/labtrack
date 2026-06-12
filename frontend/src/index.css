@@ -116,6 +116,7 @@
   --color-emerald-50: color-mix(in srgb, #8a9a7b 14%, #181616);
   --color-emerald-100: color-mix(in srgb, #8a9a7b 22%, #181616);
   --color-emerald-200: color-mix(in srgb, #8a9a7b 32%, #181616);
+  --color-emerald-300: color-mix(in srgb, #8a9a7b 50%, #181616);
   --color-emerald-500: #8a9a7b;
   --color-emerald-600: #8a9a7b;
   --color-emerald-700: #9fb592;

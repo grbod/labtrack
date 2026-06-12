@@ -556,8 +556,8 @@ async def download_daane_coc_pdf(
             db.commit()
         except Exception:  # noqa: BLE001
             db.rollback()
-            logger.warning(
-                "Failed to archive COC PDF for lot %s", lot_id, exc_info=True
+            logger.opt(exception=True).warning(
+                f"Failed to archive COC PDF for lot {lot_id}"
             )
 
         filename = f"daane-coc-{lot.reference_number}.pdf"

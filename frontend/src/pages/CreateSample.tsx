@@ -551,6 +551,11 @@ export function CreateSamplePage() {
       p.brand.toLowerCase().includes(productSearch.toLowerCase())
   )
 
+  // Autoscroll focused table cells above the sticky submit bar
+  const handleTableFocusScroll = (e: React.FocusEvent<HTMLElement>) => {
+    ;(e.target as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }
+
   // Sub-batch grid handlers
   const addSubBatch = useCallback(() => {
     setSubBatches(prev => [
@@ -1418,7 +1423,7 @@ export function CreateSamplePage() {
                   </Button>
                 </div>
               </div>
-              <div className="overflow-x-auto pb-3">
+              <div className="overflow-x-auto pb-3" onFocus={handleTableFocusScroll}>
                 <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
@@ -1437,7 +1442,7 @@ export function CreateSamplePage() {
                   </thead>
                   <tbody>
                     {subBatchTable.getRowModel().rows.map((row) => (
-                      <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                      <tr key={row.id} className="scroll-mb-28 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
                         {row.getVisibleCells().map((cell) => (
                           <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1475,7 +1480,7 @@ export function CreateSamplePage() {
                 </Button>
               </div>
             </div>
-            <div className="overflow-x-auto pb-3">
+            <div className="overflow-x-auto pb-3" onFocus={handleTableFocusScroll}>
               <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
@@ -1494,7 +1499,7 @@ export function CreateSamplePage() {
                 </thead>
                 <tbody>
                   {compositeTable.getRowModel().rows.map((row) => (
-                    <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                    <tr key={row.id} className="scroll-mb-28 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1597,25 +1602,27 @@ export function CreateSamplePage() {
         )}
 
         {/* Submit */}
-        <div className="flex gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => navigate("/")}
-            className="border-slate-200 h-10"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            disabled={createMutation.isPending}
-            className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
-          >
-            {createMutation.isPending && (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            )}
-            Create Sample
-          </Button>
+        <div className="sticky bottom-0 z-10 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate("/")}
+              className="border-slate-200 h-10"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm h-10"
+            >
+              {createMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Create Sample
+            </Button>
+          </div>
         </div>
       </form>
 

@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -17,13 +18,32 @@ from app.database import init_db
 from app.utils.logger import logger
 
 
+async def _coc_cleanup_loop():
+    """Run COC archive cleanup at startup and every 24 hours thereafter."""
+    from app.database import SessionLocal
+    from app.services.lot_service import LotService
+
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                LotService().cleanup_expired_coc_archives(db)
+            finally:
+                db.close()
+        except Exception:
+            logger.opt(exception=True).error("COC archive cleanup failed")
+        await asyncio.sleep(24 * 60 * 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     init_db()
+    cleanup_task = asyncio.create_task(_coc_cleanup_loop())
     yield
     # Shutdown
+    cleanup_task.cancel()
 
 
 app = FastAPI(

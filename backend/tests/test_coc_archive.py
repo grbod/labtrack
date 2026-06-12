@@ -1,6 +1,6 @@
 """Tests for COC PDF archiving and re-download endpoint."""
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +13,7 @@ from app.dependencies import get_current_user, get_db
 from app.main import app
 from app.models import Lot, LotProduct, Product, User
 from app.models.enums import LotStatus, LotType, UserRole
+from app.services.lot_service import LotService
 from app.services import storage_service as storage_module
 from app.services.local_storage import LocalStorageService
 
@@ -95,9 +96,9 @@ def test_product(test_db):
     return product
 
 
-def _make_lot(test_db, product, *, reference_number="241101-001", status=LotStatus.AWAITING_RESULTS):
+def _make_lot(test_db, product, *, reference_number="241101-001", status=LotStatus.AWAITING_RESULTS, lot_number="TEST123"):
     lot = Lot(
-        lot_number="TEST123",
+        lot_number=lot_number,
         lot_type=LotType.STANDARD,
         reference_number=reference_number,
         mfg_date=date(2024, 11, 1),
@@ -184,3 +185,68 @@ def test_coc_archive_404_for_terminal_lot_without_archive(client, test_db, test_
 def test_coc_archive_404_unknown_lot(client):
     resp = client.get("/api/v1/lots/999999/coc-archive")
     assert resp.status_code == 404
+
+
+def test_cleanup_purges_old_terminal_lot_archives(test_db, test_product, temp_storage):
+    """Released lot with archived COC and updated_at > 7 days ago should be purged."""
+    old_key = "cocs/old-released-lot.pdf"
+    temp_storage.upload(b"fake pdf bytes", old_key)
+
+    lot = _make_lot(test_db, test_product, reference_number="241101-010", status=LotStatus.RELEASED, lot_number="OLD001")
+    lot.coc_storage_key = old_key
+    test_db.commit()
+
+    # Backdate updated_at so it falls outside the 7-day retention window
+    # Use bulk UPDATE to bypass the onupdate trigger on the ORM model
+    test_db.query(Lot).filter(Lot.id == lot.id).update(
+        {"updated_at": datetime.utcnow() - timedelta(days=8)}
+    )
+    test_db.commit()
+
+    purged = LotService().cleanup_expired_coc_archives(test_db)
+
+    assert purged == 1
+    test_db.refresh(lot)
+    assert lot.coc_storage_key is None
+    assert not temp_storage.exists(old_key)
+
+
+def test_cleanup_keeps_recent_terminal_and_active_lots(test_db, test_product, temp_storage):
+    """A recently-released lot and an active lot with archives should NOT be purged."""
+    recent_key = "cocs/recent-released-lot.pdf"
+    active_key = "cocs/active-lot.pdf"
+    temp_storage.upload(b"recent pdf", recent_key)
+    temp_storage.upload(b"active pdf", active_key)
+
+    # RELEASED lot whose updated_at is now (within retention window)
+    recent_lot = _make_lot(
+        test_db, test_product, reference_number="241101-011", status=LotStatus.RELEASED,
+        lot_number="RECENT01",
+    )
+    recent_lot.coc_storage_key = recent_key
+    test_db.commit()
+
+    # Active (non-terminal) lot with an archive
+    active_lot = _make_lot(
+        test_db, test_product, reference_number="241101-012", status=LotStatus.AWAITING_RESULTS,
+        lot_number="ACTIVE01",
+    )
+    active_lot.coc_storage_key = active_key
+    test_db.commit()
+
+    # Backdate the active lot's updated_at to confirm non-terminal status protects it
+    test_db.query(Lot).filter(Lot.id == active_lot.id).update(
+        {"updated_at": datetime.utcnow() - timedelta(days=10)}
+    )
+    test_db.commit()
+
+    purged = LotService().cleanup_expired_coc_archives(test_db)
+
+    assert purged == 0
+
+    test_db.refresh(recent_lot)
+    test_db.refresh(active_lot)
+    assert recent_lot.coc_storage_key == recent_key
+    assert active_lot.coc_storage_key == active_key
+    assert temp_storage.exists(recent_key)
+    assert temp_storage.exists(active_key)

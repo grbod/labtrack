@@ -1,7 +1,7 @@
 """Lot service for managing lots and sublots."""
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import IntegrityError
@@ -728,6 +728,38 @@ class LotService(BaseService[Lot]):
             "changes": changes,
         }
 
+    COC_RETENTION_DAYS = 7
+
+    def cleanup_expired_coc_archives(self, db: Session) -> int:
+        """Delete archived COC PDFs for lots released/rejected > 7 days ago."""
+        from app.services.storage_service import get_storage_service
+
+        cutoff = datetime.utcnow() - timedelta(days=self.COC_RETENTION_DAYS)
+        lots = (
+            db.query(Lot)
+            .filter(
+                Lot.coc_storage_key.isnot(None),
+                Lot.status.in_([LotStatus.RELEASED, LotStatus.REJECTED]),
+                Lot.updated_at < cutoff,
+            )
+            .all()
+        )
+        storage = get_storage_service()
+        purged = 0
+        for lot in lots:
+            try:
+                storage.delete(lot.coc_storage_key)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"Failed to delete COC archive {lot.coc_storage_key}"
+                )
+            lot.coc_storage_key = None
+            purged += 1
+        if purged:
+            db.commit()
+            logger.info(f"Purged {purged} expired COC archives")
+        return purged
+
     def _bulk_status_recalculation_calculations(
         self,
         db: Session,
@@ -746,7 +778,3 @@ class LotService(BaseService[Lot]):
             .all()
         )
         return [self.calculate_lot_status(db, lot) for lot in lots]
-
-
-# Add missing import
-from datetime import timedelta

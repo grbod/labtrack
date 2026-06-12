@@ -207,13 +207,16 @@ class COAGenerationService:
         from app.models.product_test_spec import ProductTestSpecification
         from app.services.coa_category_order_service import coa_category_order_service
 
-        # Get test results for this lot that have values (no ordering in SQL, we'll sort in Python)
+        # Get test results for this lot that have values and are flagged for COA inclusion.
+        # Results with include_on_coa=False are internal/investigative and must not appear
+        # on the customer-facing COA document.
         test_results = (
             db.query(TestResult)
             .filter(
                 TestResult.lot_id == lot.id,
                 TestResult.result_value.isnot(None),
                 TestResult.result_value != "",
+                TestResult.include_on_coa.is_(True),
             )
             .all()
         )

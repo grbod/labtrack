@@ -225,6 +225,9 @@ class COAGeneratorService:
         other = []
 
         for result in lot.test_results:
+            # Skip results excluded from the customer-facing COA (internal/investigative)
+            if not result.include_on_coa:
+                continue
             if result.test_type in [
                 "Total Plate Count",
                 "Yeast/Mold",
@@ -507,6 +510,9 @@ class COAGeneratorService:
         other = []
         
         for result in lot.test_results:
+            # Skip results excluded from the customer-facing COA (internal/investigative)
+            if not result.include_on_coa:
+                continue
             if "plate count" in result.test_type.lower() or \
                "yeast" in result.test_type.lower() or \
                "mold" in result.test_type.lower() or \

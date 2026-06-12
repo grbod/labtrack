@@ -131,7 +131,7 @@ Accents (full Dragon palette applies to semantic colors in dark mode):
 - Tailwind `dark` class strategy with CSS variables for semantic tokens (surface, surface-raised, border, text-primary, text-secondary, success, error, warning, info, accent).
 - Sun/moon toggle in the top header bar; preference persisted in localStorage; **default light**.
 - Migrate hardcoded slate/white/status classes across all pages to the semantic tokens.
-- **Documents stay white:** COA previews, chain of custody PDFs, and printable labels render on white regardless of theme; only app chrome themes.
+- **Documents stay light, but dimmed in dark mode:** generated files (COA, COC PDFs, labels) are always pure white; on-screen previews in dark mode get a comfort filter on the preview container (`filter: brightness(0.85) sepia(0.04)`), rendering the paper as a warm dimmed off-white on the dark canvas. No inversion (would distort logos and PASS/FAIL colors). Light mode previews stay unfiltered.
 - **All-or-nothing ship:** the toggle only appears once every page renders correctly in Dragon. No half-dark screens.
 
 ### Touchpoints

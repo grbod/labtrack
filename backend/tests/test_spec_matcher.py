@@ -27,28 +27,41 @@ class TestSpecificationMatches:
     # --- Positive/Negative unit-based branch (test_unit == "Positive/Negative") ---
 
     def test_positive_negative_unit_negative_spec_accepts_negative(self):
-        assert specification_matches("Negative", "Positive/Negative", "Negative") is True
+        assert (
+            specification_matches("Negative", "Positive/Negative", "Negative") is True
+        )
 
     def test_positive_negative_unit_negative_spec_accepts_nd(self):
         assert specification_matches("Negative", "Positive/Negative", "ND") is True
 
     def test_positive_negative_unit_negative_spec_accepts_not_detected(self):
-        assert specification_matches("Negative", "Positive/Negative", "Not Detected") is True
+        assert (
+            specification_matches("Negative", "Positive/Negative", "Not Detected")
+            is True
+        )
 
     def test_positive_negative_unit_negative_spec_accepts_bdl(self):
         assert specification_matches("Negative", "Positive/Negative", "BDL") is True
 
     def test_positive_negative_unit_negative_spec_rejects_positive(self):
-        assert specification_matches("Negative", "Positive/Negative", "Positive") is False
+        assert (
+            specification_matches("Negative", "Positive/Negative", "Positive") is False
+        )
 
     def test_positive_negative_unit_positive_spec_accepts_positive(self):
-        assert specification_matches("Positive", "Positive/Negative", "Positive") is True
+        assert (
+            specification_matches("Positive", "Positive/Negative", "Positive") is True
+        )
 
     def test_positive_negative_unit_positive_spec_accepts_detected(self):
-        assert specification_matches("Positive", "Positive/Negative", "Detected") is True
+        assert (
+            specification_matches("Positive", "Positive/Negative", "Detected") is True
+        )
 
     def test_positive_negative_unit_positive_spec_rejects_negative(self):
-        assert specification_matches("Positive", "Positive/Negative", "Negative") is False
+        assert (
+            specification_matches("Positive", "Positive/Negative", "Negative") is False
+        )
 
     # --- "Negative" specs (no Positive/Negative unit) ---
 

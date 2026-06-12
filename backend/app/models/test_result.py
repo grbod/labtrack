@@ -2,21 +2,23 @@
 
 from datetime import datetime
 from decimal import Decimal
+
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
-    String,
-    Text,
     Date,
     DateTime,
-    Numeric,
-    Integer,
-    ForeignKey,
     Enum,
+    ForeignKey,
     Index,
-    CheckConstraint,
+    Integer,
+    Numeric,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship, validates
+
 from app.models.base import BaseModel
 from app.models.enums import TestResultStatus
 
@@ -61,9 +63,7 @@ class TestResult(BaseModel):
     method = Column(String(100), nullable=True)  # e.g., "USP <2021>"
 
     # Ad-hoc test support
-    lab_test_type_id = Column(
-        Integer, ForeignKey("lab_test_types.id"), nullable=True
-    )
+    lab_test_type_id = Column(Integer, ForeignKey("lab_test_types.id"), nullable=True)
     include_on_coa = Column(Boolean, default=True, nullable=False)
 
     # Relationships

@@ -1,39 +1,39 @@
 """COA Release management endpoints."""
 
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import joinedload
 
-from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
 from app.config import settings
-from app.services.audit_service import AuditService
-from app.models.enums import AuditAction
+from app.dependencies import CurrentUser, DbSession, QCManagerOrAdmin
 from app.models.coa_release import COARelease
+from app.models.enums import AuditAction
 from app.models.lot import Lot
-from app.services.coa_generation_service import coa_generation_service
-from app.services.release_service import ReleaseService
-from app.services.lab_info_service import lab_info_service
 from app.schemas.release import (
-    COAReleaseResponse,
-    COAReleaseWithSourcePdfs,
-    LotInRelease,
-    ProductInRelease,
-    CustomerInRelease,
-    ReleaseQueueItem,
-    ReleaseQueueResponse,
-    DraftSaveRequest,
-    SendBackRequest,
-    EmailSendRequest,
-    EmailHistoryResponse,
-    ApproveReleaseResponse,
-    ReleaseDetailsByLotProduct,
     ApproveByLotProductRequest,
     ApproveByLotProductResponse,
+    ApproveReleaseResponse,
     COAPreviewData,
+    COAReleaseResponse,
+    COAReleaseWithSourcePdfs,
     COATestResult,
+    CustomerInRelease,
+    DraftSaveRequest,
+    EmailHistoryResponse,
+    EmailSendRequest,
+    LotInRelease,
+    ProductInRelease,
+    ReleaseDetailsByLotProduct,
+    ReleaseQueueItem,
+    ReleaseQueueResponse,
+    SendBackRequest,
 )
+from app.services.audit_service import AuditService
+from app.services.coa_generation_service import coa_generation_service
+from app.services.lab_info_service import lab_info_service
+from app.services.release_service import ReleaseService
 
 router = APIRouter()
 release_service = ReleaseService()
@@ -50,7 +50,7 @@ def _normalize_pdf_storage_key(filename: str) -> str:
     key = filename.lstrip("/\\")
     marker = "pdfs/"
     if marker in key:
-        return key[key.index(marker):]
+        return key[key.index(marker) :]
     return f"pdfs/{key}"
 
 
@@ -73,14 +73,18 @@ def _get_pdf_from_storage(
 
     if settings.storage_backend == "r2":
         presigned_url = storage.get_presigned_url(storage_key)
-        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(
+            url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
 
     content = storage.download(storage_key)
     disposition = "inline" if inline else "attachment"
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"{disposition}; filename=\"{response_filename}\""},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{response_filename}"'
+        },
     )
 
 
@@ -285,6 +289,7 @@ async def regenerate_coa(
 # Release Queue and Workflow Endpoints
 # ============================================================================
 
+
 @router.get("/queue", response_model=ReleaseQueueResponse)
 async def get_release_queue(
     db: DbSession,
@@ -332,6 +337,7 @@ async def get_release_queue(
 # Lot+Product Release Endpoints
 # ============================================================================
 
+
 @router.get("/{lot_id}/{product_id}", response_model=ReleaseDetailsByLotProduct)
 async def get_release_details_by_lot_product(
     lot_id: int,
@@ -364,10 +370,11 @@ async def get_release_details_by_lot_product(
         )
 
     # Verify lot-product association
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -386,17 +393,19 @@ async def get_release_details_by_lot_product(
             joinedload(COARelease.customer),
             joinedload(COARelease.released_by),
         )
-        .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.product_id == product_id
-        )
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
     # Determine status
     from app.models.enums import COAReleaseStatus
+
     if existing_release:
-        status = "released" if existing_release.status == COAReleaseStatus.RELEASED else "awaiting_release"
+        status = (
+            "released"
+            if existing_release.status == COAReleaseStatus.RELEASED
+            else "awaiting_release"
+        )
     else:
         status = "awaiting_release"
 
@@ -411,11 +420,17 @@ async def get_release_details_by_lot_product(
         lot=LotInRelease.model_validate(lot),
         product=ProductInRelease.model_validate(product),
         source_pdfs=source_pdfs,
-        customer=CustomerInRelease.model_validate(existing_release.customer) if existing_release and existing_release.customer else None,
+        customer=(
+            CustomerInRelease.model_validate(existing_release.customer)
+            if existing_release and existing_release.customer
+            else None
+        ),
     )
 
 
-@router.post("/{lot_id}/{product_id}/approve", response_model=ApproveByLotProductResponse)
+@router.post(
+    "/{lot_id}/{product_id}/approve", response_model=ApproveByLotProductResponse
+)
 async def approve_release_by_lot_product(
     lot_id: int,
     product_id: int,
@@ -432,8 +447,9 @@ async def approve_release_by_lot_product(
     If all products for the lot are released, updates lot status to RELEASED.
     """
     from datetime import datetime
+
     from app.models import LotProduct, Product
-    from app.models.enums import LotStatus, COAReleaseStatus
+    from app.models.enums import COAReleaseStatus, LotStatus
 
     # Default request if not provided
     if request is None:
@@ -484,10 +500,11 @@ async def approve_release_by_lot_product(
         )
 
     # Verify lot-product association
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -497,10 +514,7 @@ async def approve_release_by_lot_product(
     # Check for existing COARelease or create new one
     coa_release = (
         db.query(COARelease)
-        .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.product_id == product_id
-        )
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
@@ -545,19 +559,14 @@ async def approve_release_by_lot_product(
         )
 
     # Check if all products for this lot are released
-    all_lot_products = (
-        db.query(LotProduct)
-        .filter(LotProduct.lot_id == lot_id)
-        .all()
-    )
+    all_lot_products = db.query(LotProduct).filter(LotProduct.lot_id == lot_id).all()
 
     all_product_ids = {lp.product_id for lp in all_lot_products}
 
     released_releases = (
         db.query(COARelease)
         .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.status == COAReleaseStatus.RELEASED
+            COARelease.lot_id == lot_id, COARelease.status == COAReleaseStatus.RELEASED
         )
         .all()
     )
@@ -636,10 +645,11 @@ async def preview_coa_by_lot_product(
         )
 
     # Verify lot-product association
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -650,10 +660,7 @@ async def preview_coa_by_lot_product(
         # Check if COARelease exists with a valid file
         existing_release = (
             db.query(COARelease)
-            .filter(
-                COARelease.lot_id == lot_id,
-                COARelease.product_id == product_id
-            )
+            .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
             .first()
         )
 
@@ -665,7 +672,7 @@ async def preview_coa_by_lot_product(
                 missing_detail=(
                     f"COA preview file for lot '{lot.lot_number}' and product '{product_id}' "
                     "not found in storage"
-                )
+                ),
             )
         # Generate preview PDF on-the-fly (returns storage key)
         storage_key = coa_generation_service.generate_preview(db, lot_id, product_id)
@@ -694,6 +701,7 @@ async def download_coa_by_lot_product(
     Only works if a COARelease exists and has been released.
     """
     from app.models.enums import COAReleaseStatus
+
     # Get the COARelease
     coa_release = (
         db.query(COARelease)
@@ -701,7 +709,7 @@ async def download_coa_by_lot_product(
         .filter(
             COARelease.lot_id == lot_id,
             COARelease.product_id == product_id,
-            COARelease.status == COAReleaseStatus.RELEASED
+            COARelease.status == COAReleaseStatus.RELEASED,
         )
         .first()
     )
@@ -746,7 +754,7 @@ async def regenerate_coa_by_lot_product(
         .filter(
             COARelease.lot_id == lot_id,
             COARelease.product_id == product_id,
-            COARelease.status == COAReleaseStatus.RELEASED
+            COARelease.status == COAReleaseStatus.RELEASED,
         )
         .first()
     )
@@ -790,6 +798,7 @@ async def get_preview_data_by_lot_product(
     Returns all data needed to render a WYSIWYG COA preview.
     """
     from datetime import datetime
+
     from app.models import LotProduct, Product
     from app.models.test_result import TestResult
 
@@ -810,10 +819,11 @@ async def get_preview_data_by_lot_product(
         )
 
     # Verify lot-product association
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -835,18 +845,18 @@ async def get_preview_data_by_lot_product(
     )
 
     # Get category order configuration and sort tests
-    from app.services.coa_category_order_service import coa_category_order_service
     from app.models.lab_test_type import LabTestType
+    from app.services.coa_category_order_service import coa_category_order_service
 
     category_order = coa_category_order_service.get_ordered_categories(db)
 
     # Build a lookup for test_type -> category from LabTestType
     test_type_names = [r.test_type for r in test_results]
     lab_test_types = (
-        db.query(LabTestType)
-        .filter(LabTestType.test_name.in_(test_type_names))
-        .all()
-    ) if test_type_names else []
+        (db.query(LabTestType).filter(LabTestType.test_name.in_(test_type_names)).all())
+        if test_type_names
+        else []
+    )
     category_lookup = {lt.test_name.lower(): lt.test_category for lt in lab_test_types}
 
     def get_category(test_type: str) -> str:
@@ -867,6 +877,7 @@ async def get_preview_data_by_lot_product(
 
     # Get product test specifications for fallback
     from app.models.product_test_spec import ProductTestSpecification
+
     product_specs = (
         db.query(ProductTestSpecification)
         .filter(ProductTestSpecification.product_id == product_id)
@@ -889,13 +900,15 @@ async def get_preview_data_by_lot_product(
         if not specification:
             specification = "Within limits"
 
-        tests.append(COATestResult(
-            name=result.test_type,
-            result=result.result_value or "N/D",
-            unit=result.unit,
-            specification=specification,
-            status="Pass",  # All approved results are considered passing
-        ))
+        tests.append(
+            COATestResult(
+                name=result.test_type,
+                result=result.result_value or "N/D",
+                unit=result.unit,
+                specification=specification,
+                status="Pass",  # All approved results are considered passing
+            )
+        )
 
     # Check for existing COARelease to get notes and release info
     from sqlalchemy.orm import joinedload
@@ -903,10 +916,7 @@ async def get_preview_data_by_lot_product(
     coa_release = (
         db.query(COARelease)
         .options(joinedload(COARelease.released_by))
-        .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.product_id == product_id
-        )
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
@@ -920,7 +930,9 @@ async def get_preview_data_by_lot_product(
         if coa_release.draft_data:
             notes = coa_release.draft_data.get("notes") or notes
         if coa_release.released_by:
-            released_by = coa_release.released_by.full_name or coa_release.released_by.username
+            released_by = (
+                coa_release.released_by.full_name or coa_release.released_by.username
+            )
             released_by_title = coa_release.released_by.title
             released_by_email = coa_release.released_by.email
         if coa_release.released_at:
@@ -931,7 +943,11 @@ async def get_preview_data_by_lot_product(
 
     # Build signature URL - use released_by user's signature if released, else current user's
     signature_url = None
-    if coa_release and coa_release.released_by and coa_release.released_by.signature_path:
+    if (
+        coa_release
+        and coa_release.released_by
+        and coa_release.released_by.signature_path
+    ):
         signature_url = f"/uploads/{coa_release.released_by.signature_path}"
     elif current_user.signature_path:
         signature_url = f"/uploads/{current_user.signature_path}"
@@ -943,23 +959,18 @@ async def get_preview_data_by_lot_product(
         company_phone=lab_info.phone,
         company_email=lab_info.email,
         company_logo_url=lab_info_service.get_logo_url(lab_info.logo_path),
-
         # Product info
         product_name=product.display_name,
         brand=product.brand,
-
         # Lot info
         lot_number=lot.lot_number,
         reference_number=lot.reference_number,
         mfg_date=lot.mfg_date.strftime("%B %d, %Y") if lot.mfg_date else None,
         exp_date=lot.exp_date.strftime("%B %d, %Y") if lot.exp_date else None,
-
         # Test results
         tests=tests,
-
         # Notes
         notes=notes,
-
         # Generation info
         generated_date=datetime.now().strftime("%B %d, %Y"),
         released_by=released_by,
@@ -991,10 +1002,11 @@ async def get_source_pdf_by_lot_product(
             detail="Lot not found",
         )
 
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1051,10 +1063,11 @@ async def save_draft_by_lot_product(
             detail="Product not found",
         )
 
-    lot_product = db.query(LotProduct).filter(
-        LotProduct.lot_id == lot_id,
-        LotProduct.product_id == product_id
-    ).first()
+    lot_product = (
+        db.query(LotProduct)
+        .filter(LotProduct.lot_id == lot_id, LotProduct.product_id == product_id)
+        .first()
+    )
     if not lot_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1082,10 +1095,7 @@ async def save_draft_by_lot_product(
     # Get or create COARelease
     coa_release = (
         db.query(COARelease)
-        .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.product_id == product_id
-        )
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
@@ -1111,7 +1121,7 @@ async def save_draft_by_lot_product(
             draft_data={
                 "customer_id": request.customer_id,
                 "notes": request.notes,
-            }
+            },
         )
         db.add(coa_release)
         db.flush()  # Get the ID for audit logging
@@ -1148,7 +1158,11 @@ async def save_draft_by_lot_product(
             record_id=coa_release.id,
             action=AuditAction.UPDATE,
             user_id=current_user.id,
-            old_values=draft_changes_old if any(v is not None for v in draft_changes_old.values()) else None,
+            old_values=(
+                draft_changes_old
+                if any(v is not None for v in draft_changes_old.values())
+                else None
+            ),
             new_values=draft_changes_new,
             reason="Release draft: details updated",
         )
@@ -1163,7 +1177,11 @@ async def save_draft_by_lot_product(
         lot_id=lot_id,
         product_id=product_id,
         status="awaiting_release",
-        customer_id=coa_release.draft_data.get("customer_id") if coa_release.draft_data else None,
+        customer_id=(
+            coa_release.draft_data.get("customer_id")
+            if coa_release.draft_data
+            else None
+        ),
         notes=coa_release.draft_data.get("notes") if coa_release.draft_data else None,
         draft_data=coa_release.draft_data,
         lot=LotInRelease.model_validate(lot),
@@ -1184,9 +1202,10 @@ async def send_email_by_lot_product(
     Log an email sent for a lot+product's COARelease.
     Only works after the COA has been released.
     """
-    from app.models.enums import COAReleaseStatus
-    from app.models.email_history import EmailHistory
     from datetime import datetime
+
+    from app.models.email_history import EmailHistory
+    from app.models.enums import COAReleaseStatus
 
     # Get the released COARelease
     coa_release = (
@@ -1194,7 +1213,7 @@ async def send_email_by_lot_product(
         .filter(
             COARelease.lot_id == lot_id,
             COARelease.product_id == product_id,
-            COARelease.status == COAReleaseStatus.RELEASED
+            COARelease.status == COAReleaseStatus.RELEASED,
         )
         .first()
     )
@@ -1234,16 +1253,13 @@ async def get_email_history_by_lot_product(
     """
     Get email history for a lot+product's COARelease.
     """
-    from app.models.email_history import EmailHistory
     from app.models import User
+    from app.models.email_history import EmailHistory
 
     # Get the COARelease
     coa_release = (
         db.query(COARelease)
-        .filter(
-            COARelease.lot_id == lot_id,
-            COARelease.product_id == product_id
-        )
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
@@ -1273,6 +1289,7 @@ async def get_email_history_by_lot_product(
 # ============================================================================
 # Legacy COARelease ID-based Endpoints
 # ============================================================================
+
 
 @router.get("/{id}", response_model=COAReleaseWithSourcePdfs)
 async def get_release(

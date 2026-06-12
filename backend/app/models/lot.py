@@ -2,24 +2,26 @@
 
 from datetime import date
 from decimal import Decimal
+
 from sqlalchemy import (
-    Column,
-    String,
-    Date,
+    JSON,
     Boolean,
+    CheckConstraint,
+    Column,
+    Date,
     Enum,
-    Text,
+    ForeignKey,
     Index,
     Integer,
-    ForeignKey,
-    CheckConstraint,
-    UniqueConstraint,
     Numeric,
-    JSON,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship, validates
+
 from app.models.base import BaseModel
-from app.models.enums import LotType, LotStatus, TestResultStatus
+from app.models.enums import LotStatus, LotType, TestResultStatus
 
 
 class Lot(BaseModel):
@@ -47,12 +49,18 @@ class Lot(BaseModel):
     status = Column(Enum(LotStatus), nullable=False, default=LotStatus.AWAITING_RESULTS)
     generate_coa = Column(Boolean, default=True, nullable=False)
     rejection_reason = Column(Text, nullable=True)  # Required when status is REJECTED
-    attached_pdfs = Column(JSON, nullable=True, default=list)  # List of uploaded PDF filenames
-    has_pending_retest = Column(Boolean, default=False, nullable=False)  # True when retest is pending
+    attached_pdfs = Column(
+        JSON, nullable=True, default=list
+    )  # List of uploaded PDF filenames
+    has_pending_retest = Column(
+        Boolean, default=False, nullable=False
+    )  # True when retest is pending
     daane_po_number = Column(String(20), nullable=True)  # Daane COC PO number
     coc_storage_key = Column(String(255), nullable=True)  # Archived COC PDF
     return_reason = Column(Text, nullable=True)  # Set when returned from release queue
-    return_response_note = Column(Text, nullable=True)  # Required response before re-approval
+    return_response_note = Column(
+        Text, nullable=True
+    )  # Required response before re-approval
 
     # Relationships
     sublots = relationship(
@@ -122,18 +130,44 @@ class Lot(BaseModel):
             and all(tr.status == TestResultStatus.APPROVED for tr in self.test_results)
         )
 
-    def update_status(self, new_status, rejection_reason: str = None, override_reason: str = None):
+    def update_status(
+        self, new_status, rejection_reason: str = None, override_reason: str = None
+    ):
         """Update lot status with validation."""
         # Valid transitions
         valid_transitions = {
-            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.NEEDS_ATTENTION, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.PARTIAL_RESULTS: [LotStatus.NEEDS_ATTENTION, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.NEEDS_ATTENTION: [LotStatus.UNDER_REVIEW, LotStatus.APPROVED, LotStatus.REJECTED],  # APPROVED requires override_reason
-            LotStatus.UNDER_REVIEW: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION, LotStatus.REJECTED],
-            LotStatus.AWAITING_RELEASE: [LotStatus.APPROVED, LotStatus.REJECTED, LotStatus.NEEDS_ATTENTION],
+            LotStatus.AWAITING_RESULTS: [
+                LotStatus.PARTIAL_RESULTS,
+                LotStatus.NEEDS_ATTENTION,
+                LotStatus.UNDER_REVIEW,
+                LotStatus.REJECTED,
+            ],
+            LotStatus.PARTIAL_RESULTS: [
+                LotStatus.NEEDS_ATTENTION,
+                LotStatus.UNDER_REVIEW,
+                LotStatus.REJECTED,
+            ],
+            LotStatus.NEEDS_ATTENTION: [
+                LotStatus.UNDER_REVIEW,
+                LotStatus.APPROVED,
+                LotStatus.REJECTED,
+            ],  # APPROVED requires override_reason
+            LotStatus.UNDER_REVIEW: [
+                LotStatus.AWAITING_RELEASE,
+                LotStatus.NEEDS_ATTENTION,
+                LotStatus.REJECTED,
+            ],
+            LotStatus.AWAITING_RELEASE: [
+                LotStatus.APPROVED,
+                LotStatus.REJECTED,
+                LotStatus.NEEDS_ATTENTION,
+            ],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.REJECTED],
             LotStatus.RELEASED: [],  # Terminal state
-            LotStatus.REJECTED: [LotStatus.AWAITING_RELEASE, LotStatus.NEEDS_ATTENTION],  # Can resubmit for QC review
+            LotStatus.REJECTED: [
+                LotStatus.AWAITING_RELEASE,
+                LotStatus.NEEDS_ATTENTION,
+            ],  # Can resubmit for QC review
         }
 
         if new_status not in valid_transitions.get(self.status, []):
@@ -146,14 +180,22 @@ class Lot(BaseModel):
             if not rejection_reason or not rejection_reason.strip():
                 raise ValueError("Rejection reason is required when rejecting a lot")
             self.rejection_reason = rejection_reason.strip()
-        elif new_status == LotStatus.AWAITING_RELEASE and self.status == LotStatus.REJECTED:
+        elif (
+            new_status == LotStatus.AWAITING_RELEASE
+            and self.status == LotStatus.REJECTED
+        ):
             # Clear rejection reason when resubmitting
             self.rejection_reason = None
 
         # Override reason is required when approving from NEEDS_ATTENTION (QC override)
-        if self.status == LotStatus.NEEDS_ATTENTION and new_status == LotStatus.APPROVED:
+        if (
+            self.status == LotStatus.NEEDS_ATTENTION
+            and new_status == LotStatus.APPROVED
+        ):
             if not override_reason or not override_reason.strip():
-                raise ValueError("Override justification is required when approving a lot with failing tests")
+                raise ValueError(
+                    "Override justification is required when approving a lot with failing tests"
+                )
             # Store override reason in rejection_reason field (reused for override notes)
             self.rejection_reason = f"[QC Override] {override_reason.strip()}"
 

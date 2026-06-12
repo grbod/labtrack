@@ -16,12 +16,18 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.dependencies import get_db, get_current_user
+from app.dependencies import get_current_user, get_db
 from app.main import app
-from app.models import Lot, LotProduct, Product, ProductTestSpecification, TestResult, User
+from app.models import (
+    Lot,
+    LotProduct,
+    Product,
+    ProductTestSpecification,
+    TestResult,
+    User,
+)
 from app.models.enums import LotStatus, LotType, TestResultStatus, UserRole
 from app.services.lot_service import LotService
-
 
 # ---------------------------------------------------------------------------
 # Shared DB engine for API-level tests in this module
@@ -334,12 +340,12 @@ class TestIncludeOnCoaFilter:
         db.commit()
 
         resp = client.get(f"/api/v1/release/{lot.id}/{product.id}/preview-data")
-        assert resp.status_code == 200, f"Unexpected status {resp.status_code}: {resp.text}"
+        assert (
+            resp.status_code == 200
+        ), f"Unexpected status {resp.status_code}: {resp.text}"
 
         names = [t["name"] for t in resp.json()["tests"]]
-        assert "Internal Investigation" not in names, (
-            "include_on_coa=False result appeared on COA"
-        )
-        assert "Extra Lead" in names, (
-            "include_on_coa=True result was missing from COA"
-        )
+        assert (
+            "Internal Investigation" not in names
+        ), "include_on_coa=False result appeared on COA"
+        assert "Extra Lead" in names, "include_on_coa=True result was missing from COA"

@@ -13,9 +13,9 @@ from app.dependencies import get_current_user, get_db
 from app.main import app
 from app.models import Lot, LotProduct, Product, User
 from app.models.enums import LotStatus, LotType, UserRole
-from app.services.lot_service import LotService
 from app.services import storage_service as storage_module
 from app.services.local_storage import LocalStorageService
+from app.services.lot_service import LotService
 
 # Isolated in-memory DB for this test module
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -96,7 +96,14 @@ def test_product(test_db):
     return product
 
 
-def _make_lot(test_db, product, *, reference_number="241101-001", status=LotStatus.AWAITING_RESULTS, lot_number="TEST123"):
+def _make_lot(
+    test_db,
+    product,
+    *,
+    reference_number="241101-001",
+    status=LotStatus.AWAITING_RESULTS,
+    lot_number="TEST123",
+):
     lot = Lot(
         lot_number=lot_number,
         lot_type=LotType.STANDARD,
@@ -127,7 +134,9 @@ def test_coc_pdf_generation_archives(client, test_db, active_lot):
     assert active_lot.coc_storage_key
 
 
-def test_coc_pdf_regeneration_overwrites_archive(client, test_db, active_lot, temp_storage):
+def test_coc_pdf_regeneration_overwrites_archive(
+    client, test_db, active_lot, temp_storage
+):
     r1 = client.get(f"/api/v1/lots/{active_lot.id}/daane-coc/pdf")
     assert r1.status_code == 200
 
@@ -169,7 +178,9 @@ def test_coc_archive_fallback_generates_for_active_lot(client, test_db, active_l
     assert active_lot.coc_storage_key
 
 
-def test_coc_archive_404_for_terminal_lot_without_archive(client, test_db, test_product):
+def test_coc_archive_404_for_terminal_lot_without_archive(
+    client, test_db, test_product
+):
     lot = _make_lot(
         test_db,
         test_product,
@@ -192,7 +203,13 @@ def test_cleanup_purges_old_terminal_lot_archives(test_db, test_product, temp_st
     old_key = "cocs/old-released-lot.pdf"
     temp_storage.upload(b"fake pdf bytes", old_key)
 
-    lot = _make_lot(test_db, test_product, reference_number="241101-010", status=LotStatus.RELEASED, lot_number="OLD001")
+    lot = _make_lot(
+        test_db,
+        test_product,
+        reference_number="241101-010",
+        status=LotStatus.RELEASED,
+        lot_number="OLD001",
+    )
     lot.coc_storage_key = old_key
     test_db.commit()
 
@@ -211,7 +228,9 @@ def test_cleanup_purges_old_terminal_lot_archives(test_db, test_product, temp_st
     assert not temp_storage.exists(old_key)
 
 
-def test_cleanup_keeps_recent_terminal_and_active_lots(test_db, test_product, temp_storage):
+def test_cleanup_keeps_recent_terminal_and_active_lots(
+    test_db, test_product, temp_storage
+):
     """A recently-released lot and an active lot with archives should NOT be purged."""
     recent_key = "cocs/recent-released-lot.pdf"
     active_key = "cocs/active-lot.pdf"
@@ -220,7 +239,10 @@ def test_cleanup_keeps_recent_terminal_and_active_lots(test_db, test_product, te
 
     # RELEASED lot whose updated_at is now (within retention window)
     recent_lot = _make_lot(
-        test_db, test_product, reference_number="241101-011", status=LotStatus.RELEASED,
+        test_db,
+        test_product,
+        reference_number="241101-011",
+        status=LotStatus.RELEASED,
         lot_number="RECENT01",
     )
     recent_lot.coc_storage_key = recent_key
@@ -228,7 +250,10 @@ def test_cleanup_keeps_recent_terminal_and_active_lots(test_db, test_product, te
 
     # Active (non-terminal) lot with an archive
     active_lot = _make_lot(
-        test_db, test_product, reference_number="241101-012", status=LotStatus.AWAITING_RESULTS,
+        test_db,
+        test_product,
+        reference_number="241101-012",
+        status=LotStatus.AWAITING_RESULTS,
         lot_number="ACTIVE01",
     )
     active_lot.coc_storage_key = active_key

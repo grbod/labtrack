@@ -8,10 +8,10 @@ from ``ProductTestSpecification.matches_result`` so that ad-hoc test results
 import re
 
 # Accepted result values for specs that start with "Negative" (case-insensitive)
-NEGATIVE_ACCEPTED_VALUES = ['negative', 'nd', 'not detected', 'bdl']
+NEGATIVE_ACCEPTED_VALUES = ["negative", "nd", "not detected", "bdl"]
 
 # Accepted result values for specs that start with "Positive" (case-insensitive)
-POSITIVE_ACCEPTED_VALUES = ['positive', 'detected', 'present', '+']
+POSITIVE_ACCEPTED_VALUES = ["positive", "detected", "present", "+"]
 
 
 def _parse_numeric_value(s):
@@ -25,8 +25,8 @@ def _parse_numeric_value(s):
     Returns:
         float or None if not a valid number
     """
-    cleaned = s.replace(',', '').strip()
-    match = re.match(r'^-?[\d.]+', cleaned)
+    cleaned = s.replace(",", "").strip()
+    match = re.match(r"^-?[\d.]+", cleaned)
     if not match:
         return None
     try:

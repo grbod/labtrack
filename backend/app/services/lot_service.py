@@ -574,9 +574,7 @@ class LotService(BaseService[Lot]):
 
         # Ad-hoc tests (not part of required product specs) are binding too:
         # empty result blocks review; failing own spec flags the lot.
-        adhoc_results = [
-            r for r in test_results if r.test_type not in required_specs
-        ]
+        adhoc_results = [r for r in test_results if r.test_type not in required_specs]
         adhoc_missing = [
             r.test_type
             for r in adhoc_results

@@ -1,33 +1,39 @@
 """Service for generating COA documents."""
 
 import os
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, Dict, Any, List
-from io import BytesIO
 import zipfile
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, 
-    Image, PageBreak, KeepTogether
-)
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from sqlalchemy.orm import Session
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt, RGBColor
 from loguru import logger
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from reportlab.platypus import (
+    Image,
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Lot, LotStatus
 from ..models.coa import COAHistory
 from ..services.base import BaseService
-from ..config import settings
 
 
 class COAGeneratorService:
@@ -52,14 +58,19 @@ class COAGeneratorService:
             raise ValueError(f"Lot {lot_id} not found")
 
         if lot.status not in [LotStatus.APPROVED, LotStatus.RELEASED]:
-            raise ValueError(f"Lot {lot.lot_number} is not approved for COA generation (status: {lot.status.value})")
+            raise ValueError(
+                f"Lot {lot.lot_number} is not approved for COA generation (status: {lot.status.value})"
+            )
 
         if not lot.generate_coa:
             raise ValueError(f"Lot {lot.lot_number} is not marked for COA generation")
 
         # Check if all test results are approved
         from ..models.enums import TestResultStatus
-        unapproved = [r for r in lot.test_results if r.status != TestResultStatus.APPROVED]
+
+        unapproved = [
+            r for r in lot.test_results if r.status != TestResultStatus.APPROVED
+        ]
         if unapproved:
             raise ValueError(f"Lot has {len(unapproved)} unapproved test results")
 
@@ -104,6 +115,7 @@ class COAGeneratorService:
         except Exception as e:
             logger.error(f"Failed to generate COA: {e}")
             import traceback
+
             logger.error(f"Traceback: {traceback.format_exc()}")
             db.rollback()
             raise
@@ -352,329 +364,394 @@ class COAGeneratorService:
     def _generate_pdf(self, lot: Lot, template: str, filename_base: str) -> Path:
         """Generate PDF COA using ReportLab."""
         output_path = self.output_dir / f"{filename_base}.pdf"
-        
+
         try:
             # Create PDF directly to file, not buffer
             doc = SimpleDocTemplate(
                 str(output_path),
                 pagesize=letter,
-                rightMargin=0.4*inch,
-                leftMargin=0.4*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch
+                rightMargin=0.4 * inch,
+                leftMargin=0.4 * inch,
+                topMargin=0.5 * inch,
+                bottomMargin=0.5 * inch,
             )
-            
+
             # Get styles
             styles = getSampleStyleSheet()
             self._setup_custom_styles(styles)
-            
+
             # Build story
             story = []
-            
+
             # Add header
             story.extend(self._create_pdf_header(styles))
-            
+
             # Add title
-            story.append(Paragraph("CERTIFICATE OF ANALYSIS", styles['COATitle']))
-            story.append(Spacer(1, 0.15*inch))
-            
+            story.append(Paragraph("CERTIFICATE OF ANALYSIS", styles["COATitle"]))
+            story.append(Spacer(1, 0.15 * inch))
+
             # Add lot information
             story.extend(self._create_pdf_lot_info(lot, styles))
-            story.append(Spacer(1, 0.15*inch))
-            
+            story.append(Spacer(1, 0.15 * inch))
+
             # Add test results
             story.extend(self._create_pdf_test_results(lot, styles))
-            story.append(Spacer(1, 0.15*inch))
-            
+            story.append(Spacer(1, 0.15 * inch))
+
             # Add certification
             story.extend(self._create_pdf_certification(styles))
-            story.append(Spacer(1, 0.15*inch))
-            
+            story.append(Spacer(1, 0.15 * inch))
+
             # Add signatures
             story.extend(self._create_pdf_signatures(lot, styles))
-            
+
             # Build PDF
             doc.build(story)
-            
+
             logger.info(f"PDF generated successfully at {output_path}")
             logger.info(f"PDF file size: {output_path.stat().st_size} bytes")
-            
+
             return output_path
-            
+
         except Exception as e:
             logger.error(f"Error generating PDF: {e}")
             import traceback
+
             logger.error(f"PDF generation traceback: {traceback.format_exc()}")
             raise
-    
+
     def _setup_custom_styles(self, styles):
         """Setup custom paragraph styles for PDF."""
         # Title style
-        styles.add(ParagraphStyle(
-            name='COATitle',
-            parent=styles['Title'],
-            fontSize=18,
-            textColor=colors.HexColor('#1f4788'),
-            alignment=TA_CENTER,
-            spaceAfter=10
-        ))
-        
+        styles.add(
+            ParagraphStyle(
+                name="COATitle",
+                parent=styles["Title"],
+                fontSize=18,
+                textColor=colors.HexColor("#1f4788"),
+                alignment=TA_CENTER,
+                spaceAfter=10,
+            )
+        )
+
         # Header style
-        styles.add(ParagraphStyle(
-            name='COAHeader',
-            parent=styles['Heading1'],
-            fontSize=12,
-            textColor=colors.HexColor('#1f4788'),
-            alignment=TA_LEFT,
-            spaceAfter=6
-        ))
-        
+        styles.add(
+            ParagraphStyle(
+                name="COAHeader",
+                parent=styles["Heading1"],
+                fontSize=12,
+                textColor=colors.HexColor("#1f4788"),
+                alignment=TA_LEFT,
+                spaceAfter=6,
+            )
+        )
+
         # Normal text
-        styles.add(ParagraphStyle(
-            name='COANormal',
-            parent=styles['Normal'],
-            fontSize=9,
-            alignment=TA_LEFT,
-            leading=10
-        ))
-        
+        styles.add(
+            ParagraphStyle(
+                name="COANormal",
+                parent=styles["Normal"],
+                fontSize=9,
+                alignment=TA_LEFT,
+                leading=10,
+            )
+        )
+
         # Footer style
-        styles.add(ParagraphStyle(
-            name='COAFooter',
-            parent=styles['Normal'],
-            fontSize=8,
-            alignment=TA_CENTER,
-            textColor=colors.grey
-        ))
-    
+        styles.add(
+            ParagraphStyle(
+                name="COAFooter",
+                parent=styles["Normal"],
+                fontSize=8,
+                alignment=TA_CENTER,
+                textColor=colors.grey,
+            )
+        )
+
     def _create_pdf_header(self, styles) -> List:
         """Create PDF header."""
         header_data = [
-            ['Body Nutrition', '', 'Tel: (727) 555-0123'],
-            ['2950 47th Ave North', '', 'Email: quality@bodynutrition.com'],
-            ['St Petersburg, FL 33714', '', 'www.bodynutrition.com']
+            ["Body Nutrition", "", "Tel: (727) 555-0123"],
+            ["2950 47th Ave North", "", "Email: quality@bodynutrition.com"],
+            ["St Petersburg, FL 33714", "", "www.bodynutrition.com"],
         ]
-        
-        header_table = Table(header_data, colWidths=[4*inch, 2*inch, 2*inch])
-        header_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (0, 0), 14),
-            ('TEXTCOLOR', (0, 0), (0, 0), colors.HexColor('#1f4788')),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('TEXTCOLOR', (0, 1), (-1, -1), colors.grey),
-        ]))
-        
-        return [header_table, Spacer(1, 0.2*inch)]
-    
+
+        header_table = Table(header_data, colWidths=[4 * inch, 2 * inch, 2 * inch])
+        header_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("FONTNAME", (0, 0), (0, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (0, 0), 14),
+                    ("TEXTCOLOR", (0, 0), (0, 0), colors.HexColor("#1f4788")),
+                    ("FONTSIZE", (0, 1), (-1, -1), 8),
+                    ("TEXTCOLOR", (0, 1), (-1, -1), colors.grey),
+                ]
+            )
+        )
+
+        return [header_table, Spacer(1, 0.2 * inch)]
+
     def _create_pdf_lot_info(self, lot: Lot, styles) -> List:
         """Create lot information section for PDF."""
         elements = []
-        
+
         # Get product names
         products = ", ".join([lp.product.display_name for lp in lot.lot_products])
-        
+
         # Create lot info table
         lot_data = [
-            ['Product:', products],
-            ['Lot Number:', lot.lot_number],
-            ['Reference Number:', lot.reference_number],
-            ['Manufacture Date:', lot.mfg_date.strftime('%B %d, %Y') if lot.mfg_date else 'N/A'],
-            ['Expiration Date:', lot.exp_date.strftime('%B %d, %Y') if lot.exp_date else 'N/A'],
+            ["Product:", products],
+            ["Lot Number:", lot.lot_number],
+            ["Reference Number:", lot.reference_number],
+            [
+                "Manufacture Date:",
+                lot.mfg_date.strftime("%B %d, %Y") if lot.mfg_date else "N/A",
+            ],
+            [
+                "Expiration Date:",
+                lot.exp_date.strftime("%B %d, %Y") if lot.exp_date else "N/A",
+            ],
         ]
-        
-        lot_table = Table(lot_data, colWidths=[2*inch, 5*inch])
-        lot_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ]))
-        
-        elements.append(Paragraph("PRODUCT INFORMATION", styles['COAHeader']))
+
+        lot_table = Table(lot_data, colWidths=[2 * inch, 5 * inch])
+        lot_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+
+        elements.append(Paragraph("PRODUCT INFORMATION", styles["COAHeader"]))
         elements.append(lot_table)
-        
+
         return elements
-    
+
     def _create_pdf_test_results(self, lot: Lot, styles) -> List:
         """Create test results section for PDF."""
         elements = []
-        
-        elements.append(Paragraph("TEST RESULTS", styles['COAHeader']))
-        
+
+        elements.append(Paragraph("TEST RESULTS", styles["COAHeader"]))
+
         # Group test results by category
         microbiological = []
         heavy_metals = []
         other = []
-        
+
         for result in lot.test_results:
             # Skip results excluded from the customer-facing COA (internal/investigative)
             if not result.include_on_coa:
                 continue
-            if "plate count" in result.test_type.lower() or \
-               "yeast" in result.test_type.lower() or \
-               "mold" in result.test_type.lower() or \
-               "coli" in result.test_type.lower() or \
-               "salmonella" in result.test_type.lower():
+            if (
+                "plate count" in result.test_type.lower()
+                or "yeast" in result.test_type.lower()
+                or "mold" in result.test_type.lower()
+                or "coli" in result.test_type.lower()
+                or "salmonella" in result.test_type.lower()
+            ):
                 microbiological.append(result)
-            elif any(metal in result.test_type.lower() for metal in ["lead", "mercury", "cadmium", "arsenic"]):
+            elif any(
+                metal in result.test_type.lower()
+                for metal in ["lead", "mercury", "cadmium", "arsenic"]
+            ):
                 heavy_metals.append(result)
             else:
                 other.append(result)
-        
+
         # Create tables for each category
         if microbiological:
-            elements.append(Spacer(1, 0.05*inch))
-            elements.append(Paragraph("<b>Microbiological Analysis</b>", styles['COANormal']))
-            elements.append(Spacer(1, 0.1*inch))
-            
-            table_data = [['Test Parameter', 'Result', 'Unit', 'Specification']]
+            elements.append(Spacer(1, 0.05 * inch))
+            elements.append(
+                Paragraph("<b>Microbiological Analysis</b>", styles["COANormal"])
+            )
+            elements.append(Spacer(1, 0.1 * inch))
+
+            table_data = [["Test Parameter", "Result", "Unit", "Specification"]]
             for result in microbiological:
-                table_data.append([
-                    result.test_type,
-                    result.result_value or 'ND',
-                    result.unit or '',
-                    result.specification or self._get_specification(result.test_type)
-                ])
-            
-            table = Table(table_data, colWidths=[2.5*inch, 1.5*inch, 1*inch, 2*inch])
-            table.setStyle(TableStyle([
-                # Header row
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8f0fe')),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                
-                # Data rows
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (1, 1), (2, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                
-                # Grid
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
-                
-                # Padding
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            
+                table_data.append(
+                    [
+                        result.test_type,
+                        result.result_value or "ND",
+                        result.unit or "",
+                        result.specification
+                        or self._get_specification(result.test_type),
+                    ]
+                )
+
+            table = Table(
+                table_data, colWidths=[2.5 * inch, 1.5 * inch, 1 * inch, 2 * inch]
+            )
+            table.setStyle(
+                TableStyle(
+                    [
+                        # Header row
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f0fe")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, 0), 9),
+                        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                        # Data rows
+                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 1), (-1, -1), 8),
+                        ("ALIGN", (1, 1), (2, -1), "CENTER"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        # Grid
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("LINEBELOW", (0, 0), (-1, 0), 1, colors.black),
+                        # Padding
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ]
+                )
+            )
+
             elements.append(table)
-        
+
         if heavy_metals:
-            elements.append(Spacer(1, 0.05*inch))
-            elements.append(Paragraph("<b>Heavy Metals Analysis</b>", styles['COANormal']))
-            elements.append(Spacer(1, 0.1*inch))
-            
-            table_data = [['Test Parameter', 'Result', 'Unit', 'Specification']]
+            elements.append(Spacer(1, 0.05 * inch))
+            elements.append(
+                Paragraph("<b>Heavy Metals Analysis</b>", styles["COANormal"])
+            )
+            elements.append(Spacer(1, 0.1 * inch))
+
+            table_data = [["Test Parameter", "Result", "Unit", "Specification"]]
             for result in heavy_metals:
-                table_data.append([
-                    result.test_type,
-                    result.result_value or 'ND',
-                    result.unit or '',
-                    result.specification or self._get_specification(result.test_type)
-                ])
-            
-            table = Table(table_data, colWidths=[2.5*inch, 1.5*inch, 1*inch, 2*inch])
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8f0fe')),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (1, 1), (2, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            
+                table_data.append(
+                    [
+                        result.test_type,
+                        result.result_value or "ND",
+                        result.unit or "",
+                        result.specification
+                        or self._get_specification(result.test_type),
+                    ]
+                )
+
+            table = Table(
+                table_data, colWidths=[2.5 * inch, 1.5 * inch, 1 * inch, 2 * inch]
+            )
+            table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f0fe")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, 0), 9),
+                        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 1), (-1, -1), 8),
+                        ("ALIGN", (1, 1), (2, -1), "CENTER"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("LINEBELOW", (0, 0), (-1, 0), 1, colors.black),
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ]
+                )
+            )
+
             elements.append(table)
-        
+
         if other:
-            elements.append(Spacer(1, 0.05*inch))
-            elements.append(Paragraph("<b>Additional Tests</b>", styles['COANormal']))
-            elements.append(Spacer(1, 0.1*inch))
-            
-            table_data = [['Test Parameter', 'Result', 'Unit', 'Specification']]
+            elements.append(Spacer(1, 0.05 * inch))
+            elements.append(Paragraph("<b>Additional Tests</b>", styles["COANormal"]))
+            elements.append(Spacer(1, 0.1 * inch))
+
+            table_data = [["Test Parameter", "Result", "Unit", "Specification"]]
             for result in other:
-                table_data.append([
-                    result.test_type,
-                    result.result_value or 'ND',
-                    result.unit or '',
-                    result.specification or self._get_specification(result.test_type)
-                ])
-            
-            table = Table(table_data, colWidths=[2.5*inch, 1.5*inch, 1*inch, 2*inch])
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8f0fe')),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (1, 1), (2, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ]))
-            
+                table_data.append(
+                    [
+                        result.test_type,
+                        result.result_value or "ND",
+                        result.unit or "",
+                        result.specification
+                        or self._get_specification(result.test_type),
+                    ]
+                )
+
+            table = Table(
+                table_data, colWidths=[2.5 * inch, 1.5 * inch, 1 * inch, 2 * inch]
+            )
+            table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f0fe")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, 0), 9),
+                        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 1), (-1, -1), 8),
+                        ("ALIGN", (1, 1), (2, -1), "CENTER"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("LINEBELOW", (0, 0), (-1, 0), 1, colors.black),
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ]
+                )
+            )
+
             elements.append(table)
-        
+
         return elements
-    
+
     def _create_pdf_certification(self, styles) -> List:
         """Create certification section for PDF."""
         elements = []
-        
+
         cert_text = """The above results apply to the sample as received. This Certificate of Analysis is not to be reproduced except in full, without written approval from the laboratory. This product has been tested and meets all specifications for release."""
-        
-        elements.append(Paragraph("CERTIFICATION", styles['COAHeader']))
-        elements.append(Paragraph(cert_text, styles['COANormal']))
-        
+
+        elements.append(Paragraph("CERTIFICATION", styles["COAHeader"]))
+        elements.append(Paragraph(cert_text, styles["COANormal"]))
+
         return elements
-    
+
     def _create_pdf_signatures(self, lot: Lot, styles) -> List:
         """Create signature section for PDF."""
         elements = []
-        
+
         # Get approver info
         approver_name = "Quality Control Manager"
         if lot.test_results and lot.test_results[0].approved_by_user:
             approver_name = lot.test_results[0].approved_by_user.username
-        
+
         # Create signature table with more space
         sig_data = [
-            ['', ''],  # Empty row for signatures
-            ['_' * 40, '_' * 40],
-            [approver_name, 'Quality Assurance Director'],
-            ['Date: ' + datetime.now().strftime('%m/%d/%Y'), 'Date: _____________'],
+            ["", ""],  # Empty row for signatures
+            ["_" * 40, "_" * 40],
+            [approver_name, "Quality Assurance Director"],
+            ["Date: " + datetime.now().strftime("%m/%d/%Y"), "Date: _____________"],
         ]
-        
-        sig_table = Table(sig_data, colWidths=[3.5*inch, 3.5*inch])
-        sig_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTSIZE', (0, 2), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (0, 0), 15),  # More space above signature line
-            ('BOTTOMPADDING', (0, 1), (0, 1), 5),  # Space below signature line
-            ('TOPPADDING', (0, 2), (-1, -1), 2),
-            ('BOTTOMPADDING', (0, 2), (-1, -1), 2),
-        ]))
-        
+
+        sig_table = Table(sig_data, colWidths=[3.5 * inch, 3.5 * inch])
+        sig_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTSIZE", (0, 2), (-1, -1), 8),
+                    (
+                        "TOPPADDING",
+                        (0, 0),
+                        (0, 0),
+                        15,
+                    ),  # More space above signature line
+                    ("BOTTOMPADDING", (0, 1), (0, 1), 5),  # Space below signature line
+                    ("TOPPADDING", (0, 2), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 2), (-1, -1), 2),
+                ]
+            )
+        )
+
         elements.append(sig_table)
-        
+
         # Footer
-        elements.append(Spacer(1, 0.1*inch))
+        elements.append(Spacer(1, 0.1 * inch))
         footer_text = f"Generated on {datetime.now().strftime('%m/%d/%Y at %I:%M %p')}"
-        elements.append(Paragraph(footer_text, styles['COAFooter']))
-        
+        elements.append(Paragraph(footer_text, styles["COAFooter"]))
+
         return elements
 
     def _get_specification(self, test_type: str) -> str:

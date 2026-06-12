@@ -90,7 +90,10 @@ async def global_exception_handler(request: Request, exc: Exception):
     """Prevent stack traces from leaking to clients in production."""
     if settings.debug:
         raise exc
-    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+    )
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},

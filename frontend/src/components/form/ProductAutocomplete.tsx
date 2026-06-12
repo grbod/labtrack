@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { useCombobox } from 'downshift'
+import { ChevronDown } from 'lucide-react'
 import {
   useFloating,
   autoUpdate,
@@ -46,9 +47,14 @@ export function ProductAutocomplete({
   // Track current input for synchronous filtering
   const [localInput, setLocalInput] = useState(value.product_name)
 
+  // When opened via the chevron, show the full list regardless of input length
+  const [openedViaToggle, setOpenedViaToggle] = useState(false)
+
   // Filter products synchronously based on localInput
   const filteredProducts = useMemo(() => {
-    if (!localInput || localInput.length < 2) return []
+    if (!localInput || localInput.length < 2) {
+      return openedViaToggle ? products : []
+    }
     const searchLower = localInput.toLowerCase()
     return products.filter((product) => {
       return (
@@ -59,12 +65,13 @@ export function ProductAutocomplete({
         (product.size && product.size.toLowerCase().includes(searchLower))
       )
     })
-  }, [localInput, products])
+  }, [localInput, products, openedViaToggle])
 
   const {
     isOpen,
     getMenuProps,
     getInputProps,
+    getToggleButtonProps,
     highlightedIndex,
     getItemProps,
     selectItem,
@@ -77,6 +84,8 @@ export function ProductAutocomplete({
       setLocalInput(newValue || '')
 
       if (type === useCombobox.stateChangeTypes.InputChange) {
+        // Typing returns to normal type-ahead filtering
+        setOpenedViaToggle(false)
         if (onChange && newValue !== undefined) {
           onChange(newValue)
         }
@@ -102,7 +111,14 @@ export function ProductAutocomplete({
     },
   })
 
-  const showDropdown = isOpen && !!localInput && localInput.length >= 2
+  const showDropdown = isOpen && (openedViaToggle || (!!localInput && localInput.length >= 2))
+
+  // Reset toggle-browse mode whenever the menu closes
+  useEffect(() => {
+    if (!isOpen) {
+      setOpenedViaToggle(false)
+    }
+  }, [isOpen])
 
   // Floating UI for dropdown positioning (escapes overflow containers)
   const { refs, floatingStyles } = useFloating({
@@ -237,6 +253,17 @@ export function ProductAutocomplete({
           placeholder="Type to search products..."
           className="w-full h-full border-0 focus:outline-none focus:ring-0 bg-transparent placeholder:text-slate-400"
         />
+        <button
+          {...getToggleButtonProps({
+            onClick: () => setOpenedViaToggle(true),
+          })}
+          type="button"
+          tabIndex={-1}
+          aria-label="Show all products"
+          className="shrink-0 px-1 text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <ChevronDown className={`h-4 w-4 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+        </button>
       </div>
 
       <FloatingPortal>

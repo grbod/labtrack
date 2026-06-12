@@ -227,6 +227,7 @@ class LotProduct(BaseModel):
     lot_id = Column(Integer, ForeignKey("lots.id"), primary_key=True)
     product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
     percentage = Column(Numeric(5, 2), nullable=True)
+    batch_number = Column(String(50), nullable=True)
 
     # Relationships
     lot = relationship("Lot", back_populates="lot_products")

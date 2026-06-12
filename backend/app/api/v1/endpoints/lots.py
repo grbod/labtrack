@@ -8,28 +8,37 @@ from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from app.dependencies import DbSession, CurrentUser, QCManagerOrAdmin
-from app.models import Lot, LotProduct, Product, Sublot, ProductTestSpecification, TestResult
-from app.models.enums import LotType, LotStatus, AuditAction
-from app.services.audit_service import AuditService
+from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
+from app.models import (
+    Lot,
+    LotProduct,
+    Product,
+    ProductTestSpecification,
+    Sublot,
+    TestResult,
+)
+from app.models.enums import AuditAction, LotStatus, LotType
 from app.schemas.lot import (
     LotCreate,
-    LotUpdate,
+    LotListResponse,
     LotResponse,
+    LotStatusRecalculationResponse,
+    LotStatusUpdate,
+    LotUpdate,
+    LotWithProductSpecsResponse,
     LotWithProductsResponse,
     LotWithProductSummaryResponse,
-    LotWithProductSpecsResponse,
-    LotListResponse,
     ProductInLot,
     ProductInLotWithSpecs,
     ProductSummary,
-    TestSpecInProduct,
-    SublotCreate,
     SublotBulkCreate,
+    SublotCreate,
     SublotResponse,
-    LotStatusUpdate,
+    TestSpecInProduct,
 )
+from app.services.audit_service import AuditService
 from app.services.daane_coc_service import daane_coc_service
+from app.services.lot_service import LotService
 
 router = APIRouter()
 
@@ -114,12 +123,7 @@ async def list_lots(
 
     # Apply pagination
     offset = (page - 1) * page_size
-    lots = (
-        query.order_by(Lot.created_at.desc())
-        .offset(offset)
-        .limit(page_size)
-        .all()
-    )
+    lots = query.order_by(Lot.created_at.desc()).offset(offset).limit(page_size).all()
 
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
@@ -135,17 +139,23 @@ async def list_lots(
                 flavor=lp.product.flavor,
                 size=lp.product.size,
                 percentage=lp.percentage,
+                batch_number=lp.batch_number,
             )
             for lp in lot.lot_products
             if lp.product
         ]
 
         # Calculate test counts
-        # tests_total: sum of test specifications across all products in the lot
-        tests_total = sum(
-            len(lp.product.test_specifications)
-            for lp in lot.lot_products
-            if lp.product
+        # tests_total: unique tests across all products in the lot. Multi-SKU
+        # composites share one result per test type, so dedupe by lab_test_type_id
+        # (matches the Sample Modal's count).
+        tests_total = len(
+            {
+                spec.lab_test_type_id
+                for lp in lot.lot_products
+                if lp.product
+                for spec in lp.product.test_specifications
+            }
         )
 
         # Build a map of test_name -> spec for failure checking
@@ -189,11 +199,7 @@ async def get_status_counts(
     current_user: CurrentUser,
 ) -> dict:
     """Get count of lots by status."""
-    counts = (
-        db.query(Lot.status, func.count(Lot.id))
-        .group_by(Lot.status)
-        .all()
-    )
+    counts = db.query(Lot.status, func.count(Lot.id)).group_by(Lot.status).all()
     return {status.value: count for status, count in counts}
 
 
@@ -251,7 +257,9 @@ async def list_archived_lots(
         query = query.filter(Lot.updated_at <= date_to)
 
     # Get total count
-    count_query = db.query(func.count(Lot.id)).filter(Lot.status.in_(completed_statuses))
+    count_query = db.query(func.count(Lot.id)).filter(
+        Lot.status.in_(completed_statuses)
+    )
     if search:
         search_term = f"%{search}%"
         count_query = count_query.filter(
@@ -271,12 +279,7 @@ async def list_archived_lots(
 
     # Apply pagination
     offset = (page - 1) * page_size
-    lots = (
-        query.order_by(Lot.updated_at.desc())
-        .offset(offset)
-        .limit(page_size)
-        .all()
-    )
+    lots = query.order_by(Lot.updated_at.desc()).offset(offset).limit(page_size).all()
 
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
@@ -294,20 +297,30 @@ async def list_archived_lots(
         # Create an entry for each product in the lot
         for lp in lot.lot_products:
             if lp.product:
-                items.append({
-                    "lot_id": lot.id,
-                    "product_id": lp.product.id,
-                    "reference_number": lot.reference_number,
-                    "lot_number": lot.lot_number,
-                    "product_name": lp.product.product_name,
-                    "brand": lp.product.brand,
-                    "flavor": lp.product.flavor,
-                    "size": lp.product.size,
-                    "status": lot.status.value,
-                    "completed_at": lot.updated_at.isoformat() if lot.updated_at else lot.created_at.isoformat(),
-                    "customer_name": customer_name,
-                    "rejection_reason": lot.rejection_reason if lot.status == LotStatus.REJECTED else None,
-                })
+                items.append(
+                    {
+                        "lot_id": lot.id,
+                        "product_id": lp.product.id,
+                        "reference_number": lot.reference_number,
+                        "lot_number": lot.lot_number,
+                        "product_name": lp.product.product_name,
+                        "brand": lp.product.brand,
+                        "flavor": lp.product.flavor,
+                        "size": lp.product.size,
+                        "status": lot.status.value,
+                        "completed_at": (
+                            lot.updated_at.isoformat()
+                            if lot.updated_at
+                            else lot.created_at.isoformat()
+                        ),
+                        "customer_name": customer_name,
+                        "rejection_reason": (
+                            lot.rejection_reason
+                            if lot.status == LotStatus.REJECTED
+                            else None
+                        ),
+                    }
+                )
 
     return {
         "items": items,
@@ -316,6 +329,30 @@ async def list_archived_lots(
         "page_size": page_size,
         "total_pages": total_pages,
     }
+
+
+@router.post(
+    "/status-recalculation/preview", response_model=LotStatusRecalculationResponse
+)
+async def preview_status_recalculation(
+    db: DbSession,
+    current_user: AdminUser,
+) -> LotStatusRecalculationResponse:
+    """Preview active lot status recalculation without changing records."""
+    result = LotService().preview_status_recalculation(db)
+    return LotStatusRecalculationResponse.model_validate(result)
+
+
+@router.post(
+    "/status-recalculation/apply", response_model=LotStatusRecalculationResponse
+)
+async def apply_status_recalculation(
+    db: DbSession,
+    current_user: AdminUser,
+) -> LotStatusRecalculationResponse:
+    """Apply active lot status recalculation and return changed records."""
+    result = LotService().apply_status_recalculation(db, user_id=current_user.id)
+    return LotStatusRecalculationResponse.model_validate(result)
 
 
 @router.get("/{lot_id}", response_model=LotWithProductsResponse)
@@ -339,6 +376,7 @@ async def get_lot(
             display_name=lp.product.display_name,
             brand=lp.product.brand,
             percentage=lp.percentage,
+            batch_number=lp.batch_number,
         )
         for lp in lot.lot_products
         if lp.product
@@ -410,6 +448,7 @@ async def get_lot_with_specs(
                 size=product.size,
                 display_name=product.display_name,
                 percentage=lp.percentage,
+                batch_number=lp.batch_number,
                 test_specifications=test_specs,
             )
         )
@@ -418,6 +457,28 @@ async def get_lot_with_specs(
     response.products = products_with_specs
 
     return response
+
+
+@router.post("/{lot_id}/recalculate-status", response_model=LotResponse)
+async def recalculate_single_lot_status(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> LotResponse:
+    """Recalculate one lot status from current test results."""
+    try:
+        lot = LotService().recalculate_lot_status(
+            db,
+            lot_id,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    return LotResponse.model_validate(lot)
 
 
 @router.get("/{lot_id}/daane-coc")
@@ -435,7 +496,9 @@ async def download_daane_coc(
         )
 
     try:
-        content, test_count = daane_coc_service.generate_coc_for_lot(db, lot_id, current_user)
+        content, test_count = daane_coc_service.generate_coc_for_lot(
+            db, lot_id, current_user
+        )
         filename = f"daane-coc-{lot.reference_number}.xlsx"
         headers = {
             "Content-Disposition": f'attachment; filename="{filename}"',
@@ -522,7 +585,9 @@ async def create_lot(
     reference_number = lot_in.reference_number or generate_reference_number(db)
 
     # Verify reference number is unique
-    existing_ref = db.query(Lot).filter(Lot.reference_number == reference_number.upper()).first()
+    existing_ref = (
+        db.query(Lot).filter(Lot.reference_number == reference_number.upper()).first()
+    )
     if existing_ref:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -559,6 +624,7 @@ async def create_lot(
             lot_id=lot.id,
             product_id=product_ref.product_id,
             percentage=product_ref.percentage,
+            batch_number=product_ref.batch_number,
         )
         db.add(lot_product)
 
@@ -609,9 +675,9 @@ async def update_lot(
         if hasattr(lot, field):
             old_val = getattr(lot, field)
             # Convert dates and enums to strings for JSON serialization
-            if hasattr(old_val, 'isoformat'):
+            if hasattr(old_val, "isoformat"):
                 old_values[field] = old_val.isoformat()
-            elif hasattr(old_val, 'value'):
+            elif hasattr(old_val, "value"):
                 old_values[field] = old_val.value
             else:
                 old_values[field] = old_val
@@ -628,9 +694,9 @@ async def update_lot(
         if hasattr(lot, field):
             new_val = getattr(lot, field)
             # Convert dates and enums to strings for JSON serialization
-            if hasattr(new_val, 'isoformat'):
+            if hasattr(new_val, "isoformat"):
                 new_values[field] = new_val.isoformat()
-            elif hasattr(new_val, 'value'):
+            elif hasattr(new_val, "value"):
                 new_values[field] = new_val.value
             else:
                 new_values[field] = new_val
@@ -660,7 +726,10 @@ async def submit_for_review(
     lot_id: int,
     db: DbSession,
     current_user: CurrentUser,
-    override_user_id: Optional[int] = Query(None, description="User ID who authorized the override (when submitting without PDF)"),
+    override_user_id: Optional[int] = Query(
+        None,
+        description="User ID who authorized the override (when submitting without PDF)",
+    ),
 ) -> LotResponse:
     """Submit a lot for QC review (moves from under_review to awaiting_release)."""
     from app.services.lot_service import LotService
@@ -696,7 +765,9 @@ async def submit_for_review(
     audit_service = AuditService()
     reason = "Submitted for QC release"
     if override_user_id:
-        reason = "Submitted for review without required PDF attachment (admin/QC override)"
+        reason = (
+            "Submitted for review without required PDF attachment (admin/QC override)"
+        )
         audit_service.log_action(
             db=db,
             table_name="lots",
@@ -802,7 +873,10 @@ async def update_lot_status(
 
     # Handle rejection - require reason
     if status_update.status == LotStatus.REJECTED:
-        if not status_update.rejection_reason or not status_update.rejection_reason.strip():
+        if (
+            not status_update.rejection_reason
+            or not status_update.rejection_reason.strip()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Rejection reason is required when rejecting a lot",
@@ -810,7 +884,9 @@ async def update_lot_status(
         lot.rejection_reason = status_update.rejection_reason.strip()
     elif status_update.status == LotStatus.APPROVED:
         # Clear any previous rejection reason when approving (unless it's a QC override note)
-        if lot.rejection_reason and not lot.rejection_reason.startswith("[QC Override]"):
+        if lot.rejection_reason and not lot.rejection_reason.startswith(
+            "[QC Override]"
+        ):
             lot.rejection_reason = None
 
     try:
@@ -911,7 +987,11 @@ async def list_sublots(
     return [SublotResponse.model_validate(s) for s in lot.sublots]
 
 
-@router.post("/{lot_id}/sublots", response_model=SublotResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{lot_id}/sublots",
+    response_model=SublotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_sublot(
     lot_id: int,
     sublot_in: SublotCreate,
@@ -933,7 +1013,11 @@ async def create_sublot(
         )
 
     # Check for duplicate sublot number
-    existing = db.query(Sublot).filter(Sublot.sublot_number == sublot_in.sublot_number.upper()).first()
+    existing = (
+        db.query(Sublot)
+        .filter(Sublot.sublot_number == sublot_in.sublot_number.upper())
+        .first()
+    )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -953,7 +1037,11 @@ async def create_sublot(
     return SublotResponse.model_validate(sublot)
 
 
-@router.post("/{lot_id}/sublots/bulk", response_model=list[SublotResponse], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{lot_id}/sublots/bulk",
+    response_model=list[SublotResponse],
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_sublots_bulk(
     lot_id: int,
     sublots_in: SublotBulkCreate,

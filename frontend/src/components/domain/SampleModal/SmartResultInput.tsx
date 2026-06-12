@@ -340,30 +340,36 @@ export function SmartResultInput({
     case 'number':
       {
         const prefixMatch = localValue.match(/^\s*([<>])\s*(.*)$/)
-        // Auto-initialize prefix from spec when value is empty (e.g., spec "< 100" → default "<")
-        const specPrefix = !localValue.trim() ? (specification.trim().match(/^([<>])/) ?? [])[1] || "" : ""
-        const currentPrefix = prefixMatch ? prefixMatch[1] : specPrefix
+        const currentPrefix = prefixMatch ? prefixMatch[1] : ""
         const numericPart = prefixMatch ? prefixMatch[2] : localValue
+
+        // Local-only update: persisted by the input's blur/Enter/Tab handlers
+        const cyclePrefix = (forward: boolean) => {
+          const order = ["", "<", ">"]
+          const index = order.indexOf(currentPrefix)
+          const nextPrefix = forward
+            ? order[(index + 1) % order.length]
+            : order[(index + order.length - 1) % order.length]
+          setLocalValue(nextPrefix ? `${nextPrefix}${numericPart}` : numericPart)
+        }
 
         return (
           <div className="flex items-center gap-0.5">
             <button
               type="button"
               tabIndex={-1}
+              title="Cycle operator (Shift + ↑↓)"
               className={cn(
-                "h-8 w-7 shrink-0 rounded-l-md border border-r-0 text-xs font-mono",
-                "hover:bg-slate-100 transition-colors",
-                currentPrefix
-                  ? "bg-blue-50 text-blue-700 border-blue-500"
-                  : "bg-slate-50 text-slate-400 border-slate-200"
+                "h-8 w-9 shrink-0 rounded-l-md border border-r-0 text-sm font-semibold font-mono",
+                "transition-colors",
+                currentPrefix === "<"
+                  ? "bg-blue-50 text-blue-700 border-blue-400 hover:bg-blue-100"
+                  : currentPrefix === ">"
+                    ? "bg-amber-50 text-amber-700 border-amber-400 hover:bg-amber-100"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100"
               )}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                const nextPrefix = currentPrefix === "<" ? ">" : currentPrefix === ">" ? "" : "<"
-                const nextValue = nextPrefix ? `${nextPrefix}${numericPart}` : numericPart
-                setLocalValue(nextValue)
-                onChange(nextValue)
-              }}
+              onClick={() => cyclePrefix(true)}
             >
               {currentPrefix || "="}
             </button>
@@ -377,7 +383,14 @@ export function SmartResultInput({
                 setLocalValue(nextValue)
               }}
               onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(e) => {
+                if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                  e.preventDefault()
+                  cyclePrefix(e.key === 'ArrowUp')
+                  return
+                }
+                handleKeyDown(e)
+              }}
               className={cn(
                 "h-8 text-sm border-blue-500 focus-visible:ring-blue-500 rounded-l-none",
                 className

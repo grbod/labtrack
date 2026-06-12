@@ -91,6 +91,7 @@ export interface ProductSummary {
   flavor: string | null
   size: string | null
   percentage: number | null
+  batch_number: string | null
 }
 
 // Lot types
@@ -114,11 +115,30 @@ export interface Lot {
   tests_failed?: number  // Count of test results that failed specification
 }
 
+export interface LotStatusRecalculationChange {
+  lot_id: number
+  reference_number: string
+  lot_number: string
+  old_status: LotStatus
+  new_status: LotStatus
+  reason: string
+  missing_tests: string[]
+  failing_tests: string[]
+}
+
+export interface LotStatusRecalculationResponse {
+  mode: "preview" | "apply"
+  scanned_count: number
+  changed_count: number
+  changes: LotStatusRecalculationChange[]
+}
+
 export interface ProductInLot {
   id: number
   display_name: string
   brand: string
   percentage: number | null
+  batch_number: string | null
 }
 
 export interface LotWithProducts extends Omit<Lot, 'products'> {
@@ -220,6 +240,7 @@ export interface ProductInLotWithSpecs {
   display_name: string
   serving_size: string | null
   percentage: number | null
+  batch_number: string | null
   test_specifications: TestSpecInProduct[]
 }
 

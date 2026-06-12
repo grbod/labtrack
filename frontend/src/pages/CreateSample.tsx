@@ -397,6 +397,7 @@ export function CreateSamplePage() {
           products: validProducts.map((cp) => ({
             product_id: cp.product_id!,
             percentage: equalPercentage,
+            batch_number: cp.batch_number.trim(),
           })),
         })
 
@@ -634,7 +635,7 @@ export function CreateSamplePage() {
     }),
     compositeColumnHelper.accessor('mfg_date', {
       header: 'Mfg Date',
-      size: 104,
+      size: 132,
       cell: (info) => {
         const rowId = info.row.original.id
         const isEditing = editingCompositeCell?.rowId === rowId && editingCompositeCell?.columnId === 'mfg_date'
@@ -683,7 +684,7 @@ export function CreateSamplePage() {
             onClick={() => setEditingCompositeCell({ rowId, columnId: 'mfg_date' })}
             className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm flex items-center gap-2"
           >
-            <span>{info.getValue()}</span>
+            <span className="whitespace-nowrap">{info.getValue()}</span>
             <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -872,7 +873,7 @@ export function CreateSamplePage() {
     }),
     subBatchColumnHelper.accessor('mfg_date', {
       header: 'Mfg Date',
-      size: 104,
+      size: 132,
       cell: (info) => {
         const rowId = info.row.original.id
         const isEditing = editingSubBatchCell?.rowId === rowId && editingSubBatchCell?.columnId === 'mfg_date'
@@ -953,7 +954,7 @@ export function CreateSamplePage() {
             onClick={() => setEditingSubBatchCell({ rowId, columnId: 'mfg_date' })}
             className="px-2 py-0.5 cursor-pointer hover:bg-slate-50 rounded text-sm flex items-center gap-2"
           >
-            <span>{info.getValue()}</span>
+            <span className="whitespace-nowrap">{info.getValue()}</span>
             <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -1417,7 +1418,7 @@ export function CreateSamplePage() {
                   </Button>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto pb-3">
                 <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
@@ -1474,7 +1475,7 @@ export function CreateSamplePage() {
                 </Button>
               </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto pb-3">
               <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">

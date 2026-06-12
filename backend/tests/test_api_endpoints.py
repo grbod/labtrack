@@ -1,19 +1,28 @@
 """API endpoint tests using FastAPI TestClient."""
 
-import pytest
 from datetime import date, datetime
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
-from app.database import Base
-from app.dependencies import get_db, get_current_user
-from app.models import User, Product, Lot, LotProduct, LabTestType, ProductTestSpecification, TestResult
-from app.models.enums import UserRole, LotType, LotStatus, TestResultStatus
 from app.core.security import create_access_token
-
+from app.database import Base
+from app.dependencies import get_current_user, get_db
+from app.main import app
+from app.models import (
+    AuditLog,
+    LabTestType,
+    Lot,
+    LotProduct,
+    Product,
+    ProductTestSpecification,
+    TestResult,
+    User,
+)
+from app.models.enums import LotStatus, LotType, TestResultStatus, UserRole
 
 # Test database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -51,7 +60,7 @@ def test_user(test_db):
         username="testuser",
         email="test@example.com",
         role=UserRole.QC_MANAGER,
-        active=True
+        active=True,
     )
     user.set_password("testpass123")
     test_db.add(user)
@@ -64,10 +73,7 @@ def test_user(test_db):
 def admin_user(test_db):
     """Create an admin user."""
     user = User(
-        username="admin",
-        email="admin@example.com",
-        role=UserRole.ADMIN,
-        active=True
+        username="admin", email="admin@example.com", role=UserRole.ADMIN, active=True
     )
     user.set_password("adminpass123")
     test_db.add(user)
@@ -115,7 +121,7 @@ def test_product(test_db):
         product_name="Test Product",
         flavor="Vanilla",
         display_name="Test Brand Test Product - Vanilla",
-        expiry_duration_months=24
+        expiry_duration_months=24,
     )
     test_db.add(product)
     test_db.commit()
@@ -132,7 +138,7 @@ def test_lot(test_db, test_product):
         lot_type=LotType.STANDARD,
         status=LotStatus.AWAITING_RESULTS,
         mfg_date=date.today(),
-        exp_date=date(2027, 12, 31)
+        exp_date=date(2027, 12, 31),
     )
     test_db.add(lot)
     test_db.commit()
@@ -150,6 +156,7 @@ def test_lot(test_db, test_product):
 # HEALTH CHECK TESTS
 # =============================================================================
 
+
 class TestHealthCheck:
     """Test health check endpoint."""
 
@@ -166,6 +173,7 @@ class TestHealthCheck:
 # =============================================================================
 # PRODUCT ENDPOINT TESTS
 # =============================================================================
+
 
 class TestProductEndpoints:
     """Test product API endpoints."""
@@ -193,7 +201,7 @@ class TestProductEndpoints:
             product = Product(
                 brand=f"Brand{i}",
                 product_name=f"Product{i}",
-                display_name=f"Brand{i} Product{i}"
+                display_name=f"Brand{i} Product{i}",
             )
             test_db.add(product)
         test_db.commit()
@@ -229,7 +237,7 @@ class TestProductEndpoints:
             "product_name": "New Product",
             "display_name": "New Brand New Product",
             "flavor": "Chocolate",
-            "expiry_duration_months": 36
+            "expiry_duration_months": 36,
         }
         response = client.post("/api/v1/products", json=product_data)
         assert response.status_code == 201
@@ -243,7 +251,7 @@ class TestProductEndpoints:
         product_data = {
             "brand": "",  # Invalid: empty
             "product_name": "Test",
-            "display_name": "Test"
+            "display_name": "Test",
         }
         response = client.post("/api/v1/products", json=product_data)
         assert response.status_code == 422  # Validation error
@@ -264,10 +272,7 @@ class TestProductEndpoints:
     def test_update_product(self, client, test_product):
         """Test updating a product."""
         update_data = {"brand": "Updated Brand"}
-        response = client.patch(
-            f"/api/v1/products/{test_product.id}",
-            json=update_data
-        )
+        response = client.patch(f"/api/v1/products/{test_product.id}", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["brand"] == "Updated Brand"
@@ -277,7 +282,7 @@ class TestProductEndpoints:
         response = client.request(
             "DELETE",
             f"/api/v1/products/{test_product.id}",
-            json={"reason": "Test archive reason"}
+            json={"reason": "Test archive reason"},
         )
         assert response.status_code == 200
 
@@ -298,8 +303,78 @@ class TestProductEndpoints:
 # LOT ENDPOINT TESTS
 # =============================================================================
 
+
 class TestLotEndpoints:
     """Test lot API endpoints."""
+
+    def _create_stale_needs_attention_lot(self, test_db, test_product):
+        """Create a needs_attention lot whose current results all pass."""
+        tpc = LabTestType(
+            test_name="Total Plate Count",
+            test_category="Microbiological",
+            default_unit="CFU/g",
+            test_method="AOAC 990.12",
+            is_active=True,
+        )
+        ecoli = LabTestType(
+            test_name="E. coli",
+            test_category="Microbiological",
+            default_unit="Present/Absent",
+            test_method="AOAC 991.14",
+            is_active=True,
+        )
+        test_db.add_all([tpc, ecoli])
+        test_db.commit()
+
+        test_db.add_all(
+            [
+                ProductTestSpecification(
+                    product_id=test_product.id,
+                    lab_test_type_id=tpc.id,
+                    specification="< 10000",
+                    is_required=True,
+                ),
+                ProductTestSpecification(
+                    product_id=test_product.id,
+                    lab_test_type_id=ecoli.id,
+                    specification="Negative",
+                    is_required=True,
+                ),
+            ]
+        )
+
+        lot = Lot(
+            lot_number="STALE001",
+            reference_number="241201-099",
+            lot_type=LotType.STANDARD,
+            status=LotStatus.NEEDS_ATTENTION,
+            mfg_date=date.today(),
+            exp_date=date(2027, 12, 31),
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        test_db.add(LotProduct(lot_id=lot.id, product_id=test_product.id))
+        test_db.add_all(
+            [
+                TestResult(
+                    lot_id=lot.id,
+                    test_type="Total Plate Count",
+                    result_value="<100",
+                    unit="CFU/g",
+                    status=TestResultStatus.DRAFT,
+                ),
+                TestResult(
+                    lot_id=lot.id,
+                    test_type="E. coli",
+                    result_value="Negative",
+                    unit="Present/Absent",
+                    status=TestResultStatus.DRAFT,
+                ),
+            ]
+        )
+        test_db.commit()
+        return lot
 
     def test_list_lots_empty(self, client):
         """Test listing lots when none exist."""
@@ -330,7 +405,7 @@ class TestLotEndpoints:
             "lot_type": "standard",
             "mfg_date": "2024-01-01",
             "exp_date": "2027-01-01",
-            "product_ids": [test_product.id]
+            "product_ids": [test_product.id],
         }
         response = client.post("/api/v1/lots", json=lot_data)
         assert response.status_code == 201
@@ -354,10 +429,7 @@ class TestLotEndpoints:
     def test_update_lot_status(self, client, test_lot):
         """Test updating lot status."""
         update_data = {"status": "under_review"}
-        response = client.patch(
-            f"/api/v1/lots/{test_lot.id}/status",
-            json=update_data
-        )
+        response = client.patch(f"/api/v1/lots/{test_lot.id}/status", json=update_data)
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "under_review"
@@ -366,72 +438,77 @@ class TestLotEndpoints:
         self, client, test_db, test_product
     ):
         """Submitting a stale needs_attention lot recalculates pass/fail first."""
-        tpc = LabTestType(
-            test_name="Total Plate Count",
-            test_category="Microbiological",
-            default_unit="CFU/g",
-            test_method="AOAC 990.12",
-            is_active=True,
-        )
-        ecoli = LabTestType(
-            test_name="E. coli",
-            test_category="Microbiological",
-            default_unit="Present/Absent",
-            test_method="AOAC 991.14",
-            is_active=True,
-        )
-        test_db.add_all([tpc, ecoli])
-        test_db.commit()
-
-        test_db.add_all([
-            ProductTestSpecification(
-                product_id=test_product.id,
-                lab_test_type_id=tpc.id,
-                specification="< 10000",
-                is_required=True,
-            ),
-            ProductTestSpecification(
-                product_id=test_product.id,
-                lab_test_type_id=ecoli.id,
-                specification="Negative",
-                is_required=True,
-            ),
-        ])
-
-        lot = Lot(
-            lot_number="STALE001",
-            reference_number="241201-099",
-            lot_type=LotType.STANDARD,
-            status=LotStatus.NEEDS_ATTENTION,
-            mfg_date=date.today(),
-            exp_date=date(2027, 12, 31),
-        )
-        test_db.add(lot)
-        test_db.commit()
-
-        test_db.add(LotProduct(lot_id=lot.id, product_id=test_product.id))
-        test_db.add_all([
-            TestResult(
-                lot_id=lot.id,
-                test_type="Total Plate Count",
-                result_value="<100",
-                unit="CFU/g",
-                status=TestResultStatus.DRAFT,
-            ),
-            TestResult(
-                lot_id=lot.id,
-                test_type="E. coli",
-                result_value="Negative",
-                unit="Present/Absent",
-                status=TestResultStatus.DRAFT,
-            ),
-        ])
-        test_db.commit()
+        lot = self._create_stale_needs_attention_lot(test_db, test_product)
 
         response = client.post(f"/api/v1/lots/{lot.id}/submit-for-review")
 
         assert response.status_code == 200
         assert response.json()["status"] == "awaiting_release"
+
+    def test_preview_status_recalculation_does_not_mutate(
+        self, client, test_db, test_product
+    ):
+        """Preview reports stale status changes without updating lots."""
+        lot = self._create_stale_needs_attention_lot(test_db, test_product)
+
+        response = client.post("/api/v1/lots/status-recalculation/preview")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "preview"
+        assert data["scanned_count"] == 1
+        assert data["changed_count"] == 1
+        assert data["changes"][0]["reference_number"] == lot.reference_number
+        assert data["changes"][0]["old_status"] == "needs_attention"
+        assert data["changes"][0]["new_status"] == "under_review"
+        assert data["changes"][0]["reason"] == "All tests pass"
+
+        test_db.refresh(lot)
+        assert lot.status == LotStatus.NEEDS_ATTENTION
+
+    def test_apply_status_recalculation_mutates_and_audits(
+        self, client, test_db, test_product
+    ):
+        """Apply updates stale lots and writes audit history."""
+        lot = self._create_stale_needs_attention_lot(test_db, test_product)
+
+        response = client.post("/api/v1/lots/status-recalculation/apply")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "apply"
+        assert data["changed_count"] == 1
+        assert data["changes"][0]["new_status"] == "under_review"
+
+        test_db.refresh(lot)
+        assert lot.status == LotStatus.UNDER_REVIEW
+
+        audit = (
+            test_db.query(AuditLog)
+            .filter(AuditLog.table_name == "lots", AuditLog.record_id == lot.id)
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        assert audit is not None
+        assert "Admin bulk status recalculation" in audit.reason
+
+    def test_preview_status_recalculation_requires_admin(self, test_db, test_user):
+        """Preview is admin-only."""
+        app.dependency_overrides[get_db] = override_get_db
+
+        async def override_get_current_user():
+            return test_user
+
+        app.dependency_overrides[get_current_user] = override_get_current_user
+
+        with TestClient(app) as non_admin_client:
+            response = non_admin_client.post(
+                "/api/v1/lots/status-recalculation/preview"
+            )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 403
 
     def test_delete_lot(self, client, test_lot):
         """Test deleting a lot."""
@@ -442,6 +519,7 @@ class TestLotEndpoints:
 # =============================================================================
 # AUTHENTICATION TESTS
 # =============================================================================
+
 
 class TestAuthEndpoints:
     """Test authentication endpoints."""
@@ -462,6 +540,7 @@ class TestAuthEndpoints:
 # LAB TEST TYPE ENDPOINT TESTS
 # =============================================================================
 
+
 class TestLabTestTypeEndpoints:
     """Test lab test type API endpoints."""
 
@@ -471,7 +550,7 @@ class TestLabTestTypeEndpoints:
         lab_type = LabTestType(
             test_name="Total Plate Count",
             test_category="Microbiological",
-            default_unit="CFU/g"
+            default_unit="CFU/g",
         )
         test_db.add(lab_type)
         test_db.commit()
@@ -486,7 +565,7 @@ class TestLabTestTypeEndpoints:
         data = {
             "test_name": "E. coli",
             "test_category": "Microbiological",
-            "default_unit": "Positive/Negative"
+            "default_unit": "Positive/Negative",
         }
         response = client.post("/api/v1/lab-test-types", json=data)
         assert response.status_code == 201
@@ -498,6 +577,7 @@ class TestLabTestTypeEndpoints:
 # TEST RESULT ENDPOINT TESTS
 # =============================================================================
 
+
 class TestTestResultEndpoints:
     """Test test result API endpoints."""
 
@@ -507,7 +587,7 @@ class TestTestResultEndpoints:
             "lot_id": test_lot.id,
             "test_type": "E. coli",
             "result_value": "Negative",
-            "unit": ""
+            "unit": "",
         }
         response = client.post("/api/v1/test-results", json=data)
         # Accept 201 or 200 depending on implementation

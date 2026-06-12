@@ -1,14 +1,49 @@
 """Lot service for managing lots and sublots."""
 
-from datetime import datetime, date
-from typing import Optional, List, Dict, Any, Tuple
-from sqlalchemy.orm import Session
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 from sqlalchemy.exc import IntegrityError
-from app.models.lot import Lot, Sublot, LotProduct
+from sqlalchemy.orm import Session, joinedload
+
+from app.models.enums import AuditAction, LotStatus, LotType, TestResultStatus
+from app.models.lot import Lot, LotProduct, Sublot
+from app.models.product import Product
+from app.models.product_test_spec import ProductTestSpecification
 from app.models.test_result import TestResult
-from app.models.enums import LotType, LotStatus, TestResultStatus
 from app.services.base import BaseService
 from app.utils.logger import logger
+
+
+@dataclass
+class LotStatusCalculation:
+    """Calculated status and explanation for a lot."""
+
+    lot: Lot
+    old_status: LotStatus
+    new_status: LotStatus
+    reason: str
+    missing_tests: List[str]
+    failing_tests: List[str]
+
+    @property
+    def changed(self) -> bool:
+        """Whether the calculated status differs from the current status."""
+        return self.old_status != self.new_status
+
+    def to_change_dict(self) -> Dict[str, Any]:
+        """Return API-safe change details."""
+        return {
+            "lot_id": self.lot.id,
+            "reference_number": self.lot.reference_number,
+            "lot_number": self.lot.lot_number,
+            "old_status": self.old_status,
+            "new_status": self.new_status,
+            "reason": self.reason,
+            "missing_tests": self.missing_tests,
+            "failing_tests": self.failing_tests,
+        }
 
 
 class LotService(BaseService[Lot]):
@@ -25,6 +60,13 @@ class LotService(BaseService[Lot]):
     def __init__(self):
         """Initialize lot service."""
         super().__init__(Lot)
+
+    AUTO_RECALCULATION_STATUSES = [
+        LotStatus.AWAITING_RESULTS,
+        LotStatus.PARTIAL_RESULTS,
+        LotStatus.NEEDS_ATTENTION,
+        LotStatus.UNDER_REVIEW,
+    ]
 
     def generate_reference_number(self, db: Session) -> str:
         """
@@ -221,9 +263,17 @@ class LotService(BaseService[Lot]):
 
         # Validate status transition
         valid_transitions = {
-            LotStatus.AWAITING_RESULTS: [LotStatus.PARTIAL_RESULTS, LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
+            LotStatus.AWAITING_RESULTS: [
+                LotStatus.PARTIAL_RESULTS,
+                LotStatus.UNDER_REVIEW,
+                LotStatus.REJECTED,
+            ],
             LotStatus.PARTIAL_RESULTS: [LotStatus.UNDER_REVIEW, LotStatus.REJECTED],
-            LotStatus.UNDER_REVIEW: [LotStatus.APPROVED, LotStatus.REJECTED, LotStatus.AWAITING_RESULTS],
+            LotStatus.UNDER_REVIEW: [
+                LotStatus.APPROVED,
+                LotStatus.REJECTED,
+                LotStatus.AWAITING_RESULTS,
+            ],
             LotStatus.APPROVED: [LotStatus.RELEASED, LotStatus.UNDER_REVIEW],
             LotStatus.RELEASED: [],  # Released is final
             LotStatus.REJECTED: [LotStatus.AWAITING_RESULTS],  # Can retry
@@ -368,7 +418,7 @@ class LotService(BaseService[Lot]):
         # Optional fields
         if lot_data.get("reference_number"):
             validated_data["reference_number"] = lot_data["reference_number"].strip()
-            
+
         if lot_data.get("mfg_date"):
             validated_data["mfg_date"] = lot_data["mfg_date"]
 
@@ -401,49 +451,195 @@ class LotService(BaseService[Lot]):
             .order_by(Sublot.sublot_number)
             .all()
         )
-    
+
     def get_missing_required_tests_for_lot(
-        self, 
-        db: Session, 
-        lot_id: int, 
-        completed_test_types: List[str]
+        self, db: Session, lot_id: int, completed_test_types: List[str]
     ) -> List["ProductTestSpecification"]:
         """
         Get list of required tests that haven't been completed for a lot.
-        
+
         Args:
             db: Database session
             lot_id: Lot ID
             completed_test_types: List of test type names already completed
-            
+
         Returns:
             List of missing required test specifications
         """
         from app.models import ProductTestSpecification
         from app.services.product_service import ProductService
-        
+
         lot = self.get(db, lot_id)
         if not lot:
             return []
-        
+
         product_service = ProductService()
         missing_specs = []
-        
+
         # Get missing tests for each product in the lot
         for lot_product in lot.lot_products:
             product_missing = product_service.get_missing_required_tests(
-                db, 
-                lot_product.product_id, 
-                completed_test_types
+                db, lot_product.product_id, completed_test_types
             )
-            
+
             # Add to list if not already there
             for spec in product_missing:
-                if not any(s.lab_test_type_id == spec.lab_test_type_id for s in missing_specs):
+                if not any(
+                    s.lab_test_type_id == spec.lab_test_type_id for s in missing_specs
+                ):
                     missing_specs.append(spec)
-        
+
         return missing_specs
 
+    def calculate_lot_status(
+        self,
+        db: Session,
+        lot: Lot,
+    ) -> LotStatusCalculation:
+        """
+        Calculate a lot's workflow status without mutating it.
+
+        This is the shared source of truth for normal auto-recalculation,
+        admin preview, and admin apply.
+        """
+        old_status = lot.status
+
+        if old_status not in self.AUTO_RECALCULATION_STATUSES:
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=old_status,
+                reason="Status is excluded from automatic recalculation",
+                missing_tests=[],
+                failing_tests=[],
+            )
+
+        required_specs: Dict[str, ProductTestSpecification] = {}
+        for lot_product in lot.lot_products:
+            if not lot_product.product:
+                continue
+            for spec in lot_product.product.test_specifications:
+                test_name = spec.test_name
+                if spec.is_required and test_name and test_name not in required_specs:
+                    required_specs[test_name] = spec
+
+        test_results = db.query(TestResult).filter(TestResult.lot_id == lot.id).all()
+        completed_results: Dict[str, str] = {}
+        for result in test_results:
+            if result.result_value is not None and result.result_value.strip() != "":
+                completed_results[result.test_type] = result.result_value
+
+        if not required_specs:
+            if test_results:
+                return LotStatusCalculation(
+                    lot=lot,
+                    old_status=old_status,
+                    new_status=LotStatus.UNDER_REVIEW,
+                    reason="No required tests configured; test results exist",
+                    missing_tests=[],
+                    failing_tests=[],
+                )
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=LotStatus.AWAITING_RESULTS,
+                reason="No required tests configured and no results entered",
+                missing_tests=[],
+                failing_tests=[],
+            )
+
+        missing_tests = [
+            test_name
+            for test_name in required_specs
+            if test_name not in completed_results
+        ]
+        failing_tests = [
+            test_name
+            for test_name, spec in required_specs.items()
+            if test_name in completed_results
+            and not spec.matches_result(completed_results[test_name])
+        ]
+
+        completed_required = len(required_specs) - len(missing_tests)
+        total_required = len(required_specs)
+
+        if completed_required == 0:
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=LotStatus.AWAITING_RESULTS,
+                reason="Missing tests: all required tests are missing",
+                missing_tests=missing_tests,
+                failing_tests=[],
+            )
+
+        if completed_required < total_required:
+            if old_status == LotStatus.NEEDS_ATTENTION:
+                return LotStatusCalculation(
+                    lot=lot,
+                    old_status=old_status,
+                    new_status=LotStatus.NEEDS_ATTENTION,
+                    reason="Missing tests; needs attention stays until all required tests pass",
+                    missing_tests=missing_tests,
+                    failing_tests=[],
+                )
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=LotStatus.PARTIAL_RESULTS,
+                reason=f"Missing tests: {', '.join(missing_tests)}",
+                missing_tests=missing_tests,
+                failing_tests=[],
+            )
+
+        if failing_tests:
+            return LotStatusCalculation(
+                lot=lot,
+                old_status=old_status,
+                new_status=LotStatus.NEEDS_ATTENTION,
+                reason=f"Failing specs: {', '.join(failing_tests)}",
+                missing_tests=[],
+                failing_tests=failing_tests,
+            )
+
+        return LotStatusCalculation(
+            lot=lot,
+            old_status=old_status,
+            new_status=LotStatus.UNDER_REVIEW,
+            reason="All tests pass",
+            missing_tests=[],
+            failing_tests=[],
+        )
+
+    def _apply_lot_status_calculation(
+        self,
+        db: Session,
+        calculation: LotStatusCalculation,
+        user_id: Optional[int] = None,
+        reason_prefix: str = "Auto-calculated",
+    ) -> bool:
+        """Apply a calculated status change and write its audit entry."""
+        if not calculation.changed:
+            return False
+
+        lot = calculation.lot
+        lot.status = calculation.new_status
+        self._log_audit(
+            db=db,
+            action=AuditAction.UPDATE,
+            record_id=lot.id,
+            old_values={"status": calculation.old_status.value},
+            new_values={"status": calculation.new_status.value},
+            user_id=user_id,
+            reason=f"{reason_prefix}: {calculation.reason}",
+        )
+        logger.info(
+            "Auto-updated lot {} status from {} to {}",
+            lot.lot_number,
+            calculation.old_status.value,
+            calculation.new_status.value,
+        )
+        return True
 
     def recalculate_lot_status(
         self,
@@ -452,126 +648,77 @@ class LotService(BaseService[Lot]):
         user_id: Optional[int] = None,
     ) -> Lot:
         """
-        Auto-calculate lot status based on test results completion and pass/fail.
-
-        Called after each test result save to update lot status automatically.
-
-        Status transitions:
-        - awaiting_results: No test results entered yet
-        - partial_results: Some results entered, not all required tests complete
-        - needs_attention: All required tests complete, but some fail specs
-        - under_review: All required test results entered and pass
-
-        Note: approved/rejected are set manually by QC manager.
-        Auto-recovery: If all tests pass, moves back to under_review from needs_attention.
-        Sticky behavior: Once in needs_attention, stays there even if a failing result is cleared
-                        (unless all remaining tests pass).
-
-        Args:
-            db: Database session
-            lot_id: ID of the lot to recalculate
-            user_id: ID of user making the change
-
-        Returns:
-            Updated lot
+        Auto-calculate and update one lot status based on current test results.
         """
-        from app.models import ProductTestSpecification
-
         lot = self.get(db, lot_id)
         if not lot:
             raise ValueError(f"Lot with ID {lot_id} not found")
 
-        # Don't auto-update status if already approved, released, or rejected
-        if lot.status in [LotStatus.APPROVED, LotStatus.RELEASED, LotStatus.REJECTED]:
-            return lot
-
-        # Get all required test specs from all products in this lot
-        required_specs = {}  # test_name -> spec object
-        for lot_product in lot.lot_products:
-            if not lot_product.product:
-                continue
-            for spec in lot_product.product.test_specifications:
-                if spec.is_required:
-                    required_specs[spec.test_name] = spec
-
-        # Get test results for this lot
-        test_results = db.query(TestResult).filter(TestResult.lot_id == lot_id).all()
-
-        # Build map of test_type -> result_value for completed tests
-        completed_results = {}  # test_type -> result_value
-        for result in test_results:
-            if result.result_value is not None and result.result_value.strip() != "":
-                completed_results[result.test_type] = result.result_value
-
-        # If no required tests, status depends on whether any tests exist
-        if not required_specs:
-            if test_results:
-                new_status = LotStatus.UNDER_REVIEW
-            else:
-                new_status = LotStatus.AWAITING_RESULTS
-        else:
-            # Count completed required tests and check pass/fail
-            completed_required = 0
-            failing_tests = []
-
-            for test_name, spec in required_specs.items():
-                if test_name in completed_results:
-                    completed_required += 1
-                    # Check if this result passes the spec
-                    result_value = completed_results[test_name]
-                    if not spec.matches_result(result_value):
-                        failing_tests.append(test_name)
-
-            total_required = len(required_specs)
-
-            if completed_required == 0:
-                new_status = LotStatus.AWAITING_RESULTS
-            elif completed_required < total_required:
-                # Sticky behavior: if currently NEEDS_ATTENTION, stay there
-                if lot.status == LotStatus.NEEDS_ATTENTION:
-                    new_status = LotStatus.NEEDS_ATTENTION
-                else:
-                    new_status = LotStatus.PARTIAL_RESULTS
-            else:
-                # All required tests completed
-                if failing_tests:
-                    # Some tests fail - needs attention
-                    new_status = LotStatus.NEEDS_ATTENTION
-                else:
-                    # All tests pass - ready for review (auto-recovery from needs_attention)
-                    new_status = LotStatus.UNDER_REVIEW
-
-        # Only update if status changed
-        if lot.status != new_status:
-            old_status = lot.status
-            lot.status = new_status
-
-            # Build detailed audit reason
-            if new_status == LotStatus.NEEDS_ATTENTION and failing_tests:
-                reason = f"Auto-calculated: tests failing specs: {', '.join(failing_tests)}"
-            elif new_status == LotStatus.UNDER_REVIEW and old_status == LotStatus.NEEDS_ATTENTION:
-                reason = "Auto-calculated: all tests now pass (auto-recovery)"
-            else:
-                reason = "Auto-calculated based on test results"
-
-            self._log_audit(
-                db=db,
-                action="update",
-                record_id=lot.id,
-                old_values={"status": old_status.value},
-                new_values={"status": new_status.value},
-                user_id=user_id,
-                reason=reason,
-            )
-
+        calculation = self.calculate_lot_status(db, lot)
+        if self._apply_lot_status_calculation(db, calculation, user_id=user_id):
             db.commit()
             db.refresh(lot)
 
-            logger.info(
-                f"Auto-updated lot {lot.lot_number} status from {old_status.value} to {new_status.value}"
-            )
-
         return lot
+
+    def preview_status_recalculation(self, db: Session) -> Dict[str, Any]:
+        """Preview active lot status recalculation without mutating data."""
+        calculations = self._bulk_status_recalculation_calculations(db)
+        changes = [
+            calculation.to_change_dict()
+            for calculation in calculations
+            if calculation.changed
+        ]
+        return {
+            "mode": "preview",
+            "scanned_count": len(calculations),
+            "changed_count": len(changes),
+            "changes": changes,
+        }
+
+    def apply_status_recalculation(
+        self,
+        db: Session,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply active lot status recalculation and return changed rows."""
+        calculations = self._bulk_status_recalculation_calculations(db)
+        changes = []
+        for calculation in calculations:
+            if self._apply_lot_status_calculation(
+                db,
+                calculation,
+                user_id=user_id,
+                reason_prefix="Admin bulk status recalculation",
+            ):
+                changes.append(calculation.to_change_dict())
+
+        db.commit()
+        return {
+            "mode": "apply",
+            "scanned_count": len(calculations),
+            "changed_count": len(changes),
+            "changes": changes,
+        }
+
+    def _bulk_status_recalculation_calculations(
+        self,
+        db: Session,
+    ) -> List[LotStatusCalculation]:
+        """Calculate current status for all active tracker lots."""
+        lots = (
+            db.query(Lot)
+            .options(
+                joinedload(Lot.lot_products)
+                .joinedload(LotProduct.product)
+                .joinedload(Product.test_specifications)
+                .joinedload(ProductTestSpecification.lab_test_type)
+            )
+            .filter(Lot.status.in_(self.AUTO_RECALCULATION_STATUSES))
+            .order_by(Lot.created_at.desc())
+            .all()
+        )
+        return [self.calculate_lot_status(db, lot) for lot in lots]
 
 
 # Add missing import

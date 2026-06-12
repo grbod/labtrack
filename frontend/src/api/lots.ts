@@ -1,5 +1,14 @@
 import { api } from "./client"
-import type { Lot, LotWithProducts, LotWithProductSpecs, LotType, LotStatus, PaginatedResponse, ArchivedLot } from "@/types"
+import type {
+  Lot,
+  LotWithProducts,
+  LotWithProductSpecs,
+  LotType,
+  LotStatus,
+  LotStatusRecalculationResponse,
+  PaginatedResponse,
+  ArchivedLot,
+} from "@/types"
 
 export interface LotFilters {
   page?: number
@@ -22,6 +31,7 @@ export interface ArchivedLotFilters {
 export interface ProductReference {
   product_id: number
   percentage?: number
+  batch_number?: string
 }
 
 export interface CreateLotData {
@@ -116,6 +126,21 @@ export const lotsApi = {
   submitForReview: async (id: number, overrideUserId?: number): Promise<Lot> => {
     const params = overrideUserId ? { override_user_id: overrideUserId } : {}
     const response = await api.post<Lot>(`/lots/${id}/submit-for-review`, null, { params })
+    return response.data
+  },
+
+  recalculateStatus: async (id: number): Promise<Lot> => {
+    const response = await api.post<Lot>(`/lots/${id}/recalculate-status`)
+    return response.data
+  },
+
+  previewStatusRecalculation: async (): Promise<LotStatusRecalculationResponse> => {
+    const response = await api.post<LotStatusRecalculationResponse>("/lots/status-recalculation/preview")
+    return response.data
+  },
+
+  applyStatusRecalculation: async (): Promise<LotStatusRecalculationResponse> => {
+    const response = await api.post<LotStatusRecalculationResponse>("/lots/status-recalculation/apply")
     return response.data
   },
 

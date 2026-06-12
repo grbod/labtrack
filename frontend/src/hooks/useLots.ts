@@ -3,7 +3,7 @@ import { toast } from "sonner"
 import { lotsApi, type LotFilters, type ArchivedLotFilters, type CreateLotData, type UpdateLotData, type SublotData } from "@/api/lots"
 import { releaseKeys } from "@/hooks/useRelease"
 import { extractApiErrorMessage } from "@/lib/api-utils"
-import type { LotStatus } from "@/types"
+import type { LotStatusRecalculationResponse, LotStatus } from "@/types"
 
 export const lotKeys = {
   all: ["lots"] as const,
@@ -127,6 +127,51 @@ export function useSubmitForReview() {
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
       // Invalidate release queue so it auto-refreshes when navigating there
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+    },
+  })
+}
+
+export function useRecalculateLotStatus() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => lotsApi.recalculateStatus(id),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to recalculate lot status"))
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+    },
+  })
+}
+
+export function usePreviewStatusRecalculation() {
+  return useMutation<LotStatusRecalculationResponse, unknown, void>({
+    mutationFn: () => lotsApi.previewStatusRecalculation(),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to preview status recalculation"))
+    },
+  })
+}
+
+export function useApplyStatusRecalculation() {
+  const queryClient = useQueryClient()
+
+  return useMutation<LotStatusRecalculationResponse, unknown, void>({
+    mutationFn: () => lotsApi.applyStatusRecalculation(),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to apply status recalculation"))
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.details() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+      toast.success(`Updated ${result.changed_count} sample${result.changed_count === 1 ? "" : "s"}`)
     },
   })
 }

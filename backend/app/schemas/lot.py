@@ -2,11 +2,11 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.enums import LotType, LotStatus
+from app.models.enums import LotStatus, LotType
 
 
 class ProductReference(BaseModel):
@@ -14,6 +14,7 @@ class ProductReference(BaseModel):
 
     product_id: int
     percentage: Optional[Decimal] = None
+    batch_number: Optional[str] = Field(None, max_length=50)
 
 
 class LotBase(BaseModel):
@@ -50,6 +51,7 @@ class ProductInLot(BaseModel):
     display_name: str
     brand: str
     percentage: Optional[Decimal] = None
+    batch_number: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +65,7 @@ class ProductSummary(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     percentage: Optional[Decimal] = None
+    batch_number: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -147,7 +150,31 @@ class LotStatusUpdate(BaseModel):
 
     status: LotStatus
     rejection_reason: Optional[str] = None  # Required when status is 'rejected'
-    override_reason: Optional[str] = None  # Required when approving from 'needs_attention'
+    override_reason: Optional[str] = (
+        None  # Required when approving from 'needs_attention'
+    )
+
+
+class LotStatusRecalculationChange(BaseModel):
+    """A lot status change found by status recalculation."""
+
+    lot_id: int
+    reference_number: str
+    lot_number: str
+    old_status: LotStatus
+    new_status: LotStatus
+    reason: str
+    missing_tests: List[str] = Field(default_factory=list)
+    failing_tests: List[str] = Field(default_factory=list)
+
+
+class LotStatusRecalculationResponse(BaseModel):
+    """Result of a preview or apply lot status recalculation run."""
+
+    mode: str
+    scanned_count: int
+    changed_count: int
+    changes: List[LotStatusRecalculationChange] = Field(default_factory=list)
 
 
 # Extended schemas for modal with test specifications
@@ -177,6 +204,7 @@ class ProductInLotWithSpecs(BaseModel):
     display_name: str
     serving_size: Optional[str] = None
     percentage: Optional[Decimal] = None
+    batch_number: Optional[str] = None
     test_specifications: List[TestSpecInProduct] = []
 
     model_config = {"from_attributes": True}

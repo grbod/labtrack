@@ -32,6 +32,12 @@ labtrack/
 └── templates/           # Document templates
 ```
 
+### Request Flow (Backend)
+Endpoints in `backend/app/api/v1/endpoints/` handle routing and auth only; they call services in `backend/app/services/` which contain all business logic and persistence via SQLAlchemy models. Pydantic request/response schemas live in `backend/app/schemas/`. Adding a feature typically touches all four layers: model → schema → service → endpoint.
+
+### Data Flow (Frontend)
+`src/api/client.ts` is the shared axios instance (JWT auth header, base URL). Per-resource API modules in `src/api/*.ts` are wrapped by TanStack Query hooks in `src/hooks/use*.ts`, which pages and components consume; components never call axios directly. Auth state lives in a zustand store (`src/store/auth.ts`). A full-stack change typically mirrors the backend layers: `src/types/index.ts` → `src/api/` → `src/hooks/` → page/component.
+
 ## Key Features
 
 ### 1. Sample Management
@@ -59,23 +65,42 @@ labtrack/
 
 ## Commands
 
-### Running the Application
+A root `Makefile` wraps the common workflows: `make dev` (backend on :8009 + frontend on :5173), `make test`, `make format` (black + isort), `make lint` (flake8), `make migrate` (alembic upgrade head).
+
+### Running the Application Locally
 ```bash
-# Backend
+# Backend: ALWAYS use backend/.venv (NOT the stale backend/venv, NOT system Python)
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8009
+.venv/bin/python -m uvicorn app.main:app --reload --port 8009
 
-# Frontend
+# Frontend (proxies /api/v1 to the backend)
 cd frontend
-npm install
-npm run dev
+npm run dev   # serves on http://localhost:5173
+```
 
-# Run backend tests
-cd backend && python -m pytest tests/ -v
+Startup notes:
+- Check ports first: `lsof -i :8009 -i :5173 -sTCP:LISTEN`. If the backend port is held but unresponsive, a crashed uvicorn reloader parent may still own the socket; kill it and restart.
+- Run both as background tasks and verify: frontend `curl http://localhost:5173/` should return 200; backend `/docs` is disabled (404 is normal), so verify with an API route instead, e.g. `curl -X POST http://localhost:8009/api/v1/auth/login` returning 422 means the app is alive.
+- If the backend crashes on import with `ModuleNotFoundError`, a dependency is missing from `.venv`. Install with uv: `cd backend && uv pip install <package> --python .venv/bin/python` (`.venv` has no pip module). The `--reload` watcher does NOT recover from an import crash at startup; restart uvicorn after installing.
+- Successful startup runs Alembic migrations and the seed check automatically (look for "Database migrations applied successfully" in the log).
 
-# Run frontend build
-cd frontend && npm run build
+### Backend Tests
+```bash
+cd backend
+.venv/bin/python -m pytest tests/ -v
+
+# Single test file or test (pytest.ini enables coverage by default; --no-cov speeds up iteration)
+.venv/bin/python -m pytest tests/test_lot_service.py -v --no-cov
+.venv/bin/python -m pytest tests/test_lot_service.py::test_name -v --no-cov
+```
+
+### Frontend
+```bash
+cd frontend
+npm run build      # tsc -b + vite build (catches type errors)
+npm run lint       # eslint
+npm run test       # vitest watch mode
+npm run test:run   # vitest single run (CI)
 ```
 
 ### Default Login Credentials
@@ -170,13 +195,11 @@ cd backend && python scripts/seed_product_test_specs.py
 
 ## Testing
 
-Run tests with coverage (use the venv Python):
-```bash
-cd backend
-.venv/bin/python -m pytest tests/ -v
-```
+See Commands above for invocation. Always use the venv Python (`backend/.venv/bin/python`), not system Python.
 
-Note: 5 test files have pre-existing import errors (`slowapi` not installed, `test_result_service` module missing) — these are unrelated to seed functionality. All other 274 tests pass.
+Known issues:
+- Some test files have pre-existing import errors (`test_result_service` module missing). `slowapi` was installed into `.venv` on 2026-06-12, so those import errors are resolved.
+- pytest markers available: `slow`, `integration`, `unit` (e.g. `-m "not slow"`).
 
 ## Development Guidelines
 
@@ -185,6 +208,8 @@ Note: 5 test files have pre-existing import errors (`slowapi` not installed, `te
 3. **Add audit trails** - Use BaseService for automatic audit logging
 4. **Validate user permissions** - Check roles before sensitive operations
 5. **Handle errors gracefully** - Show user-friendly messages in the UI
+6. **Test naming** - Backend suites are `test_<feature>.py`; frontend tests are `<Component>.test.tsx` (Vitest + Testing Library)
+7. **Format before committing** - `make format` (black + isort) and `make lint` for Python; `npm run lint` for frontend changes
 
 ## Deployment
 

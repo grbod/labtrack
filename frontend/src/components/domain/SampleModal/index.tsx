@@ -17,7 +17,7 @@ import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTabl
 import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
 import { RetestsHistoryAccordion } from "./RetestsHistoryAccordion"
-import { useLotWithSpecs, lotKeys, useSubmitForReview } from "@/hooks/useLots"
+import { useLotWithSpecs, lotKeys, useRecalculateLotStatus, useSubmitForReview } from "@/hooks/useLots"
 import { useTestResults, useUpdateTestResult, useCreateTestResult, useDeleteTestResult } from "@/hooks/useTestResults"
 import { useRetestRequests } from "@/hooks/useRetests"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
@@ -259,6 +259,7 @@ export function SampleModal({
   const deleteTestResultMutation = useDeleteTestResult()
   const uploadMutation = useUploadPdf()
   const submitForReviewMutation = useSubmitForReview()
+  const recalculateLotStatusMutation = useRecalculateLotStatus()
 
   // Lab info for PDF requirement setting
   const { labInfo } = useLabInfo()
@@ -498,7 +499,7 @@ export function SampleModal({
           // Force immediate refetch of lot details so modal shows updated status
           await queryClient.refetchQueries({ queryKey: lotKeys.detailWithSpecs(lot.id) })
         }
-      } catch (error) {
+      } catch {
         toast.error("Failed to save", {
           description: "Please try again",
         })
@@ -511,7 +512,7 @@ export function SampleModal({
 
   // Handle adding a new ad-hoc test
   const handleAddTest = useCallback(
-    async (testName: string, _labTestTypeId: number) => {
+    async (testName: string) => {
       if (!lot) return
       try {
         await createTestResultMutation.mutateAsync({
@@ -521,7 +522,7 @@ export function SampleModal({
           unit: undefined,
         })
         toast.success("Test added")
-      } catch (error) {
+      } catch {
         toast.error("Failed to add test")
       }
     },
@@ -534,7 +535,7 @@ export function SampleModal({
       try {
         await deleteTestResultMutation.mutateAsync(id)
         toast.success("Test removed")
-      } catch (error) {
+      } catch {
         toast.error("Failed to remove test")
       }
     },
@@ -566,7 +567,7 @@ export function SampleModal({
             ? "PDF uploaded successfully"
             : `${acceptedFiles.length} PDFs uploaded successfully`
         )
-      } catch (error) {
+      } catch {
         setUploadError("Failed to upload file(s)")
       } finally {
         setIsUploading(false)
@@ -673,14 +674,24 @@ export function SampleModal({
   }, [overrideUsername, overridePassword, performSubmission])
 
   // Handle modal close attempt (check for unsaved changes)
-  const handleCloseAttempt = useCallback(() => {
+  const handleCloseAttempt = useCallback(async () => {
     // Check if table has unsaved changes
     if (tableRef.current?.hasUnsavedChanges()) {
       setShowUnsavedWarning(true)
       return
     }
+    if (recalculateLotStatusMutation.isPending) {
+      return
+    }
+    if (lot) {
+      try {
+        await recalculateLotStatusMutation.mutateAsync(lot.id)
+      } catch {
+        return
+      }
+    }
     onClose()
-  }, [onClose])
+  }, [lot, onClose, recalculateLotStatusMutation])
 
   // Force close (discard changes)
   const handleForceClose = useCallback(() => {
@@ -993,25 +1004,25 @@ export function SampleModal({
 
         {/* Success Dialog - Nested Dialog for submit approval */}
         <Dialog open={showSubmitSuccessDialog} onOpenChange={setShowSubmitSuccessDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-emerald-600 flex items-center gap-2 text-[18px]">
-                <CheckCircle2 className="h-5 w-5" />
+          <DialogContent className="w-[calc(100vw-32px)] max-w-[620px] p-6">
+            <DialogHeader className="items-center text-center">
+              <DialogTitle className="text-emerald-600 flex items-center justify-center gap-3 text-[22px] leading-7">
+                <CheckCircle2 className="h-6 w-6 flex-shrink-0" />
                 Moved to Release Queue
               </DialogTitle>
             </DialogHeader>
 
-            <div className="py-4">
-              <p className="text-sm text-slate-600">
+            <div className="py-3 text-center">
+              <p className="text-base leading-7 text-slate-600">
                 Sample <span className="font-mono font-semibold text-slate-900">{submittedLotRef}</span> has been submitted for final COA release.
               </p>
             </div>
 
-            <DialogFooter className="flex-col sm:flex-row gap-2">
+            <DialogFooter className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {canGoToRelease && (
                 <Button
                   type="button"
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white"
                   onClick={() => {
                     setShowSubmitSuccessDialog(false)
                     onClose()
@@ -1024,6 +1035,7 @@ export function SampleModal({
               <Button
                 type="button"
                 variant="outline"
+                className="w-full h-11"
                 onClick={() => {
                   setShowSubmitSuccessDialog(false)
                   if (onSubmitSuccess) {
@@ -1038,6 +1050,7 @@ export function SampleModal({
               <Button
                 type="button"
                 variant="outline"
+                className="w-full h-11"
                 onClick={() => {
                   setShowSubmitSuccessDialog(false)
                   onClose()
@@ -1122,7 +1135,11 @@ export function SampleModal({
               ref={saveButtonRef}
               onClick={handleCloseAttempt}
               onKeyDown={handleSaveButtonKeyDown}
+              disabled={recalculateLotStatusMutation.isPending}
             >
+              {recalculateLotStatusMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
                 Save & Close
               </Button>
             </div>

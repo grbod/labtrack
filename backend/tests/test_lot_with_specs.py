@@ -1,10 +1,11 @@
 """Tests for lot with specs endpoint and status recalculation."""
 
-import pytest
 from datetime import date
 
+import pytest
+
 from app.models import Lot, LotProduct, TestResult
-from app.models.enums import LotType, LotStatus, TestResultStatus
+from app.models.enums import LotStatus, LotType, TestResultStatus
 from app.services.lot_service import LotService
 
 
@@ -202,6 +203,29 @@ class TestLotService:
         # Should remain released
         assert updated_lot.status == LotStatus.RELEASED
 
+    def test_recalculate_status_does_not_change_awaiting_release(
+        self, test_db, sample_product_with_specs
+    ):
+        """Test that awaiting_release status is not changed."""
+        lot = Lot(
+            lot_number="TEST005B",
+            lot_type=LotType.STANDARD,
+            reference_number="250101-005B",
+            status=LotStatus.AWAITING_RELEASE,
+            generate_coa=True,
+        )
+        test_db.add(lot)
+        test_db.commit()
+
+        lot_product = LotProduct(lot_id=lot.id, product_id=sample_product_with_specs.id)
+        test_db.add(lot_product)
+        test_db.commit()
+
+        service = LotService()
+        updated_lot = service.recalculate_lot_status(test_db, lot.id)
+
+        assert updated_lot.status == LotStatus.AWAITING_RELEASE
+
     def test_recalculate_status_does_not_change_rejected(
         self, test_db, sample_product_with_specs
     ):
@@ -273,9 +297,7 @@ class TestLotWithSpecs:
         assert "Arsenic" in spec_names
         assert "Protein" in spec_names
 
-    def test_multi_product_lot_specs(
-        self, test_db, sample_lab_test_types
-    ):
+    def test_multi_product_lot_specs(self, test_db, sample_lab_test_types):
         """Test lot with multiple products having specs."""
         from app.models import Product, ProductTestSpecification
 
@@ -508,7 +530,7 @@ class TestQCOverrideApproval:
         # Approve with override reason
         lot.update_status(
             LotStatus.APPROVED,
-            override_reason="TPC limit was borderline and confirmed by retest"
+            override_reason="TPC limit was borderline and confirmed by retest",
         )
         test_db.commit()
 

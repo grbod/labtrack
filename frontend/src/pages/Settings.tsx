@@ -25,9 +25,26 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 import { useAuthStore } from "@/store/auth"
 import { useSettings, PAGE_SIZE_OPTIONS } from "@/hooks/useSettings"
+import { useApplyStatusRecalculation, usePreviewStatusRecalculation } from "@/hooks/useLots"
 import { useLabMapping, useRebuildLabMapping } from "@/hooks/useLabMapping"
 import { useChangePassword } from "@/hooks/useUsers"
 import { emailTemplateApi } from "@/api/emailTemplate"
@@ -39,8 +56,24 @@ import { ImageCropper } from "@/components/ui/image-cropper"
 import { toast } from "sonner"
 import { extractApiErrorMessage } from "@/lib/api-utils"
 import type { EmailTemplateVariable } from "@/types/emailTemplate"
+import type { LotStatus, LotStatusRecalculationResponse } from "@/types"
 
 type SettingsTab = "display" | "system" | "user" | "email" | "coa-style" | "lab-mapping" | "user-management"
+
+const lotStatusLabels: Record<LotStatus, string> = {
+  awaiting_results: "Awaiting Results",
+  partial_results: "Partial Results",
+  needs_attention: "Needs Attention",
+  under_review: "Under Review",
+  awaiting_release: "Awaiting Release",
+  approved: "Approved",
+  released: "Released",
+  rejected: "Rejected",
+}
+
+function formatLotStatus(status: LotStatus): string {
+  return lotStatusLabels[status] ?? status
+}
 
 export function SettingsPage() {
   const { user } = useAuthStore()
@@ -49,9 +82,14 @@ export function SettingsPage() {
     user?.role
   )
   const queryClient = useQueryClient()
+  const previewStatusRecalculationMutation = usePreviewStatusRecalculation()
+  const applyStatusRecalculationMutation = useApplyStatusRecalculation()
 
   // Tab state
   const [activeTab, setActiveTab] = useState<SettingsTab>("display")
+  const [statusRecalculationPreview, setStatusRecalculationPreview] =
+    useState<LotStatusRecalculationResponse | null>(null)
+  const [showApplyRecalculationDialog, setShowApplyRecalculationDialog] = useState(false)
 
   // Local form state for system settings
   const [staleWarningDays, setStaleWarningDays] = useState(systemSettings.settings.staleWarningDays)
@@ -216,6 +254,28 @@ export function SettingsPage() {
     userSettings.updateSettings({ pageSize: value })
   }
 
+  const handlePreviewStatusRecalculation = async () => {
+    try {
+      const result = await previewStatusRecalculationMutation.mutateAsync()
+      setStatusRecalculationPreview(result)
+      toast.success(
+        `Scanned ${result.scanned_count} sample${result.scanned_count === 1 ? "" : "s"}`
+      )
+    } catch {
+      // Error toast is handled by the mutation.
+    }
+  }
+
+  const handleApplyStatusRecalculation = async () => {
+    try {
+      const result = await applyStatusRecalculationMutation.mutateAsync()
+      setStatusRecalculationPreview(result)
+      setShowApplyRecalculationDialog(false)
+    } catch {
+      // Error toast is handled by the mutation.
+    }
+  }
+
   const handleSaveSystemSettings = async () => {
     setIsSaving(true)
     setSaveSuccess(false)
@@ -297,13 +357,10 @@ export function SettingsPage() {
       setTimeout(() => setLabInfoAutoSaveSuccess(false), 2000)
       // Success! Dialog will close via onOpenChange(false) in ImageCropper
       // URL cleanup happens in onOpenChange callback when dialog closes
-    } catch (error: any) {
-      console.error("Logo upload failed:", error?.response?.data || error)
-      const message = error?.response?.data?.detail
-        || error?.response?.statusText
-        || error?.message
-        || "Unknown error"
-      alert(`Failed to upload logo: ${message}\n\nStatus: ${error?.response?.status || 'N/A'}`)
+    } catch (error: unknown) {
+      console.error("Logo upload failed:", error)
+      const message = extractApiErrorMessage(error, "Unknown error")
+      alert(`Failed to upload logo: ${message}`)
       throw error // Re-throw so ImageCropper doesn't close the dialog
     } finally {
       setIsUploadingLogo(false)
@@ -762,8 +819,8 @@ export function SettingsPage() {
                       setCurrentPassword("")
                       setNewPassword("")
                       setConfirmPassword("")
-                    } catch (err: any) {
-                      toast.error(err?.response?.data?.detail || "Failed to change password")
+                    } catch (err: unknown) {
+                      toast.error(extractApiErrorMessage(err, "Failed to change password"))
                     }
                   }}
                   disabled={changePasswordMutation.isPending}
@@ -1133,6 +1190,150 @@ export function SettingsPage() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Status Recalculation */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="h-4 w-4 text-cyan-600" />
+                <h3 className="text-[14px] font-semibold text-slate-900">
+                  Sample Status Recalculation
+                </h3>
+              </div>
+              <p className="text-[12px] text-slate-500 max-w-3xl">
+                Preview and repair active Sample Tracker statuses from current test results. Released, rejected, and awaiting-release samples are not changed.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePreviewStatusRecalculation}
+                  disabled={previewStatusRecalculationMutation.isPending}
+                  className="h-10 border-slate-200"
+                >
+                  {previewStatusRecalculationMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                  )}
+                  Preview Recalculation
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => setShowApplyRecalculationDialog(true)}
+                  disabled={
+                    !statusRecalculationPreview ||
+                    statusRecalculationPreview.changed_count === 0 ||
+                    previewStatusRecalculationMutation.isPending ||
+                    applyStatusRecalculationMutation.isPending
+                  }
+                  className="h-10 bg-cyan-700 hover:bg-cyan-800 text-white"
+                >
+                  {applyStatusRecalculationMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Apply Recalculation
+                </Button>
+              </div>
+
+              {statusRecalculationPreview && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="slate">
+                      {statusRecalculationPreview.scanned_count} scanned
+                    </Badge>
+                    <Badge variant={statusRecalculationPreview.changed_count > 0 ? "cyan" : "emerald"}>
+                      {statusRecalculationPreview.changed_count} {statusRecalculationPreview.mode === "apply" ? "updated" : "would change"}
+                    </Badge>
+                  </div>
+
+                  {statusRecalculationPreview.changes.length > 0 ? (
+                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50/80">
+                            <TableHead className="text-[12px] font-semibold text-slate-600">
+                              Reference
+                            </TableHead>
+                            <TableHead className="text-[12px] font-semibold text-slate-600">
+                              Lot
+                            </TableHead>
+                            <TableHead className="text-[12px] font-semibold text-slate-600">
+                              Old Status
+                            </TableHead>
+                            <TableHead className="text-[12px] font-semibold text-slate-600">
+                              New Status
+                            </TableHead>
+                            <TableHead className="text-[12px] font-semibold text-slate-600">
+                              Why
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {statusRecalculationPreview.changes.map((change) => (
+                            <TableRow key={change.lot_id}>
+                              <TableCell className="font-mono text-[13px] font-medium text-slate-900">
+                                {change.reference_number}
+                              </TableCell>
+                              <TableCell className="font-mono text-[13px] text-slate-600">
+                                {change.lot_number}
+                              </TableCell>
+                              <TableCell className="text-[13px] text-slate-600">
+                                {formatLotStatus(change.old_status)}
+                              </TableCell>
+                              <TableCell className="text-[13px] font-semibold text-slate-900">
+                                {formatLotStatus(change.new_status)}
+                              </TableCell>
+                              <TableCell className="text-[13px] text-slate-600">
+                                {change.reason}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-800">
+                      No active sample statuses need recalculation.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <Dialog open={showApplyRecalculationDialog} onOpenChange={setShowApplyRecalculationDialog}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Apply Status Recalculation?</DialogTitle>
+                    <DialogDescription>
+                      This will update {statusRecalculationPreview?.changed_count ?? 0} active sample{statusRecalculationPreview?.changed_count === 1 ? "" : "s"}. Released, rejected, and awaiting-release samples will not be changed.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowApplyRecalculationDialog(false)}
+                      disabled={applyStatusRecalculationMutation.isPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleApplyStatusRecalculation}
+                      disabled={applyStatusRecalculationMutation.isPending}
+                      className="bg-cyan-700 hover:bg-cyan-800 text-white"
+                    >
+                      {applyStatusRecalculationMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : null}
+                      Apply
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
 
             {/* Save Button */}

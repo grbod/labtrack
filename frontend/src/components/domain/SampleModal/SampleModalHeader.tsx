@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronLeft, ChevronRight, ChevronDown, X, Package, Lock } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronDown, X, Package, Lock, Keyboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -11,6 +11,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getStatusLabel, getStatusBgClasses } from "@/lib/status-config"
 import type { LotWithProductSpecs } from "@/types"
@@ -42,7 +48,7 @@ export function SampleModalHeader({
   onNavigate,
   onClose,
 }: SampleModalHeaderProps) {
-  const [isProductsExpanded, setIsProductsExpanded] = useState(false)
+  const [isProductsExpanded, setIsProductsExpanded] = useState(true)
 
   const isMultiSku = lot.lot_type === "multi_sku_composite"
   const primaryProduct = lot.products[0]
@@ -99,6 +105,11 @@ export function SampleModalHeader({
                       className="flex items-center justify-center gap-2"
                     >
                       <span>{product.display_name}</span>
+                      {product.batch_number && (
+                        <span className="font-mono text-xs text-slate-500">
+                          {product.batch_number}
+                        </span>
+                      )}
                       {product.percentage && (
                         <span className="text-xs text-slate-400">
                           ({product.percentage}%)
@@ -125,8 +136,43 @@ export function SampleModalHeader({
           </div>
         </div>
 
-        {/* Right: Next + Close buttons */}
+        {/* Right: Shortcuts + Next + Close buttons */}
         <div className="flex items-center gap-1">
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="text-slate-400 hover:text-slate-600 transition-colors p-2"
+                  aria-label="Keyboard shortcuts"
+                >
+                  <Keyboard className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[12px]">
+                <div className="space-y-1">
+                  <div className="font-medium text-slate-700 mb-1.5">Keyboard Shortcuts</div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Cycle operator</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Shift + ↑↓</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Next field</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Tab</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Save & next row</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Enter</kbd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Cancel edit</span>
+                    <kbd className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">Esc</kbd>
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button
             variant="ghost"
             size="icon"

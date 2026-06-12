@@ -176,6 +176,42 @@ export function useApplyStatusRecalculation() {
   })
 }
 
+export function useReturnLotForReview() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ lotId, reason }: { lotId: number; reason: string }) =>
+      lotsApi.returnForReview(lotId, reason),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to return lot for review"))
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+    },
+  })
+}
+
+export function useRejectLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ lotId, reason }: { lotId: number; reason: string }) =>
+      lotsApi.updateStatus(lotId, "rejected", reason),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to reject lot"))
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+    },
+  })
+}
+
 export function useResubmitLot() {
   const queryClient = useQueryClient()
 

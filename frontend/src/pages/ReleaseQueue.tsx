@@ -26,23 +26,33 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useReleaseQueue, useRecentlyReleased, useDownloadWithTracking, useSendEmail } from "@/hooks/useRelease"
+import { useReturnLotForReview, useRejectLot } from "@/hooks/useLots"
+import { useAuthStore } from "@/store/auth"
 import { formatDate } from "@/lib/date-utils"
+import { toast } from "sonner"
 import type { ReleaseQueueItem, ArchiveItem } from "@/types/release"
 
 export function ReleaseQueuePage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const canAct = user?.role === "admin" || user?.role === "qc_manager"
   const [recentDays, setRecentDays] = useState(7)
   const [search, setSearch] = useState("")
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
   const [selectedItem, setSelectedItem] = useState<ArchiveItem | null>(null)
+  const [actionDialog, setActionDialog] = useState<{ mode: "return" | "reject"; item: ReleaseQueueItem } | null>(null)
+  const [actionReason, setActionReason] = useState("")
   const { data: queue = [], isLoading } = useReleaseQueue()
   const { data: recentlyReleased = [], isLoading: isLoadingRecent } = useRecentlyReleased(recentDays)
   const { handleDownload: downloadCoa, isDownloading } = useDownloadWithTracking()
   const sendEmail = useSendEmail()
+  const returnMutation = useReturnLotForReview()
+  const rejectMutation = useRejectLot()
 
   // Filter recently released based on search
   const filteredReleased = recentlyReleased.filter((item) => {
@@ -87,6 +97,37 @@ export function ReleaseQueuePage() {
       setSelectedItem(null)
     } catch (error) {
       console.error("Failed to send email:", error)
+    }
+  }
+
+  const handleActionClick = (e: React.MouseEvent, mode: "return" | "reject", item: ReleaseQueueItem) => {
+    e.stopPropagation()
+    setActionReason("")
+    setActionDialog({ mode, item })
+  }
+
+  const handleActionConfirm = async () => {
+    if (!actionDialog || !actionReason.trim()) return
+    const { mode, item } = actionDialog
+    try {
+      if (mode === "return") {
+        await returnMutation.mutateAsync({ lotId: item.lot_id, reason: actionReason.trim() })
+        toast.success("Lot returned to Sample Tracker")
+      } else {
+        await rejectMutation.mutateAsync({ lotId: item.lot_id, reason: actionReason.trim() })
+        toast.success("Lot rejected")
+      }
+      setActionDialog(null)
+      setActionReason("")
+    } catch {
+      // error toast handled in mutation onError
+    }
+  }
+
+  const handleActionDialogClose = (open: boolean) => {
+    if (!open) {
+      setActionDialog(null)
+      setActionReason("")
     }
   }
 
@@ -155,6 +196,11 @@ export function ReleaseQueuePage() {
                 <TableHead className="text-[12px] font-semibold text-slate-600">
                   Status
                 </TableHead>
+                {canAct && (
+                  <TableHead className="text-[12px] font-semibold text-slate-600 w-[220px]">
+                    Actions
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -190,6 +236,28 @@ export function ReleaseQueuePage() {
                       Awaiting Release
                     </Badge>
                   </TableCell>
+                  {canAct && (
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => handleActionClick(e, "return", item)}
+                          className="h-8 text-[12px] text-amber-700 hover:bg-amber-50 border-amber-200"
+                        >
+                          Return for Review
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => handleActionClick(e, "reject", item)}
+                          className="h-8 text-[12px] text-red-600 hover:bg-red-50 border-red-200"
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -347,6 +415,85 @@ export function ReleaseQueuePage() {
         </div>
       </div>
       </motion.div>
+
+      {/* Action Dialog (Return for Review / Reject) */}
+      <Dialog open={!!actionDialog} onOpenChange={handleActionDialogClose}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>
+              {actionDialog?.mode === "return" ? "Return for Review" : "Reject Lot"}
+            </DialogTitle>
+          </DialogHeader>
+          {actionDialog && (
+            <div className="py-2">
+              <div className="rounded-lg bg-slate-50 p-3 mb-4">
+                <div className="space-y-1.5">
+                  <div>
+                    <p className="text-[11px] text-slate-500">Product</p>
+                    <p className="text-[13px] font-medium text-slate-900">
+                      {actionDialog.item.product_name}
+                      {actionDialog.item.flavor && ` - ${actionDialog.item.flavor}`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500">Lot Number</p>
+                    <p className="text-[13px] font-mono font-medium text-slate-900">
+                      {actionDialog.item.lot_number}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="actionReason" className="text-[12px]">
+                  {actionDialog.mode === "return"
+                    ? "Reason - what needs to be corrected?"
+                    : "Rejection reason"}
+                </Label>
+                <Textarea
+                  id="actionReason"
+                  value={actionReason}
+                  onChange={(e) => setActionReason(e.target.value)}
+                  placeholder={
+                    actionDialog.mode === "return"
+                      ? "Describe what needs to be corrected..."
+                      : "Provide a reason for rejection..."
+                  }
+                  rows={3}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleActionDialogClose(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleActionConfirm}
+              disabled={
+                !actionReason.trim() ||
+                returnMutation.isPending ||
+                rejectMutation.isPending
+              }
+              className={
+                actionDialog?.mode === "reject"
+                  ? "bg-red-600 hover:bg-red-700 text-white"
+                  : "bg-amber-600 hover:bg-amber-700 text-white"
+              }
+            >
+              {(returnMutation.isPending || rejectMutation.isPending) && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {actionDialog?.mode === "return" ? "Return for Review" : "Reject Lot"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Email Dialog */}
       <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>

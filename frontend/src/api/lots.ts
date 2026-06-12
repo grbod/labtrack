@@ -149,6 +149,11 @@ export const lotsApi = {
     return response.data
   },
 
+  returnForReview: async (lotId: number, reason: string): Promise<Lot> => {
+    const response = await api.post<Lot>(`/lots/${lotId}/return-for-review`, { reason })
+    return response.data
+  },
+
   delete: async (id: number): Promise<void> => {
     await api.delete(`/lots/${id}`)
   },

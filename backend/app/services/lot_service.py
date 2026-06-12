@@ -529,16 +529,10 @@ class LotService(BaseService[Lot]):
             if result.result_value is not None and result.result_value.strip() != "":
                 completed_results[result.test_type] = result.result_value
 
-        if not required_specs:
-            if test_results:
-                return LotStatusCalculation(
-                    lot=lot,
-                    old_status=old_status,
-                    new_status=LotStatus.UNDER_REVIEW,
-                    reason="No required tests configured; test results exist",
-                    missing_tests=[],
-                    failing_tests=[],
-                )
+        # No required specs AND no results at all → awaiting. If ad-hoc results
+        # exist, fall through to the combined logic below (required_specs empty)
+        # so ad-hoc gating still applies.
+        if not required_specs and not test_results:
             return LotStatusCalculation(
                 lot=lot,
                 old_status=old_status,
@@ -560,10 +554,43 @@ class LotService(BaseService[Lot]):
             and not spec.matches_result(completed_results[test_name])
         ]
 
-        completed_required = len(required_specs) - len(missing_tests)
-        total_required = len(required_specs)
+        from app.utils.spec_matcher import specification_matches
+
+        # Ad-hoc tests (not part of required product specs) are binding too:
+        # empty result blocks review; failing own spec flags the lot.
+        adhoc_results = [
+            r for r in test_results if r.test_type not in required_specs
+        ]
+        adhoc_missing = [
+            r.test_type
+            for r in adhoc_results
+            if r.result_value is None or not str(r.result_value).strip()
+        ]
+        adhoc_failing = [
+            r.test_type
+            for r in adhoc_results
+            if r.test_type not in adhoc_missing
+            and not specification_matches(r.specification, r.unit, r.result_value)
+        ]
+        missing_tests = missing_tests + adhoc_missing
+        failing_tests = failing_tests + adhoc_failing
+
+        total_required = len(required_specs) + len(adhoc_results)
+        completed_required = total_required - len(missing_tests)
 
         if completed_required == 0:
+            # No completed tests. If any result rows exist at all (e.g. an
+            # ad-hoc test was added but left blank), the lot is in progress
+            # → PARTIAL_RESULTS; otherwise nothing has started → AWAITING.
+            if test_results:
+                return LotStatusCalculation(
+                    lot=lot,
+                    old_status=old_status,
+                    new_status=LotStatus.PARTIAL_RESULTS,
+                    reason=f"Missing tests: {', '.join(missing_tests)}",
+                    missing_tests=missing_tests,
+                    failing_tests=[],
+                )
             return LotStatusCalculation(
                 lot=lot,
                 old_status=old_status,

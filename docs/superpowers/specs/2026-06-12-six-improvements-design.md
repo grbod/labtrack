@@ -37,12 +37,13 @@ The COC PDF is generated on the fly at sample creation; if the printout/PDF is l
 - At first generation, persist the COC PDF through the existing storage layer (local filesystem or R2) and save the storage key on the lot.
 - **The archive is immutable.** Re-download always serves the original byte-for-byte; it is the record of what was sent to the lab. No regenerate action, no silent refresh on lot edits.
 - A "Download Chain of Custody" button in the sample detail modal (opened from the Sample Tracker) serves the archived PDF.
-- Lots created before this feature (no archived PDF): one-time generate-and-archive fallback on first download, so the button works for every lot.
+- Lots created before this feature (no archived PDF): one-time generate-and-archive fallback on first download, so the button works for every active lot.
+- **7-day retention after terminal status:** the COC exists to submit the sample to the lab for original testing; once a lot is Released or Rejected it's no longer needed. A cleanup task deletes archived COC PDFs 7 days after the lot enters Released or Rejected status and clears the storage key. After purge, the download button no longer appears for that lot (no regenerate fallback for terminal lots). Cleanup runs on backend startup and daily thereafter.
 
 ### Touchpoints
 - Backend: COC generation endpoint stores PDF + key on Lot; new/extended download endpoint serving the archive.
 - Frontend: button in `SampleModal` header/footer; API + hook additions.
-- Migration: `coc_storage_key` (nullable string) on Lot.
+- Migration: `coc_storage_key` (nullable string) on Lot. Cleanup uses the lot's released/rejected timestamp + 7 days.
 
 ---
 

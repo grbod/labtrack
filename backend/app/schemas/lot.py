@@ -148,6 +148,18 @@ class SublotResponse(SublotBase):
     model_config = {"from_attributes": True}
 
 
+class LotReturnRequest(BaseModel):
+    """Request body for returning an awaiting-release lot for review."""
+
+    reason: str
+
+
+class LotSubmitRequest(BaseModel):
+    """Optional request body for submit-for-review (carries return response)."""
+
+    return_response_note: Optional[str] = None
+
+
 class LotStatusUpdate(BaseModel):
     """Schema for updating lot status."""
 

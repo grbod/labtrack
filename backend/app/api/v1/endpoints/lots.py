@@ -3,7 +3,7 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -22,8 +22,10 @@ from app.schemas.lot import (
     LotCreate,
     LotListResponse,
     LotResponse,
+    LotReturnRequest,
     LotStatusRecalculationResponse,
     LotStatusUpdate,
+    LotSubmitRequest,
     LotUpdate,
     LotWithProductSpecsResponse,
     LotWithProductsResponse,
@@ -800,6 +802,7 @@ async def submit_for_review(
         None,
         description="User ID who authorized the override (when submitting without PDF)",
     ),
+    payload: Optional[LotSubmitRequest] = Body(None),
 ) -> LotResponse:
     """Submit a lot for QC review (moves from under_review to awaiting_release)."""
     from app.services.lot_service import LotService
@@ -810,6 +813,29 @@ async def submit_for_review(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lot not found",
         )
+
+    # A returned lot must be answered before it can move on. The response note
+    # releases the NEEDS_ATTENTION hold in calculate_lot_status below.
+    if lot.return_reason and not lot.return_response_note:
+        note = payload.return_response_note if payload else None
+        if not note or not note.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A response note is required: explain what happened and how it was addressed",
+            )
+        lot.return_response_note = note.strip()
+        db.flush()
+        AuditService().log_action(
+            db=db,
+            table_name="lots",
+            record_id=lot.id,
+            action=AuditAction.UPDATE,
+            user_id=current_user.id,
+            old_values={"return_response_note": None},
+            new_values={"return_response_note": lot.return_response_note},
+            reason=f"Return resolved: {lot.return_response_note}",
+        )
+        db.flush()
 
     # A lot can be stale in NEEDS_ATTENTION after a failed result is corrected.
     # Recalculate here so submission is based on current result/spec data.
@@ -859,6 +885,73 @@ async def submit_for_review(
             new_values={"status": lot.status.value},
             reason=reason,
         )
+
+    db.commit()
+    db.refresh(lot)
+
+    return LotResponse.model_validate(lot)
+
+
+@router.post("/{lot_id}/return-for-review", response_model=LotResponse)
+async def return_lot_for_review(
+    lot_id: int,
+    payload: LotReturnRequest,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+) -> LotResponse:
+    """Return an awaiting-release lot to the tracker for correction (QC/Admin)."""
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    if not payload.reason or not payload.reason.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to return a lot for review",
+        )
+
+    if lot.status != LotStatus.AWAITING_RELEASE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot return for review from status '{lot.status.value}'. "
+                "Must be 'awaiting_release'."
+            ),
+        )
+
+    old_values = {
+        "status": lot.status.value,
+        "return_reason": lot.return_reason,
+    }
+
+    try:
+        lot.update_status(LotStatus.NEEDS_ATTENTION)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    lot.return_reason = payload.reason.strip()
+    lot.return_response_note = None
+    db.flush()
+
+    AuditService().log_action(
+        db=db,
+        table_name="lots",
+        record_id=lot.id,
+        action=AuditAction.UPDATE,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values={
+            "status": lot.status.value,
+            "return_reason": lot.return_reason,
+        },
+        reason=f"Returned for review: {lot.return_reason}",
+    )
 
     db.commit()
     db.refresh(lot)

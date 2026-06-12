@@ -39,6 +39,7 @@ from app.schemas.lot import (
 from app.services.audit_service import AuditService
 from app.services.daane_coc_service import daane_coc_service
 from app.services.lot_service import LotService
+from app.utils.logger import logger
 
 router = APIRouter()
 
@@ -542,6 +543,23 @@ async def download_daane_coc_pdf(
             selected_lab_test_type_ids=selected_lab_test_type_ids,
             special_instructions=special_instructions,
         )
+        # Archive: the most recent explicit generation is the COC of record.
+        # Record-keeping must not break the download UX if storage hiccups,
+        # so failures are logged and swallowed (PDF is still served).
+        try:
+            from app.services.storage_service import get_storage_service
+
+            storage = get_storage_service()
+            key = f"coc/{lot.reference_number}.pdf"
+            storage.upload(content, key, content_type="application/pdf")
+            lot.coc_storage_key = key
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.warning(
+                "Failed to archive COC PDF for lot %s", lot_id, exc_info=True
+            )
+
         filename = f"daane-coc-{lot.reference_number}.pdf"
         headers = {
             "Content-Disposition": f'attachment; filename="{filename}"',
@@ -564,6 +582,58 @@ async def download_daane_coc_pdf(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+TERMINAL_LOT_STATUSES = [LotStatus.RELEASED, LotStatus.REJECTED]
+
+
+@router.get("/{lot_id}/coc-archive")
+async def download_coc_archive(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    """Re-download the archived Chain of Custody PDF (immutable record).
+
+    Serves the archived bytes (the last explicit generation = document of
+    record). For terminal lots (RELEASED/REJECTED) with no archive, 404s.
+    For active lots with no archive yet (pre-feature), generates once with
+    defaults and archives.
+    """
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    from app.services.storage_service import get_storage_service
+
+    storage = get_storage_service()
+
+    if not lot.coc_storage_key or not storage.exists(lot.coc_storage_key):
+        if lot.status in TERMINAL_LOT_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chain of custody is no longer available for this lot",
+            )
+        # Pre-feature lot still in flight: generate once with defaults and archive
+        content, _ = daane_coc_service.generate_coc_pdf_for_lot(
+            db, lot_id, current_user
+        )
+        key = f"coc/{lot.reference_number}.pdf"
+        storage.upload(content, key, content_type="application/pdf")
+        lot.coc_storage_key = key
+        db.commit()
+    else:
+        content = storage.download(lot.coc_storage_key)
+
+    filename = f"daane-coc-{lot.reference_number}.pdf"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("", response_model=LotResponse, status_code=status.HTTP_201_CREATED)

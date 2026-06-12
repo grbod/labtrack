@@ -3,6 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
+    Boolean,
     Column,
     String,
     Text,
@@ -58,6 +59,12 @@ class TestResult(BaseModel):
     # Additional fields for specific test types
     specification = Column(String(100), nullable=True)  # e.g., "<10 CFU/g"
     method = Column(String(100), nullable=True)  # e.g., "USP <2021>"
+
+    # Ad-hoc test support
+    lab_test_type_id = Column(
+        Integer, ForeignKey("lab_test_types.id"), nullable=True
+    )
+    include_on_coa = Column(Boolean, default=True, nullable=False)
 
     # Relationships
     lot = relationship("Lot", back_populates="test_results")

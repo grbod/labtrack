@@ -19,6 +19,8 @@ class TestResultBase(BaseModel):
     specification: Optional[str] = Field(None, max_length=100)
     method: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
+    lab_test_type_id: Optional[int] = None
+    include_on_coa: bool = True
 
 
 class TestResultCreate(TestResultBase):
@@ -39,6 +41,7 @@ class TestResultUpdate(BaseModel):
     specification: Optional[str] = Field(None, max_length=100)
     method: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
+    include_on_coa: Optional[bool] = None
 
 
 class TestResultResponse(BaseModel):
@@ -60,6 +63,8 @@ class TestResultResponse(BaseModel):
     approved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    lab_test_type_id: Optional[int] = None
+    include_on_coa: bool = True
 
     model_config = {"from_attributes": True}
 

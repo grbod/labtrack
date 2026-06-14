@@ -229,3 +229,20 @@ class LotWithProductSpecsResponse(LotResponse):
     """Lot response with full product details and test specifications."""
 
     products: List[ProductInLotWithSpecs] = []
+
+
+class ReviewThreadEvent(BaseModel):
+    """A single event in the lot's return/resolution conversation thread."""
+
+    type: str  # "return" | "resolution"
+    message: str
+    author: Optional[str] = None
+    author_role: Optional[str] = None
+    at: datetime
+
+
+class ReviewThreadResponse(BaseModel):
+    """Full return/resolution conversation thread derived from the audit log."""
+
+    events: List[ReviewThreadEvent]
+    return_count: int

@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 
 from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
 from app.models import (
+    AuditLog,
     Lot,
     LotProduct,
     Product,
@@ -33,6 +34,8 @@ from app.schemas.lot import (
     ProductInLot,
     ProductInLotWithSpecs,
     ProductSummary,
+    ReviewThreadEvent,
+    ReviewThreadResponse,
     SublotBulkCreate,
     SublotCreate,
     SublotResponse,
@@ -971,6 +974,75 @@ async def return_lot_for_review(
     db.refresh(lot)
 
     return LotResponse.model_validate(lot)
+
+
+@router.get("/{lot_id}/review-thread", response_model=ReviewThreadResponse)
+async def get_review_thread(
+    lot_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReviewThreadResponse:
+    """Derive the return/resolution conversation for a lot from its audit log.
+
+    Accessible to any authenticated user (including lab tech) because they need
+    to see the thread in the sample modal.
+    """
+    lot = db.query(Lot).filter(Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lot not found",
+        )
+
+    audit_rows = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "lots",
+            AuditLog.record_id == lot_id,
+        )
+        .options(joinedload(AuditLog.user))
+        .order_by(AuditLog.timestamp.asc())
+        .all()
+    )
+
+    events: list[ReviewThreadEvent] = []
+    for log in audit_rows:
+        new_values = log.get_new_values_dict()
+
+        return_reason = new_values.get("return_reason")
+        return_response_note = new_values.get("return_response_note")
+
+        if return_reason:
+            event_type = "return"
+            message = return_reason
+        elif return_response_note:
+            event_type = "resolution"
+            message = return_response_note
+        else:
+            continue
+
+        author = log.user.username if log.user else None
+        if log.user and log.user.role:
+            author_role = (
+                log.user.role.value
+                if hasattr(log.user.role, "value")
+                else str(log.user.role)
+            )
+        else:
+            author_role = None
+
+        events.append(
+            ReviewThreadEvent(
+                type=event_type,
+                message=message,
+                author=author,
+                author_role=author_role,
+                at=log.timestamp,
+            )
+        )
+
+    return_count = sum(1 for e in events if e.type == "return")
+    return ReviewThreadResponse(events=events, return_count=return_count)
 
 
 @router.post("/{lot_id}/resubmit", response_model=LotResponse)

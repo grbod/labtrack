@@ -420,8 +420,7 @@ export function ReleaseActions({
         {!isReleased && canAct && (
           <Button
             type="button"
-            variant="outline"
-            className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
+            className="w-full bg-amber-600 hover:bg-amber-700"
             onClick={() => setReturnOpen(true)}
           >
             <CornerUpLeft className="h-4 w-4" />

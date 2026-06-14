@@ -239,17 +239,17 @@ export function ReleasePage() {
 
       {/* Return thread banner — shown whenever this lot was ever returned (even if now resolved) */}
       {thread && thread.return_count > 0 && (
-        <div className="shrink-0 border-b border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-700">
+        <div className="shrink-0 border-b border-amber-300 bg-amber-50">
           <div className="px-4 py-2">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-              <span className="flex-1 text-sm font-semibold text-red-700 dark:text-red-400">
+              <span className="flex-1 text-sm font-semibold text-red-700">
                 Returned {thread.return_count}× before release
               </span>
               {thread.events.length > 2 && (
                 <button
                   onClick={() => setShowFullThread((v) => !v)}
-                  className="flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200 transition-colors"
+                  className="flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 transition-colors"
                 >
                   {showFullThread
                     ? <>Show less <ChevronUp className="h-3.5 w-3.5" /></>
@@ -258,7 +258,7 @@ export function ReleasePage() {
                 </button>
               )}
             </div>
-            <p className="mt-0.5 text-xs font-medium text-red-700 dark:text-red-400">
+            <p className="mt-0.5 text-xs font-medium text-red-700">
               Review notes — read before releasing
             </p>
             <div className="mt-2">

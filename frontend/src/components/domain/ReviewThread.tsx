@@ -1,14 +1,10 @@
 import { CornerUpLeft, PencilLine } from "lucide-react"
-import { formatDate } from "@/lib/date-utils"
+import { formatDateTime } from "@/lib/date-utils"
 import type { ReviewThreadEvent } from "@/types"
 
 interface ReviewThreadProps {
   events: ReviewThreadEvent[]
   className?: string
-}
-
-function formatEventDate(at: string): string {
-  return formatDate(at)
 }
 
 function formatRole(role: string | null): string {
@@ -56,7 +52,7 @@ export function ReviewThread({ events, className }: ReviewThreadProps) {
                 <p className={`text-[11px] font-medium leading-tight ${isReturn ? "text-amber-700" : "text-slate-500"}`}>
                   {isReturn ? "Returned" : "Resolved"}&nbsp;&middot;&nbsp;
                   {authorDisplay}{roleDisplay}&nbsp;&middot;&nbsp;
-                  {formatEventDate(event.at)}
+                  {formatDateTime(event.at)}
                 </p>
                 <p className={`mt-0.5 text-[12px] whitespace-pre-wrap ${isReturn ? "text-amber-800" : "text-slate-600"}`}>
                   {event.message}

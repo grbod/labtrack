@@ -14,6 +14,20 @@ export function formatDate(dateStr: string): string {
 }
 
 /**
+ * Format date with time of day (e.g., "Jan 15, 2024, 2:14 PM").
+ * Used where the time matters for ordering, e.g. a same-day conversation thread.
+ */
+export function formatDateTime(dateStr: string): string {
+  return new Date(dateStr).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+/**
  * Calculate relative time string from a date.
  * Returns human-readable relative time like "Today", "2 days ago", "1 week ago".
  *

@@ -6,19 +6,19 @@
 @theme {
   /* Solarized Light semantic tokens (base3 bg, base01 text, base02 emphasis) */
   --color-background: #fdf6e3;
-  --color-foreground: #586e75;
+  --color-foreground: #466168;
   --color-card: #fdf6e3;
-  --color-card-foreground: #586e75;
+  --color-card-foreground: #466168;
   --color-popover: #fdf6e3;
-  --color-popover-foreground: #586e75;
+  --color-popover-foreground: #466168;
   --color-primary: #073642;
   --color-primary-foreground: #fdf6e3;
   --color-secondary: #eee8d5;
-  --color-secondary-foreground: #586e75;
+  --color-secondary-foreground: #466168;
   --color-muted: #eee8d5;
-  --color-muted-foreground: #657b83;
+  --color-muted-foreground: #516b74;
   --color-accent: #eee8d5;
-  --color-accent-foreground: #586e75;
+  --color-accent-foreground: #466168;
   --color-destructive: #dc322f;
   --color-destructive-foreground: #fdf6e3;
   --color-border: #d8d8cc;
@@ -48,10 +48,10 @@
   --color-slate-100: #eee8d5;                               /* base2 — canvas / hover */
   --color-slate-200: color-mix(in srgb, #93a1a1 35%, #fdf6e3);  /* subtle border */
   --color-slate-300: color-mix(in srgb, #93a1a1 55%, #fdf6e3);  /* stronger border */
-  --color-slate-400: #93a1a1;                               /* base1 — muted / placeholder */
-  --color-slate-500: #657b83;                               /* base00 — secondary text */
-  --color-slate-600: #586e75;                               /* base01 — body text */
-  --color-slate-700: #586e75;                               /* base01 — labels */
+  --color-slate-400: #76898c;                               /* base1 — muted / placeholder */
+  --color-slate-500: #516b74;                               /* base00 — secondary text */
+  --color-slate-600: #466168;                               /* base01 — body text */
+  --color-slate-700: #466168;                               /* base01 — labels */
   --color-slate-800: #073642;                               /* base02 */
   --color-slate-900: #073642;                               /* base02 — headings / primary bg */
   --color-slate-950: #073642;
@@ -60,10 +60,10 @@
   --color-gray-100: #eee8d5;
   --color-gray-200: color-mix(in srgb, #93a1a1 35%, #fdf6e3);
   --color-gray-300: color-mix(in srgb, #93a1a1 55%, #fdf6e3);
-  --color-gray-400: #93a1a1;
-  --color-gray-500: #657b83;
-  --color-gray-600: #586e75;
-  --color-gray-700: #586e75;
+  --color-gray-400: #76898c;
+  --color-gray-500: #516b74;
+  --color-gray-600: #466168;
+  --color-gray-700: #466168;
   --color-gray-800: #073642;
   --color-gray-900: #073642;
   --color-gray-950: #073642;

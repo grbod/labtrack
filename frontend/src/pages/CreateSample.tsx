@@ -346,27 +346,32 @@ export function CreateSamplePage() {
       } else if (formData.lot_type === "multi_sku_composite") {
         // For multi_sku_composite: Use composite products grid data
 
+        // Filter out fully-empty trailing rows (no product selected, no text typed)
+        const nonEmptyCompositeRows = compositeProducts.filter(
+          cp => cp.product_id !== null || cp.product_name.trim() !== ''
+        )
+
         // Check if there are any rows
-        if (compositeProducts.length === 0) {
+        if (nonEmptyCompositeRows.length === 0) {
           alert("Please add at least one product row")
           return
         }
 
-        // Check for products without valid product_id
-        const invalidProducts = compositeProducts.filter(cp => cp.product_id === null)
+        // Check for rows with text but no valid product_id (partial/invalid entries)
+        const invalidProducts = nonEmptyCompositeRows.filter(cp => cp.product_id === null)
         if (invalidProducts.length > 0) {
           alert("Please select valid products from the database for all rows. Hover over invalid entries to see the error.")
           return
         }
 
         // Check for products without batch numbers
-        const productsWithoutBatch = compositeProducts.filter(cp => cp.batch_number.trim() === '')
+        const productsWithoutBatch = nonEmptyCompositeRows.filter(cp => cp.batch_number.trim() === '')
         if (productsWithoutBatch.length > 0) {
           alert("Please enter batch numbers for all products")
           return
         }
 
-        const validProducts = compositeProducts.filter(cp => cp.product_id !== null && cp.batch_number.trim() !== '')
+        const validProducts = nonEmptyCompositeRows.filter(cp => cp.product_id !== null && cp.batch_number.trim() !== '')
 
         // Generate composite lot number from batch numbers
         const compositeLotNumber = "COMP-" + validProducts.map(p => p.batch_number).join("-")
@@ -553,7 +558,12 @@ export function CreateSamplePage() {
 
   // Autoscroll focused table cells above the sticky submit bar
   const handleTableFocusScroll = (e: React.FocusEvent<HTMLElement>) => {
-    ;(e.target as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" })
+    const el = e.target as HTMLElement   // capture before the rAF
+    // Defer past the layout of any just-created row so the focused cell is measured
+    // against real geometry, and snap instantly so it never feels "late".
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => el.scrollIntoView({ block: "nearest" }))
+    )
   }
 
   // Sub-batch grid handlers
@@ -739,28 +749,38 @@ export function CreateSamplePage() {
                   const isLastRow = currentRowIndex === compositeProducts.length - 1
                   const tableEl = (e.target as HTMLElement).closest('table')
 
-                  if (isLastRow) {
-                    // Add new row (spreadsheet convention)
-                    const newRow = {
-                      id: nextCompositeId,
-                      product_id: null,
-                      product_name: '',
-                      mfg_date: new Date().toISOString().split('T')[0],
-                      batch_number: ''
-                    }
-                    setCompositeProducts(prev => [...prev, newRow])
-                    setNextCompositeId(prev => prev + 1)
-                  }
+                  const currentRow = compositeProducts[currentRowIndex]
+                  const hasContent = currentRow?.product_id != null
 
-                  // Focus next row's product input after React renders
-                  requestAnimationFrame(() => {
+                  if (isLastRow && !hasContent) {
+                    // Empty last row — leave the table, focus the submit button
+                    setEditingCompositeCell(null)
+                    const submitBtn = document.querySelector('button[type="submit"]') as HTMLElement | null
+                    submitBtn?.focus()
+                  } else {
+                    if (isLastRow && hasContent) {
+                      // Row has a selected product — add a new row (spreadsheet convention)
+                      const newRow = {
+                        id: nextCompositeId,
+                        product_id: null,
+                        product_name: '',
+                        mfg_date: new Date().toISOString().split('T')[0],
+                        batch_number: ''
+                      }
+                      setCompositeProducts(prev => [...prev, newRow])
+                      setNextCompositeId(prev => prev + 1)
+                    }
+
+                    // Focus next row's product input after React renders
                     requestAnimationFrame(() => {
-                      const rows = tableEl?.querySelectorAll('tbody tr')
-                      const nextRow = rows?.[currentRowIndex + 1]
-                      const productInput = nextRow?.querySelector('input[type="text"]') as HTMLInputElement
-                      productInput?.focus()
+                      requestAnimationFrame(() => {
+                        const rows = tableEl?.querySelectorAll('tbody tr')
+                        const nextRow = rows?.[currentRowIndex + 1]
+                        const productInput = nextRow?.querySelector('input[type="text"]') as HTMLInputElement
+                        productInput?.focus()
+                      })
                     })
-                  })
+                  }
                 }
               }}
               autoFocus
@@ -929,17 +949,26 @@ export function CreateSamplePage() {
                   const isLastRow = currentRowIndex === subBatches.length - 1
 
                   if (isLastRow) {
-                    // Add new row and focus it
-                    const newRowId = nextSubBatchId
-                    const newRow = {
-                      id: newRowId,
-                      mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
-                      batch_number: ''
+                    const currentRow = subBatches[currentRowIndex]
+                    const hasContent = (currentRow?.batch_number ?? "").trim() !== ""
+                    if (hasContent) {
+                      // Row has content — add a new row and focus it
+                      const newRowId = nextSubBatchId
+                      const newRow = {
+                        id: newRowId,
+                        mfg_date: watchedMfgDate || new Date().toISOString().split('T')[0],
+                        batch_number: ''
+                      }
+                      setSubBatches(prev => [...prev, newRow])
+                      setNextSubBatchId(prev => prev + 1)
+                      // Focus the new row's batch_number
+                      setEditingSubBatchCell({ rowId: newRowId, columnId: 'batch_number' })
+                    } else {
+                      // Empty last row — leave the table, focus the submit button
+                      setEditingSubBatchCell(null)
+                      const submitBtn = document.querySelector('button[type="submit"]') as HTMLElement | null
+                      submitBtn?.focus()
                     }
-                    setSubBatches(prev => [...prev, newRow])
-                    setNextSubBatchId(prev => prev + 1)
-                    // Focus the new row's batch_number
-                    setEditingSubBatchCell({ rowId: newRowId, columnId: 'batch_number' })
                   } else {
                     // Focus next existing row's batch_number
                     const nextRowId = subBatches[currentRowIndex + 1].id
@@ -1443,7 +1472,7 @@ export function CreateSamplePage() {
                   </thead>
                   <tbody>
                     {subBatchTable.getRowModel().rows.map((row) => (
-                      <tr key={row.id} className="scroll-mb-28 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
+                      <tr key={row.id} className="scroll-mb-36 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
                         {row.getVisibleCells().map((cell) => (
                           <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1500,7 +1529,7 @@ export function CreateSamplePage() {
                 </thead>
                 <tbody>
                   {compositeTable.getRowModel().rows.map((row) => (
-                    <tr key={row.id} className="scroll-mb-28 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
+                    <tr key={row.id} className="scroll-mb-36 scroll-mt-4 border-b border-slate-100 hover:bg-slate-50/50">
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} style={{ width: cell.column.getSize() }} className="px-3 py-1.5">
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}

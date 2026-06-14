@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
   CheckCircle2,
+  CornerUpLeft,
   Download,
   Mail,
   Plus,
@@ -13,6 +14,7 @@ import {
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Tooltip,
   TooltipContent,
@@ -30,9 +32,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { CustomerQuickAdd } from "./CustomerQuickAdd"
 import { useCustomers, useEmailHistory, useSendEmail, useDownloadCoa } from "@/hooks/useRelease"
+import { useReturnLotForReview } from "@/hooks/useLots"
 import { useRetestRequests } from "@/hooks/useRetests"
 import { formatDate } from "@/lib/date-utils"
 import { extractApiErrorMessage } from "@/lib/api-utils"
+import { useAuthStore } from "@/store/auth"
 import type { ReleaseDetails, Customer, SaveDraftData } from "@/types/release"
 
 interface ReleaseActionsProps {
@@ -71,6 +75,13 @@ export function ReleaseActions({
   useEffect(() => {
     setApproveError(null)
   }, [lotId, productId])
+
+  const { user } = useAuthStore()
+  const canAct = user?.role === "admin" || user?.role === "qc_manager"
+
+  const returnMutation = useReturnLotForReview()
+  const [returnOpen, setReturnOpen] = useState(false)
+  const [returnReason, setReturnReason] = useState("")
 
   const { data: customers = [] } = useCustomers()
   const { data: emailHistory = [] } = useEmailHistory(lotId, productId)
@@ -146,6 +157,18 @@ export function ReleaseActions({
       })
       setApproveError(message)
       toast.error(message, { duration: 5000 })
+    }
+  }
+
+  const handleReturn = async () => {
+    try {
+      await returnMutation.mutateAsync({ lotId, reason: returnReason.trim() })
+      toast.success("Returned for review")
+      setReturnOpen(false)
+      setReturnReason("")
+      onDone()
+    } catch {
+      /* useReturnLotForReview already shows an error toast */
     }
   }
 
@@ -394,6 +417,18 @@ export function ReleaseActions({
           </div>
         )}
 
+        {!isReleased && canAct && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
+            onClick={() => setReturnOpen(true)}
+          >
+            <CornerUpLeft className="h-4 w-4" />
+            Return for Review
+          </Button>
+        )}
+
         {!isReleased && (
           <TooltipProvider>
             <Tooltip open={hasPendingRetest ? undefined : false}>
@@ -571,6 +606,46 @@ export function ReleaseActions({
               onClick={handleSuccessDone}
             >
               Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return for Review Dialog */}
+      <Dialog open={returnOpen} onOpenChange={(open) => { setReturnOpen(open); if (!open) setReturnReason("") }}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Return for Review</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-2">
+            <Label htmlFor="returnReason" className="text-[12px]">
+              Reason - what needs to be corrected?
+            </Label>
+            <Textarea
+              id="returnReason"
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              placeholder="Describe what needs to be corrected..."
+              rows={3}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { setReturnOpen(false); setReturnReason("") }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleReturn}
+              disabled={!returnReason.trim() || returnMutation.isPending}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {returnMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Return for Review
             </Button>
           </DialogFooter>
         </DialogContent>

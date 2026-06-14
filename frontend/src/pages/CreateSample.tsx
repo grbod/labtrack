@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown, Copy, CheckCircle2, Check, Download } from "lucide-react"
+import { Plus, Loader2, Package, Beaker, CalendarDays, Trash2, ChevronUp, ChevronDown, Copy, CheckCircle2, Check, Download, Boxes, Layers } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
 import { toast } from "sonner"
@@ -1041,9 +1041,9 @@ export function CreateSamplePage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
         {/* Lot Type Selection */}
         <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-          <div className="border-b border-blue-100 bg-blue-50/70 px-6 py-4">
+          <div className="border-b border-amber-100 bg-amber-50/70 px-6 py-4">
             <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-blue-600" />
+              <Package className="h-5 w-5 text-amber-600" />
               <h2 className="font-semibold text-slate-900 text-[15px]">Lot Type</h2>
             </div>
             <p className="mt-1 text-[13px] text-slate-500">
@@ -1076,9 +1076,9 @@ export function CreateSamplePage() {
         {/* STANDARD: Combined Product + Lot Details */}
         {watchedLotType === "standard" && (
           <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-            <div className="border-b border-violet-100 bg-violet-50/70 px-6 py-4">
+            <div className="border-b border-amber-100 bg-amber-50/70 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Beaker className="h-5 w-5 text-violet-600" />
+                <Beaker className="h-5 w-5 text-amber-600" />
                 <h2 className="font-semibold text-slate-900 text-[15px]">Lot Details</h2>
               </div>
             </div>
@@ -1276,9 +1276,9 @@ export function CreateSamplePage() {
           <>
             {/* Parent Lot Details */}
             <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-              <div className="border-b border-violet-100 bg-violet-50/70 px-6 py-4">
+              <div className="border-b border-amber-100 bg-amber-50/70 px-6 py-4">
                 <div className="flex items-center gap-2">
-                  <Beaker className="h-5 w-5 text-violet-600" />
+                  <Beaker className="h-5 w-5 text-amber-600" />
                   <h2 className="font-semibold text-slate-900 text-[15px]">Parent Lot Details</h2>
                 </div>
               </div>
@@ -1436,7 +1436,10 @@ export function CreateSamplePage() {
               <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="font-semibold text-slate-900 text-[15px]">Sub-Batches</h2>
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-5 w-5 text-amber-600" />
+                      <h2 className="font-semibold text-slate-900 text-[15px]">Sub-Batches</h2>
+                    </div>
                     <p className="mt-1 text-[13px] text-slate-500">
                       Add sub-batch details (one COA will be generated for the master lot)
                     </p>
@@ -1493,7 +1496,10 @@ export function CreateSamplePage() {
             <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-slate-900 text-[15px]">Composite Batch Details</h2>
+                  <div className="flex items-center gap-2">
+                    <Boxes className="h-5 w-5 text-amber-600" />
+                    <h2 className="font-semibold text-slate-900 text-[15px]">Composite Batch Details</h2>
+                  </div>
                   <p className="mt-1 text-[13px] text-slate-500">
                     Add products with their batch numbers (a COA will be generated for each item)
                   </p>
@@ -1632,7 +1638,7 @@ export function CreateSamplePage() {
         )}
 
         {/* Submit */}
-        <div className="sticky bottom-0 z-10 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+        <div className="mt-6 -mx-6 border-t border-slate-200 px-6 pt-4">
           <div className="flex gap-3">
             <Button
               type="button"

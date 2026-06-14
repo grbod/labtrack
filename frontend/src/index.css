@@ -4,29 +4,172 @@
 
 /* Define theme colors using Tailwind v4 @theme directive */
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222.2 84% 4.9%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222.2 84% 4.9%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222.2 84% 4.9%);
-  --color-primary: hsl(222.2 47.4% 11.2%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(210 40% 96.1%);
-  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-muted: hsl(210 40% 96.1%);
-  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
-  --color-accent: hsl(210 40% 96.1%);
-  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
-  --color-destructive: hsl(0 84.2% 60.2%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(214.3 31.8% 91.4%);
-  --color-input: hsl(214.3 31.8% 91.4%);
-  --color-ring: hsl(222.2 84% 4.9%);
+  /* Solarized Light semantic tokens (base3 bg, base01 text, base02 emphasis) */
+  --color-background: #fdf6e3;
+  --color-foreground: #586e75;
+  --color-card: #fdf6e3;
+  --color-card-foreground: #586e75;
+  --color-popover: #fdf6e3;
+  --color-popover-foreground: #586e75;
+  --color-primary: #073642;
+  --color-primary-foreground: #fdf6e3;
+  --color-secondary: #eee8d5;
+  --color-secondary-foreground: #586e75;
+  --color-muted: #eee8d5;
+  --color-muted-foreground: #657b83;
+  --color-accent: #eee8d5;
+  --color-accent-foreground: #586e75;
+  --color-destructive: #dc322f;
+  --color-destructive-foreground: #fdf6e3;
+  --color-border: #d8d8cc;
+  --color-input: #d8d8cc;
+  --color-ring: #268bd2;
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Solarized Light (default / light theme)
+   Mirrors the .dark Dragon block but for the light scope: an unlayered :root
+   block overrides Tailwind's default color scales so every existing utility
+   (bg-white, text-slate-900, bg-amber-50, …) renders in Solarized. .dark
+   (later in this file) re-overrides these under the dark class.
+   Bases: base3 #fdf6e3  base2 #eee8d5  base1 #93a1a1  base0 #839496
+          base00 #657b83 base01 #586e75 base02 #073642 base03 #002b36
+   Text is biased one step darker for readability; PASS green is punched up.
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  /* ── Neutrals (slate / gray mirror, white) ── */
+  --color-white: #fdf6e3;                                   /* base3 — cards / light text */
+
+  --color-slate-50: #eee8d5;                                /* base2 — subtle bg / shell */
+  --color-slate-100: #eee8d5;                               /* base2 — canvas / hover */
+  --color-slate-200: color-mix(in srgb, #93a1a1 35%, #fdf6e3);  /* subtle border */
+  --color-slate-300: color-mix(in srgb, #93a1a1 55%, #fdf6e3);  /* stronger border */
+  --color-slate-400: #93a1a1;                               /* base1 — muted / placeholder */
+  --color-slate-500: #657b83;                               /* base00 — secondary text */
+  --color-slate-600: #586e75;                               /* base01 — body text */
+  --color-slate-700: #586e75;                               /* base01 — labels */
+  --color-slate-800: #073642;                               /* base02 */
+  --color-slate-900: #073642;                               /* base02 — headings / primary bg */
+  --color-slate-950: #073642;
+
+  --color-gray-50: #eee8d5;
+  --color-gray-100: #eee8d5;
+  --color-gray-200: color-mix(in srgb, #93a1a1 35%, #fdf6e3);
+  --color-gray-300: color-mix(in srgb, #93a1a1 55%, #fdf6e3);
+  --color-gray-400: #93a1a1;
+  --color-gray-500: #657b83;
+  --color-gray-600: #586e75;
+  --color-gray-700: #586e75;
+  --color-gray-800: #073642;
+  --color-gray-900: #073642;
+  --color-gray-950: #073642;
+
+  /* ── Blue → Solarized blue #268bd2 (info / links / ring) ── */
+  --color-blue-50: color-mix(in srgb, #268bd2 12%, #fdf6e3);
+  --color-blue-100: color-mix(in srgb, #268bd2 20%, #fdf6e3);
+  --color-blue-200: color-mix(in srgb, #268bd2 30%, #fdf6e3);
+  --color-blue-300: color-mix(in srgb, #268bd2 45%, #fdf6e3);
+  --color-blue-400: #268bd2;
+  --color-blue-500: #268bd2;
+  --color-blue-600: #268bd2;
+  --color-blue-700: color-mix(in srgb, #268bd2 82%, #002b36);
+  --color-blue-800: color-mix(in srgb, #268bd2 82%, #002b36);
+
+  /* ── Sky → Solarized blue ── */
+  --color-sky-50: color-mix(in srgb, #268bd2 12%, #fdf6e3);
+  --color-sky-100: color-mix(in srgb, #268bd2 20%, #fdf6e3);
+  --color-sky-200: color-mix(in srgb, #268bd2 30%, #fdf6e3);
+  --color-sky-700: color-mix(in srgb, #268bd2 82%, #002b36);
+
+  /* ── Indigo → Solarized violet #6c71c4 ── */
+  --color-indigo-50: color-mix(in srgb, #6c71c4 12%, #fdf6e3);
+  --color-indigo-100: color-mix(in srgb, #6c71c4 20%, #fdf6e3);
+  --color-indigo-200: color-mix(in srgb, #6c71c4 30%, #fdf6e3);
+  --color-indigo-600: #6c71c4;
+  --color-indigo-700: color-mix(in srgb, #6c71c4 82%, #002b36);
+  --color-indigo-800: color-mix(in srgb, #6c71c4 82%, #002b36);
+
+  /* ── Red / Rose → Solarized red #dc322f (FAIL, vivid) ── */
+  --color-red-50: color-mix(in srgb, #dc322f 12%, #fdf6e3);
+  --color-red-100: color-mix(in srgb, #dc322f 20%, #fdf6e3);
+  --color-red-200: color-mix(in srgb, #dc322f 30%, #fdf6e3);
+  --color-red-400: #dc322f;
+  --color-red-500: #dc322f;
+  --color-red-600: #dc322f;
+  --color-red-700: color-mix(in srgb, #dc322f 85%, #002b36);
+  --color-red-800: color-mix(in srgb, #dc322f 85%, #002b36);
+  --color-red-900: color-mix(in srgb, #dc322f 85%, #002b36);
+
+  /* ── Green / Emerald → punchy green #2f9e44 (PASS) ── */
+  --color-green-50: color-mix(in srgb, #2f9e44 12%, #fdf6e3);
+  --color-green-100: color-mix(in srgb, #2f9e44 20%, #fdf6e3);
+  --color-green-200: color-mix(in srgb, #2f9e44 30%, #fdf6e3);
+  --color-green-600: #2f9e44;
+  --color-green-700: color-mix(in srgb, #2f9e44 82%, #002b36);
+  --color-green-800: color-mix(in srgb, #2f9e44 82%, #002b36);
+
+  --color-emerald-50: color-mix(in srgb, #2f9e44 12%, #fdf6e3);
+  --color-emerald-100: color-mix(in srgb, #2f9e44 20%, #fdf6e3);
+  --color-emerald-200: color-mix(in srgb, #2f9e44 30%, #fdf6e3);
+  --color-emerald-300: color-mix(in srgb, #2f9e44 45%, #fdf6e3);
+  --color-emerald-500: #2f9e44;
+  --color-emerald-600: #2f9e44;
+  --color-emerald-700: color-mix(in srgb, #2f9e44 82%, #002b36);
+  --color-emerald-800: color-mix(in srgb, #2f9e44 82%, #002b36);
+
+  /* ── Amber / Yellow → Solarized yellow #b58900 (warnings / section headers) ── */
+  --color-amber-50: color-mix(in srgb, #b58900 12%, #fdf6e3);
+  --color-amber-100: color-mix(in srgb, #b58900 20%, #fdf6e3);
+  --color-amber-200: color-mix(in srgb, #b58900 30%, #fdf6e3);
+  --color-amber-300: color-mix(in srgb, #b58900 45%, #fdf6e3);
+  --color-amber-400: #b58900;
+  --color-amber-500: #b58900;
+  --color-amber-600: #b58900;
+  --color-amber-700: color-mix(in srgb, #b58900 82%, #002b36);
+  --color-amber-800: color-mix(in srgb, #b58900 82%, #002b36);
+  --color-amber-900: color-mix(in srgb, #b58900 82%, #002b36);
+
+  --color-yellow-50: color-mix(in srgb, #b58900 12%, #fdf6e3);
+  --color-yellow-100: color-mix(in srgb, #b58900 20%, #fdf6e3);
+  --color-yellow-700: color-mix(in srgb, #b58900 82%, #002b36);
+
+  /* ── Violet / Purple → Solarized violet #6c71c4 ── */
+  --color-violet-50: color-mix(in srgb, #6c71c4 12%, #fdf6e3);
+  --color-violet-100: color-mix(in srgb, #6c71c4 20%, #fdf6e3);
+  --color-violet-200: color-mix(in srgb, #6c71c4 30%, #fdf6e3);
+  --color-violet-600: #6c71c4;
+  --color-violet-700: color-mix(in srgb, #6c71c4 82%, #002b36);
+  --color-violet-800: color-mix(in srgb, #6c71c4 82%, #002b36);
+
+  --color-purple-50: color-mix(in srgb, #6c71c4 12%, #fdf6e3);
+  --color-purple-100: color-mix(in srgb, #6c71c4 20%, #fdf6e3);
+  --color-purple-700: color-mix(in srgb, #6c71c4 82%, #002b36);
+  --color-purple-800: color-mix(in srgb, #6c71c4 82%, #002b36);
+
+  /* ── Pink / Fuchsia → Solarized magenta #d33682 ── */
+  --color-pink-100: color-mix(in srgb, #d33682 20%, #fdf6e3);
+  --color-pink-700: color-mix(in srgb, #d33682 82%, #002b36);
+
+  /* ── Orange → Solarized orange #cb4b16 ── */
+  --color-orange-50: color-mix(in srgb, #cb4b16 12%, #fdf6e3);
+  --color-orange-100: color-mix(in srgb, #cb4b16 20%, #fdf6e3);
+  --color-orange-200: color-mix(in srgb, #cb4b16 30%, #fdf6e3);
+  --color-orange-400: #cb4b16;
+  --color-orange-600: #cb4b16;
+  --color-orange-700: color-mix(in srgb, #cb4b16 82%, #002b36);
+
+  /* ── Teal / Cyan → Solarized cyan #2aa198 ── */
+  --color-teal-100: color-mix(in srgb, #2aa198 20%, #fdf6e3);
+  --color-teal-700: color-mix(in srgb, #2aa198 82%, #002b36);
+
+  --color-cyan-100: color-mix(in srgb, #2aa198 20%, #fdf6e3);
+  --color-cyan-600: #2aa198;
+  --color-cyan-700: color-mix(in srgb, #2aa198 82%, #002b36);
+  --color-cyan-800: color-mix(in srgb, #2aa198 82%, #002b36);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -248,7 +391,7 @@ body {
   bottom: 0;
   right: 2px;
   width: 4px;
-  background: hsl(214 15% 93%);
+  background: #eee8d5;
   border-radius: 2px;
 }
 
@@ -260,7 +403,7 @@ body {
 
 /* The thumb — thin pill, subtle slate */
 .simplebar-scrollbar::before {
-  background: hsl(215 15% 78%) !important;
+  background: #93a1a1 !important;
   border-radius: 2px !important;
   opacity: 1 !important;
   left: 0 !important;
@@ -271,12 +414,12 @@ body {
 /* Hover state — slightly darker */
 .simplebar-track.simplebar-vertical:hover .simplebar-scrollbar::before,
 .simplebar-scrollbar:hover::before {
-  background: hsl(215 18% 68%) !important;
+  background: #839496 !important;
 }
 
 /* Active/dragging state */
 .simplebar-scrollbar:active::before {
-  background: hsl(215 20% 60%) !important;
+  background: #657b83 !important;
 }
 
 /* Always visible */

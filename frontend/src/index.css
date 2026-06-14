@@ -24,8 +24,8 @@
   --color-border: #d8d8cc;
   --color-input: #d8d8cc;
   --color-ring: #268bd2;
-  /* Section-header band: midway between the cool slate and the warm sepia */
-  --color-section-header: #e4dfcc;
+  /* Section-header band: warm cream */
+  --color-section-header: #f1ebd8;
   --color-section-edge: #cdc9b4;
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;

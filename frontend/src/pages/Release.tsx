@@ -40,7 +40,7 @@ export function ReleasePage() {
 
   // Resizable panel state
   const [leftPanelWidth, setLeftPanelWidth] = useState(50) // percentage of left two panes
-  const [showFullThread, setShowFullThread] = useState(false)
+  const [notesView, setNotesView] = useState<"preview" | "full" | "hidden">("preview")
   const containerRef = useRef<HTMLDivElement>(null)
   const pdfPaneRef = useRef<HTMLDivElement>(null)
   const coaPaneRef = useRef<HTMLDivElement>(null)
@@ -246,24 +246,39 @@ export function ReleasePage() {
               <span className="flex-1 text-sm font-semibold text-red-700">
                 Returned {thread.return_count}× before release
               </span>
-              {thread.events.length > 2 && (
-                <button
-                  onClick={() => setShowFullThread((v) => !v)}
-                  className="flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 transition-colors"
-                >
-                  {showFullThread
-                    ? <>Show less <ChevronUp className="h-3.5 w-3.5" /></>
-                    : <>Show all {thread.events.length} <ChevronDown className="h-3.5 w-3.5" /></>
-                  }
-                </button>
-              )}
+              <button
+                onClick={() =>
+                  setNotesView(
+                    notesView === "full"
+                      ? "hidden"
+                      : notesView === "hidden"
+                        ? "preview"
+                        : thread.events.length > 2
+                          ? "full"
+                          : "hidden"
+                  )
+                }
+                className="flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 transition-colors"
+              >
+                {notesView === "full" ? (
+                  <>Show less <ChevronUp className="h-3.5 w-3.5" /></>
+                ) : notesView === "hidden" ? (
+                  <>Show notes <ChevronDown className="h-3.5 w-3.5" /></>
+                ) : thread.events.length > 2 ? (
+                  <>Show all {thread.events.length} <ChevronDown className="h-3.5 w-3.5" /></>
+                ) : (
+                  <>Hide <ChevronUp className="h-3.5 w-3.5" /></>
+                )}
+              </button>
             </div>
             <p className="mt-0.5 text-xs font-medium text-red-700">
               Review notes — read before releasing
             </p>
-            <div className="mt-2">
-              <ReviewThread events={showFullThread ? thread.events : thread.events.slice(-2)} />
-            </div>
+            {notesView !== "hidden" && (
+              <div className="mt-2">
+                <ReviewThread events={notesView === "full" ? thread.events : thread.events.slice(-2)} />
+              </div>
+            )}
           </div>
         </div>
       )}

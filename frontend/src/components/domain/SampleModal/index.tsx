@@ -5,7 +5,7 @@ import { useDropzone } from "react-dropzone"
 import { useNavigate } from "react-router-dom"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown } from "lucide-react"
+import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown, ChevronDown, ChevronUp } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -18,7 +18,7 @@ import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTabl
 import { FilterPills } from "./FilterPills"
 import { AdditionalTestsAccordion } from "./AdditionalTestsAccordion"
 import { RetestsHistoryAccordion } from "./RetestsHistoryAccordion"
-import { useLotWithSpecs, lotKeys, useRecalculateLotStatus, useSubmitForReview } from "@/hooks/useLots"
+import { useLotWithSpecs, lotKeys, useRecalculateLotStatus, useSubmitForReview, useReviewThread } from "@/hooks/useLots"
 import { useTestResults, useUpdateTestResult, useCreateTestResult, useDeleteTestResult } from "@/hooks/useTestResults"
 import { useRetestRequests } from "@/hooks/useRetests"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
@@ -29,6 +29,7 @@ import { useLabInfo } from "@/hooks/useLabInfo"
 import { useAuthStore } from "@/store/auth"
 import { calculatePassFail } from "@/lib/spec-validation"
 import { SendForRetestDialog } from "@/components/domain/SendForRetestDialog"
+import { ReviewThread } from "@/components/domain/ReviewThread"
 import { useDownloadCocArchive } from "@/hooks/useDaaneCoc"
 
 import type {
@@ -118,6 +119,9 @@ export function SampleModal({
   // Return-response dialog state (for lots returned-unresolved from Release Queue)
   const [showReturnResponseDialog, setShowReturnResponseDialog] = useState(false)
   const [returnResponseNote, setReturnResponseNote] = useState("")
+
+  // Review thread collapsible state — auto-expands when lot is currently returned-unresolved
+  const [threadExpanded, setThreadExpanded] = useState(false)
 
   // Focus helpers for custom tab order
   const focusSaveButton = useCallback(() => {
@@ -231,6 +235,9 @@ export function SampleModal({
   // Fetch lot with specs
   const { data: lotWithSpecs } = useLotWithSpecs(lot?.id ?? 0)
 
+  // Fetch review/return thread
+  const { data: reviewThread } = useReviewThread(lot?.id)
+
   // Fetch test results
   const { data: testResultsData, isLoading: isLoadingResults } = useTestResults(
     lot ? { lot_id: lot.id, page_size: 100 } : {}
@@ -279,6 +286,13 @@ export function SampleModal({
   const returnSource = lotWithSpecs ?? lot
   const returnReason = returnSource?.return_reason ?? null
   const isReturned = !!returnReason && !returnSource?.return_response_note
+
+  // Auto-expand thread when lot is currently returned-unresolved so lab tech sees it immediately
+  useEffect(() => {
+    if (isReturned) {
+      setThreadExpanded(true)
+    }
+  }, [isReturned])
 
   // Build merged test specs from all products
   const mergedTestSpecs = useMemo(() => {
@@ -817,11 +831,28 @@ export function SampleModal({
             </div>
           ) : (
             <>
-              {/* Returned-for-review banner */}
-              {isReturned && (
-                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-amber-800">Returned for review</p>
-                  <p className="mt-0.5 text-sm text-amber-700">{returnReason}</p>
+              {/* Return/resolution thread banner */}
+              {reviewThread && reviewThread.events.length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50">
+                  <button
+                    type="button"
+                    onClick={() => setThreadExpanded((v) => !v)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-left"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                    <span className="flex-1 text-sm font-semibold text-amber-800">
+                      {isReturned ? "Returned for review" : `Returned ${reviewThread.return_count}× — resolved`}
+                    </span>
+                    {threadExpanded
+                      ? <ChevronUp className="h-4 w-4 text-amber-600" />
+                      : <ChevronDown className="h-4 w-4 text-amber-600" />
+                    }
+                  </button>
+                  {threadExpanded && (
+                    <div className="px-4 pb-3">
+                      <ReviewThread events={reviewThread.events} />
+                    </div>
+                  )}
                 </div>
               )}
 

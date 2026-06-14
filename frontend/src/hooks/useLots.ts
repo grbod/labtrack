@@ -16,6 +16,7 @@ export const lotKeys = {
   sublots: (lotId: number) => [...lotKeys.all, "sublots", lotId] as const,
   archived: () => [...lotKeys.all, "archived"] as const,
   archivedList: (filters: ArchivedLotFilters) => [...lotKeys.archived(), filters] as const,
+  reviewThread: (id: number) => [...lotKeys.detail(id), "review-thread"] as const,
 }
 
 export function useLots(filters: LotFilters = {}) {
@@ -132,6 +133,7 @@ export function useSubmitForReview() {
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.reviewThread(id) })
       // Invalidate release queue so it auto-refreshes when navigating there
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
     },
@@ -196,6 +198,7 @@ export function useReturnLotForReview() {
       queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
       queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.reviewThread(variables.lotId) })
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
     },
   })
@@ -281,5 +284,14 @@ export function useArchivedLots(filters: ArchivedLotFilters = {}, enabled: boole
     queryKey: lotKeys.archivedList(filters),
     queryFn: () => lotsApi.listArchived(filters),
     enabled,
+  })
+}
+
+/** Fetch the review/return thread for a lot (return events + lab-tech resolutions) */
+export function useReviewThread(lotId?: number) {
+  return useQuery({
+    queryKey: lotKeys.reviewThread(lotId ?? 0),
+    queryFn: () => lotsApi.getReviewThread(lotId as number),
+    enabled: !!lotId,
   })
 }

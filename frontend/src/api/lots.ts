@@ -8,6 +8,7 @@ import type {
   LotStatusRecalculationResponse,
   PaginatedResponse,
   ArchivedLot,
+  ReviewThreadResponse,
 } from "@/types"
 
 export interface LotFilters {
@@ -177,6 +178,11 @@ export const lotsApi = {
 
   createSublotsBulk: async (lotId: number, sublots: SublotData[]): Promise<Sublot[]> => {
     const response = await api.post<Sublot[]>(`/lots/${lotId}/sublots/bulk`, { sublots })
+    return response.data
+  },
+
+  getReviewThread: async (lotId: number): Promise<ReviewThreadResponse> => {
+    const response = await api.get<ReviewThreadResponse>(`/lots/${lotId}/review-thread`)
     return response.data
   },
 

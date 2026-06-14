@@ -381,3 +381,16 @@ export interface RetestOriginalValue {
   retest_reference: string
   retest_status: RetestStatus
 }
+
+export interface ReviewThreadEvent {
+  type: "return" | "resolution"
+  message: string
+  author: string | null
+  author_role: string | null
+  at: string
+}
+
+export interface ReviewThreadResponse {
+  events: ReviewThreadEvent[]
+  return_count: number
+}

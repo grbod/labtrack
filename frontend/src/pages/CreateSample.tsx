@@ -1041,9 +1041,9 @@ export function CreateSamplePage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
         {/* Lot Type Selection */}
         <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-          <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+          <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
             <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-slate-500" />
+              <Package className="h-5 w-5 text-slate-600" />
               <h2 className="font-semibold text-slate-900 text-[15px]">Lot Type</h2>
             </div>
             <p className="mt-1 text-[13px] text-slate-500">
@@ -1076,9 +1076,9 @@ export function CreateSamplePage() {
         {/* STANDARD: Combined Product + Lot Details */}
         {watchedLotType === "standard" && (
           <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+            <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Beaker className="h-5 w-5 text-slate-500" />
+                <Beaker className="h-5 w-5 text-slate-600" />
                 <h2 className="font-semibold text-slate-900 text-[15px]">Lot Details</h2>
               </div>
             </div>
@@ -1233,9 +1233,9 @@ export function CreateSamplePage() {
         {/* Lab Reference # Autogeneration - separate block */}
         {watchedLotType === "standard" && (
           <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+            <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-slate-500" />
+                <Package className="h-5 w-5 text-slate-600" />
                 <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference #</h2>
               </div>
               <p className="mt-1 text-[13px] text-slate-500">
@@ -1276,9 +1276,9 @@ export function CreateSamplePage() {
           <>
             {/* Parent Lot Details */}
             <div className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-              <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+              <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
                 <div className="flex items-center gap-2">
-                  <Beaker className="h-5 w-5 text-slate-500" />
+                  <Beaker className="h-5 w-5 text-slate-600" />
                   <h2 className="font-semibold text-slate-900 text-[15px]">Parent Lot Details</h2>
                 </div>
               </div>
@@ -1433,11 +1433,11 @@ export function CreateSamplePage() {
 
             {/* Sub-Batches Grid */}
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-              <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+              <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <Layers className="h-5 w-5 text-slate-500" />
+                      <Layers className="h-5 w-5 text-slate-600" />
                       <h2 className="font-semibold text-slate-900 text-[15px]">Sub-Batches</h2>
                     </div>
                     <p className="mt-1 text-[13px] text-slate-500">
@@ -1493,11 +1493,11 @@ export function CreateSamplePage() {
         {/* multi_sku_composite: Composite Products Grid */}
         {watchedLotType === "multi_sku_composite" && (
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+            <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Boxes className="h-5 w-5 text-slate-500" />
+                    <Boxes className="h-5 w-5 text-slate-600" />
                     <h2 className="font-semibold text-slate-900 text-[15px]">Composite Batch Details</h2>
                   </div>
                   <p className="mt-1 text-[13px] text-slate-500">
@@ -1552,9 +1552,9 @@ export function CreateSamplePage() {
         {/* multi_sku_composite: Lab Reference & Exp Date */}
         {watchedLotType === "multi_sku_composite" && (
           <div data-section="lab-reference" className="rounded-xl border border-slate-200 bg-white shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] overflow-hidden">
-            <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+            <div className="border-b border-slate-300 bg-slate-200 px-6 py-4">
               <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-slate-500" />
+                <Package className="h-5 w-5 text-slate-600" />
                 <h2 className="font-semibold text-slate-900 text-[15px]">Lab Reference & Expiration</h2>
               </div>
             </div>

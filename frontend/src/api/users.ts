@@ -59,4 +59,24 @@ export const usersApi = {
   delete: async (id: number): Promise<void> => {
     await api.delete(`/users/${id}`)
   },
+
+  /**
+   * Upload a signature image for a user (admin only).
+   */
+  uploadSignature: async (id: number, file: File): Promise<User> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await api.post<User>(`/users/${id}/signature`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    return response.data
+  },
+
+  /**
+   * Delete a user's signature image (admin only).
+   */
+  deleteSignature: async (id: number): Promise<User> => {
+    const response = await api.delete<User>(`/users/${id}/signature`)
+    return response.data
+  },
 }

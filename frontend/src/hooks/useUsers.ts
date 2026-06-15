@@ -85,6 +85,41 @@ export function useDeleteUser() {
 }
 
 /**
+ * Hook to upload a signature image for a user (admin only).
+ */
+export function useUploadUserSignature() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) =>
+      usersApi.uploadSignature(id, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to upload signature"))
+    },
+  })
+}
+
+/**
+ * Hook to delete a user's signature image (admin only).
+ */
+export function useDeleteUserSignature() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => usersApi.deleteSignature(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.all })
+    },
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to remove signature"))
+    },
+  })
+}
+
+/**
  * Hook to change the current user's password.
  */
 export function useChangePassword() {

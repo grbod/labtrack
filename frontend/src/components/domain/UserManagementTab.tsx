@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { Users, Loader2, Save, Pencil, Plus, KeyRound } from "lucide-react"
+import { useRef, useState } from "react"
+import { Users, Loader2, Save, Pencil, Plus, KeyRound, Upload, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,8 +30,15 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ImageCropper } from "@/components/ui/image-cropper"
 
-import { useUsers, useUpdateUser, useCreateUser } from "@/hooks/useUsers"
+import {
+  useUsers,
+  useUpdateUser,
+  useCreateUser,
+  useUploadUserSignature,
+  useDeleteUserSignature,
+} from "@/hooks/useUsers"
 import { useAuthStore } from "@/store/auth"
 import { toast } from "sonner"
 import type { User, UserRole } from "@/types"
@@ -83,6 +90,8 @@ export function UserManagementTab() {
   const { data: users, isLoading, error } = useUsers()
   const updateUserMutation = useUpdateUser()
   const createUserMutation = useCreateUser()
+  const uploadSignatureMutation = useUploadUserSignature()
+  const deleteSignatureMutation = useDeleteUserSignature()
   const { user: currentUser } = useAuthStore()
 
   const [editingUser, setEditingUser] = useState<User | null>(null)
@@ -90,6 +99,9 @@ export function UserManagementTab() {
   const [resetPassword, setResetPassword] = useState("")
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [createForm, setCreateForm] = useState<CreateForm>(DEFAULT_CREATE_FORM)
+  const signatureInputRef = useRef<HTMLInputElement>(null)
+  const [signatureCropperOpen, setSignatureCropperOpen] = useState(false)
+  const [signatureToCrop, setSignatureToCrop] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -167,6 +179,47 @@ export function UserManagementTab() {
       setResetPassword("")
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || "Failed to reset password")
+    }
+  }
+
+  const handleSignatureSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"]
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Please upload a JPG, PNG, or WebP image")
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Image must be less than 2MB")
+      return
+    }
+
+    setSignatureToCrop(URL.createObjectURL(file))
+    setSignatureCropperOpen(true)
+    if (signatureInputRef.current) {
+      signatureInputRef.current.value = ""
+    }
+  }
+
+  const handleSignatureCropComplete = async (croppedBlob: Blob) => {
+    if (!editingUser) return
+    const file = new File([croppedBlob], "signature.png", { type: "image/png" })
+    // Let errors propagate so the cropper stays open (mirrors the User Profile flow).
+    const updated = await uploadSignatureMutation.mutateAsync({ id: editingUser.id, file })
+    setEditingUser(updated)
+    toast.success("Signature updated")
+  }
+
+  const handleRemoveSignature = async () => {
+    if (!editingUser) return
+    try {
+      const updated = await deleteSignatureMutation.mutateAsync(editingUser.id)
+      setEditingUser(updated)
+      toast.success("Signature removed")
+    } catch {
+      // error toast handled by the mutation hook
     }
   }
 
@@ -508,6 +561,55 @@ export function UserManagementTab() {
               />
             </div>
 
+            {/* Signature */}
+            <div className="space-y-1.5 border-t border-slate-200 pt-4">
+              <Label className="text-[13px] font-semibold text-slate-700">Signature</Label>
+              <div className="flex items-center gap-3">
+                {editingUser?.signature_url && (
+                  <img
+                    src={editingUser.signature_url}
+                    alt={`${editingUser.username} signature`}
+                    className="h-14 w-auto rounded border bg-white object-contain p-1"
+                  />
+                )}
+                <input
+                  ref={signatureInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleSignatureSelect}
+                  className="hidden"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => signatureInputRef.current?.click()}
+                  disabled={uploadSignatureMutation.isPending}
+                  className="gap-2"
+                >
+                  {uploadSignatureMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  {editingUser?.signature_url ? "Change" : "Upload"}
+                </Button>
+                {editingUser?.signature_url && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRemoveSignature}
+                    disabled={deleteSignatureMutation.isPending}
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Appears on COAs this user releases. PNG with a transparent background works best.
+              </p>
+            </div>
+
             {/* Metadata */}
             {editingUser && (
               <div className="rounded-lg bg-slate-50 p-3 space-y-1">
@@ -568,6 +670,23 @@ export function UserManagementTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Signature Cropper */}
+      {signatureToCrop && (
+        <ImageCropper
+          open={signatureCropperOpen}
+          onOpenChange={(open) => {
+            setSignatureCropperOpen(open)
+            if (!open && signatureToCrop) {
+              URL.revokeObjectURL(signatureToCrop)
+              setSignatureToCrop(null)
+            }
+          }}
+          imageSrc={signatureToCrop}
+          onCropComplete={handleSignatureCropComplete}
+          title="Crop Signature"
+        />
+      )}
     </>
   )
 }

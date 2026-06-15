@@ -2,7 +2,7 @@ import { useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Lot, LotStatus } from "@/types"
+import type { Lot, LotStatus, LotType } from "@/types"
 
 /**
  * Animation configuration for Kanban cards
@@ -138,13 +138,34 @@ function splitLots(batch?: string | null): string[] {
 }
 
 /**
+ * Universal identifier colors, by ROLE (not by lot type) - the same on every card.
+ * Lab Ref = gold, main lot = green, sublot/batch = blue. The blue/green/gold family
+ * is the only trio Kanagawa Dragon keeps distinct (cool hues collapse to one blue-gray
+ * there); the -700 shade keeps them legible on the cream Solarized card. Remapped for
+ * both themes in index.css.
+ */
+const REF_COLOR = "text-amber-700"
+const LOT_COLOR = "text-green-700"
+const BATCH_COLOR = "text-blue-700"
+
+/**
+ * Type tag (pill) styling, by lot type. blue/green/amber are remapped in both themes.
+ */
+const LOT_TYPE_TAG: Record<LotType, { label: string; tag: string }> = {
+  standard: { label: "Single SKU", tag: "bg-blue-100 text-blue-700" },
+  parent_lot: { label: "Parent Lot", tag: "bg-green-100 text-green-700" },
+  multi_sku_composite: { label: "Composite", tag: "bg-amber-100 text-amber-700" },
+  sublot: { label: "Sublot", tag: "bg-slate-100 text-slate-700" },
+}
+
+/**
  * Wrapped row of small mono lot/sublot tags, indented under a flavor line.
  */
-function LotTagRow({ tags }: { tags: string[] }) {
+function LotTagRow({ tags, colorClass = "text-slate-500" }: { tags: string[]; colorClass?: string }) {
   return (
-    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 pl-2">
+    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 pl-4">
       {tags.map((t, i) => (
-        <span key={`${t}-${i}`} className="font-mono text-[9px] text-slate-500">
+        <span key={`${t}-${i}`} className={cn("font-mono text-[9px]", colorClass)}>
           {t}
         </span>
       ))}
@@ -155,12 +176,20 @@ function LotTagRow({ tags }: { tags: string[] }) {
 /**
  * A "flavor + lot number" line: the flavor truncates, the lot stays visible.
  */
-function FlavorLotLine({ label, lotId }: { label?: string | null; lotId?: string | null }) {
+function FlavorLotLine({
+  label,
+  lotId,
+  lotClass = "text-slate-400",
+}: {
+  label?: string | null
+  lotId?: string | null
+  lotClass?: string
+}) {
   if (!label && !lotId) return null
   return (
-    <div className="flex items-baseline gap-1.5">
-      {label && <span className="truncate text-[10px] text-slate-500">{label}</span>}
-      {lotId && <span className="shrink-0 font-mono text-[10px] text-slate-400">{lotId}</span>}
+    <div className="flex items-baseline gap-1.5 pl-2">
+      {label && <span className="truncate text-[12px] text-slate-500">{label}</span>}
+      {lotId && <span className={cn("shrink-0 font-mono text-[10px]", lotClass)}>{lotId}</span>}
     </div>
   )
 }
@@ -208,6 +237,7 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
   // Production lot number shown next to a single-product flavor; suppress when it
   // would just duplicate the Lab Ref shown in the footer.
   const lotNumber = lot.lot_number !== lot.reference_number ? lot.lot_number : null
+  const typeTag = LOT_TYPE_TAG[lot.lot_type] ?? LOT_TYPE_TAG.standard
 
   // Returned-unresolved: came back from Release Queue, no response note yet
   const isReturned = !!lot.return_reason && !lot.return_response_note
@@ -234,19 +264,29 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
       {/* Product info or lot type fallback */}
       {primary ? (
         <>
-          {/* Line 1: Brand + Days Badge */}
+          {/* Line 1: Brand + Type tag + Days Badge */}
           <div className="flex items-start justify-between gap-2">
             <p className="text-[12px] font-semibold text-slate-900 truncate">
               {primary.brand}
             </p>
-            <span
-              className={cn(
-                "flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-semibold",
-                daysBadge.color
-              )}
-            >
-              {daysBadge.days}d
-            </span>
+            <div className="flex flex-shrink-0 items-center gap-1">
+              <span
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[9px] font-medium",
+                  typeTag.tag
+                )}
+              >
+                {typeTag.label}
+              </span>
+              <span
+                className={cn(
+                  "flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold",
+                  daysBadge.color
+                )}
+              >
+                {daysBadge.days}d
+              </span>
+            </div>
           </div>
           {/* Line 2: Product Name */}
           <p className="text-[11px] text-slate-700 truncate">
@@ -261,20 +301,20 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
                 const label = p.flavor ?? p.product_name
                 return lots.length > 1 ? (
                   <div key={p.id}>
-                    <p className="truncate text-[10px] text-slate-500">{label}</p>
-                    <LotTagRow tags={lots} />
+                    <p className="truncate pl-2 text-[12px] text-slate-500">{label}</p>
+                    <LotTagRow tags={lots} colorClass={BATCH_COLOR} />
                   </div>
                 ) : (
-                  <FlavorLotLine key={p.id} label={label} lotId={lots[0]} />
+                  <FlavorLotLine key={p.id} label={label} lotId={lots[0]} lotClass={BATCH_COLOR} />
                 )
               })}
             </div>
           ) : (
             /* Standard / parent: flavor + production lot, then any sublots */
             <>
-              <FlavorLotLine label={primary.flavor} lotId={lotNumber} />
+              <FlavorLotLine label={primary.flavor} lotId={lotNumber} lotClass={LOT_COLOR} />
               {sublots.length > 0 && (
-                <LotTagRow tags={sublots.map((s) => s.sublot_number)} />
+                <LotTagRow tags={sublots.map((s) => s.sublot_number)} colorClass={BATCH_COLOR} />
               )}
             </>
           )}
@@ -308,7 +348,7 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
       {/* Footer: Lab Ref + Badges */}
       <div className="mt-1.5 flex items-center justify-between">
         <p className="text-[11px] text-slate-600">
-          Lab Ref <span className="font-mono font-medium">{lot.reference_number}</span>
+          Lab Ref <span className={cn("font-mono font-medium", REF_COLOR)}>{lot.reference_number}</span>
         </p>
         <div className="flex items-center gap-1">
           {/* Returned Badge */}

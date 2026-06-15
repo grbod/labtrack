@@ -477,7 +477,7 @@ body {
   background-color: #ffffff; /* paper is always white, not themed */
 }
 .dark .document-preview {
-  filter: brightness(0.85) sepia(0.04);
+  filter: brightness(0.75) sepia(0.06);
 }
 
 /* Enterprise-grade compact styles */

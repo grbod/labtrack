@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
 from app.models import (
@@ -39,6 +39,7 @@ from app.schemas.lot import (
     SublotBulkCreate,
     SublotCreate,
     SublotResponse,
+    SublotSummary,
     TestSpecInProduct,
 )
 from app.services.audit_service import AuditService
@@ -92,6 +93,7 @@ async def list_lots(
         .joinedload(Product.test_specifications)
         .joinedload(ProductTestSpecification.lab_test_type),
         joinedload(Lot.test_results),
+        selectinload(Lot.sublots),
     )
 
     # Apply filters
@@ -149,6 +151,13 @@ async def list_lots(
             )
             for lp in lot.lot_products
             if lp.product
+        ]
+        lot_response.sublots = [
+            SublotSummary(
+                sublot_number=s.sublot_number,
+                production_date=s.production_date,
+            )
+            for s in lot.sublots
         ]
 
         # Calculate test counts

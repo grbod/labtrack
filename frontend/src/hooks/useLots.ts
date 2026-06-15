@@ -254,11 +254,11 @@ export function useDeleteLot() {
 }
 
 // Sublot hooks
-export function useSublots(lotId: number) {
+export function useSublots(lotId: number, enabled = true) {
   return useQuery({
     queryKey: lotKeys.sublots(lotId),
     queryFn: () => lotsApi.listSublots(lotId),
-    enabled: !!lotId,
+    enabled: !!lotId && enabled,
   })
 }
 

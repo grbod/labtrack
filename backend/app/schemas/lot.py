@@ -70,6 +70,15 @@ class ProductSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SublotSummary(BaseModel):
+    """Minimal sublot info for parent-lot list/card responses."""
+
+    sublot_number: str
+    production_date: Optional[date] = None
+
+    model_config = {"from_attributes": True}
+
+
 class LotResponse(BaseModel):
     """Lot response schema."""
 
@@ -103,6 +112,7 @@ class LotWithProductSummaryResponse(LotResponse):
     """Lot response with minimal product info for list views."""
 
     products: List[ProductSummary] = []
+    sublots: List[SublotSummary] = []  # Parent-lot sublots (empty for other lot types)
     tests_entered: int = 0  # Count of test results with values entered
     tests_total: int = 0  # Total expected tests from product specs
     tests_failed: int = 0  # Count of test results that failed specification

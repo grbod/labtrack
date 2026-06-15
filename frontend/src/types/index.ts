@@ -94,6 +94,12 @@ export interface ProductSummary {
   batch_number: string | null
 }
 
+// Minimal sublot info for parent-lot list/card responses
+export interface SublotSummary {
+  sublot_number: string
+  production_date?: string | null
+}
+
 // Lot types
 export interface Lot {
   id: number
@@ -113,6 +119,7 @@ export interface Lot {
   created_at: string
   updated_at: string | null
   products?: ProductSummary[]  // Included in list responses for Kanban display
+  sublots?: SublotSummary[]  // Parent-lot sublots (empty/absent for other lot types)
   tests_entered?: number  // Count of test results with values entered
   tests_total?: number  // Total expected tests from product specs
   tests_failed?: number  // Count of test results that failed specification

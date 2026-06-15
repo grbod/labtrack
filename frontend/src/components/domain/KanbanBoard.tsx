@@ -128,6 +128,44 @@ function formatLotType(lotType: string): string {
 }
 
 /**
+ * Splits a comma-joined batch_number into its individual component lots.
+ */
+function splitLots(batch?: string | null): string[] {
+  return (batch ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Wrapped row of small mono lot/sublot tags, indented under a flavor line.
+ */
+function LotTagRow({ tags }: { tags: string[] }) {
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 pl-2">
+      {tags.map((t, i) => (
+        <span key={`${t}-${i}`} className="font-mono text-[9px] text-slate-500">
+          {t}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * A "flavor + lot number" line: the flavor truncates, the lot stays visible.
+ */
+function FlavorLotLine({ label, lotId }: { label?: string | null; lotId?: string | null }) {
+  if (!label && !lotId) return null
+  return (
+    <div className="flex items-baseline gap-1.5">
+      {label && <span className="truncate text-[10px] text-slate-500">{label}</span>}
+      {lotId && <span className="shrink-0 font-mono text-[10px] text-slate-400">{lotId}</span>}
+    </div>
+  )
+}
+
+/**
  * Individual Kanban card component
  */
 interface KanbanCardProps {
@@ -162,9 +200,14 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
 
   const daysBadge = getDaysBadge()
 
-  // Get first product for display
-  const product = lot.products?.[0] ?? null
-  const hasMultipleProducts = (lot.products?.length ?? 0) > 1
+  // Products + sublots for display
+  const products = lot.products ?? []
+  const primary = products[0] ?? null
+  const isComposite = lot.lot_type === "multi_sku_composite"
+  const sublots = lot.sublots ?? []
+  // Production lot number shown next to a single-product flavor; suppress when it
+  // would just duplicate the Lab Ref shown in the footer.
+  const lotNumber = lot.lot_number !== lot.reference_number ? lot.lot_number : null
 
   // Returned-unresolved: came back from Release Queue, no response note yet
   const isReturned = !!lot.return_reason && !lot.return_response_note
@@ -189,12 +232,12 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
       }}
     >
       {/* Product info or lot type fallback */}
-      {product ? (
+      {primary ? (
         <>
           {/* Line 1: Brand + Days Badge */}
           <div className="flex items-start justify-between gap-2">
             <p className="text-[12px] font-semibold text-slate-900 truncate">
-              {product.brand}
+              {primary.brand}
             </p>
             <span
               className={cn(
@@ -207,19 +250,33 @@ function KanbanCardContent({ lot, staleness, onClick, isHighlighted }: Omit<Kanb
           </div>
           {/* Line 2: Product Name */}
           <p className="text-[11px] text-slate-700 truncate">
-            {product.product_name}
+            {primary.product_name}
           </p>
-          {/* Line 3: Flavor only (no size) */}
-          {product.flavor && (
-            <p className="text-[10px] text-slate-500 truncate">
-              {product.flavor}
-            </p>
-          )}
-          {/* Multi-product indicator */}
-          {hasMultipleProducts && (
-            <p className="text-[9px] text-blue-500 font-medium">
-              +{lot.products!.length - 1} more product{lot.products!.length > 2 ? "s" : ""}
-            </p>
+
+          {isComposite ? (
+            /* Composite: itemize every sub-product (flavor + its component lot[s]) */
+            <div className="mt-0.5 space-y-0.5">
+              {products.map((p) => {
+                const lots = splitLots(p.batch_number)
+                const label = p.flavor ?? p.product_name
+                return lots.length > 1 ? (
+                  <div key={p.id}>
+                    <p className="truncate text-[10px] text-slate-500">{label}</p>
+                    <LotTagRow tags={lots} />
+                  </div>
+                ) : (
+                  <FlavorLotLine key={p.id} label={label} lotId={lots[0]} />
+                )
+              })}
+            </div>
+          ) : (
+            /* Standard / parent: flavor + production lot, then any sublots */
+            <>
+              <FlavorLotLine label={primary.flavor} lotId={lotNumber} />
+              {sublots.length > 0 && (
+                <LotTagRow tags={sublots.map((s) => s.sublot_number)} />
+              )}
+            </>
           )}
         </>
       ) : (

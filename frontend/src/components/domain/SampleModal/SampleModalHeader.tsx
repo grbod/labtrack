@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getStatusLabel, getStatusBgClasses } from "@/lib/status-config"
+import { useSublots } from "@/hooks/useLots"
 import type { LotWithProductSpecs } from "@/types"
 
 interface SampleModalHeaderProps {
@@ -51,7 +52,9 @@ export function SampleModalHeader({
   const [isProductsExpanded, setIsProductsExpanded] = useState(true)
 
   const isMultiSku = lot.lot_type === "multi_sku_composite"
+  const isParent = lot.lot_type === "parent_lot"
   const primaryProduct = lot.products[0]
+  const { data: sublots = [] } = useSublots(lot.id, isParent)
 
   return (
     <DialogHeader className="flex-shrink-0 border-b border-slate-200 pb-4">
@@ -134,6 +137,23 @@ export function SampleModalHeader({
               {getStatusLabel(lot.status)}
             </Badge>
           </div>
+
+          {/* Parent-lot sublots: always-expanded, one per row */}
+          {isParent && sublots.length > 0 && (
+            <div className="mt-2">
+              <p className="text-sm text-slate-500">Sublots ({sublots.length})</p>
+              <div className="mt-1 space-y-1 text-sm text-slate-600">
+                {sublots.map((s) => (
+                  <div key={s.id} className="flex items-center justify-center gap-2">
+                    <span className="font-mono">{s.sublot_number}</span>
+                    {s.production_date && (
+                      <span className="text-xs text-slate-400">{s.production_date}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Shortcuts + Next + Close buttons */}

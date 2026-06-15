@@ -193,6 +193,48 @@ For existing databases, use the standalone script:
 cd backend && python scripts/seed_product_test_specs.py
 ```
 
+## Bulk Data Import (COA Register)
+
+Loading real historical lab records from a "COA Register" spreadsheet (the lab's master log, e.g. `2.4.4 New COA Register.xlsx`) is a recurring task. The reusable loader is `backend/scripts/load_coa_register.py`. It wipes the existing per-lot lab data and recreates lots/sublots/composites/test-results/releases from the spreadsheet.
+
+### Lot taxonomy (how register rows map to lots)
+The register has one row per lab reference (`RefID`). Rows group into three lot types:
+- **Single SKU (Standard lot)**: one row with a unique `Lot`. `lot_number` = `Lot`, `reference_number` = `RefID`, one product, one COA.
+- **Parent lot + sublots**: multiple rows sharing the same `Lot` number (same product/SKU, a different `RefID` per batch). Becomes one `PARENT_LOT` (lot_number = the shared `Lot`, reference auto-generated `YYMMDD-XXX`), one product, and one `Sublot` per row (sublot_number = that row's `RefID`). One COA covers the master lot.
+- **Multi-SKU composite**: multiple rows sharing the same `C…`-prefixed `RefID` (different SKUs combined under one COA). Becomes one `MULTI_SKU_COMPOSITE` (reference = the `C…` code), one `LotProduct` per distinct SKU (component `Lot` numbers go in `batch_number`), and one COA/release per product.
+  - Edge case: a `C…` ref that is the **same SKU** across several lots loads as a **parent lot** (the model cannot hold one product twice in a composite); the component lots become its sublots.
+
+### Status rules (per lot)
+The lead row's `QC Approval`, the `ToPrint` flag, and whether the row has any results together set status:
+- `QC Approval` populated **and not** `NEEDS METALS` → `RELEASED`, with a `COARelease(status=RELEASED)` per product and test results `APPROVED`. No COA PDF is generated (rendered on demand). Releases/approvals are attributed to the `qcmanager` user; the real approver name is stored in the release note.
+- `ToPrint = "NEEDS METALS"` → `PARTIAL_RESULTS` (micro tests in, metals pending). **Not** released, even when `QC Approval` is populated.
+- `QC Approval` empty **but the row has results** → `AWAITING_RELEASE`. Appears in the **Release Queue**; results are marked `APPROVED` so a COA can generate on Approve & Release.
+- `QC Approval` empty **and no results** → `AWAITING_RESULTS`. Appears in the Sample Tracker.
+
+### Running the loader
+```bash
+cd backend
+.venv/bin/python scripts/load_coa_register.py --file '<path.xlsx>' --dry-run   # report only (DEFAULT)
+.venv/bin/python scripts/load_coa_register.py --file '<path.xlsx>' --commit    # backup + wipe + load
+```
+- **Always `--dry-run` first** and read the report (lot counts by type, products to create, flagged rows).
+- `--commit` copies `labtrack.db` to `labtrack.db.bak-<ts>` first, then wipes and loads in a single transaction (atomic: any error rolls back the wipe too).
+- Idempotent: re-running wipes and reloads; auto-created products persist and are matched (not duplicated) on the next run.
+
+### Wiped vs kept
+- **Wiped** (per-lot lab data): lots, sublots, lot_products, test_results, coa_releases, coa_history, retest_requests/items, email_history, audit_logs/annotations, parsing_queue; resets daane_coc_daily_counters.
+- **Kept** (reference/config): users, products, product_test_specifications, lab_test_types, customers, lab_info, coa_category_order, daane_test_mapping, email_templates.
+
+### Things to watch out for
+- **Products auto-create + get a test panel**: a SKU not already in the catalog is created (brand/product/flavor/size). Identity includes size, so the size-less seed catalog rarely matches and many new products are expected. Each created (or earlier spec-less) product is given a **required test panel** = the union of test columns populated across that SKU's rows, with the **4 common micro** (Total Plate Count, Yeast & Mold, Escherichia coli, Salmonella spp.) as the floor when none are populated. **Metals are forced onto `NEEDS METALS` SKUs** so those lots stay genuinely partial. Products that already have specs (the seed catalog) are left untouched.
+- **Verify brand spellings in the source first**: product identity is `(brand, product, flavor, size)`, so a misspelled brand creates a **duplicate product** on import (e.g. "Wellious" once mistyped "Welliouc" produced two products). Fix the spreadsheet, not the DB, then re-import.
+- **Test column renames**: columns map to lab test types by name, with three renames: `Yeast/Mold` to `Yeast & Mold`, `E. Coli` to `Escherichia coli`, `Salmonella` to `Salmonella spp.`. Unmapped test columns are reported.
+- **De-dup/flags**: a `RefID` reused across rows gets a `-2` suffix on the second; a `Lot` cell of `"NEEDS LOT"` falls back to the `RefID`; `NEEDS METALS` rows load as `PARTIAL_RESULTS` (not released) with whatever results they have (metals blank). Eyeball the flag list after every run.
+- **Enums store by NAME** in SQLite (`RELEASED`, `PARENT_LOT`, `AWAITING_RESULTS`), not the lowercase value. Raw-SQL checks must use the uppercase name; the API still serializes the lowercase value.
+- **`/archive` page_size max is 100.** Released COAs surface in History/Archive (one item per release). The Release Queue's "Recently Released" only shows the last N days, so use History (widen the date filter) to see older releases.
+- **`--commit` with the dev server running** is fine (SQLite locking); the server shares the DB, so just refresh the UI to see new data.
+- **VPS**: the loader targets the local dev DB. To update production, run the same script on the VPS (`/opt/labtrack/backend`) against its own `labtrack.db`.
+
 ## Testing
 
 See Commands above for invocation. Always use the venv Python (`backend/.venv/bin/python`), not system Python.

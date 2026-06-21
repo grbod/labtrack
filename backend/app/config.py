@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     ai_provider: str = Field(default="mock", env="AI_PROVIDER")
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="google/gemini-2.5-flash", env="OPENROUTER_MODEL")
 
     # File paths
-    watch_folder_path: Path = Field(default=Path("./pdf_watch"), env="WATCH_FOLDER")
     template_folder: Path = Field(default=Path("./templates"), env="TEMPLATE_FOLDER")
     templates_path: Path = Field(default=Path("./templates"), env="TEMPLATES_PATH")
     coa_output_folder: Path = Field(
@@ -62,11 +62,6 @@ class Settings(BaseSettings):
     @property
     def COA_OUTPUT_FOLDER(self):
         return str(self.coa_output_folder)
-
-    # PDF Monitoring
-    enable_folder_monitoring: bool = Field(default=True, env="ENABLE_MONITORING")
-    watch_interval: int = Field(default=5, env="WATCH_INTERVAL")
-    pdf_watch_folder: str = Field(default="./pdf_watch", env="PDF_WATCH_FOLDER")
 
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")

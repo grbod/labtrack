@@ -18,6 +18,7 @@ import { ReleasePage } from "@/pages/Release"
 import { ArchivePage } from "@/pages/Archive"
 import { ArchivedItemsPage } from "@/pages/ArchivedItems"
 import { ArchiveLotPage } from "@/pages/ArchiveLot"
+import { ResultsImporterPage } from "@/pages/ResultsImporter"
 
 // Create a client
 const queryClient = new QueryClient({
@@ -53,6 +54,7 @@ function AppRoutes() {
         <Route path="/lab-tests" element={<LabTestTypesPage />} />
         <Route path="/samples" element={<CreateSamplePage />} />
         <Route path="/tracker" element={<SampleTrackerPage />} />
+        <Route path="/results-importer" element={<ResultsImporterPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/release" element={<ReleaseQueuePage />} />

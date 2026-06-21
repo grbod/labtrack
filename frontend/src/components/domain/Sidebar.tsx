@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   ClipboardList,
   FileCheck,
+  FileUp,
   Archive,
   Users,
   Settings,
@@ -52,6 +53,7 @@ const navSections: NavSection[] = [
     items: [
       { label: "Create Sample", href: "/samples", icon: <TestTube className="h-[18px] w-[18px]" /> },
       { label: "Sample Tracker", href: "/tracker", icon: <ClipboardList className="h-[18px] w-[18px]" /> },
+      { label: "Results Importer", href: "/results-importer", icon: <FileUp className="h-[18px] w-[18px]" /> },
       { label: "Release Queue", href: "/release", icon: <FileCheck className="h-[18px] w-[18px]" /> },
       { label: "History", href: "/archive", icon: <Archive className="h-[18px] w-[18px]" /> },
     ],

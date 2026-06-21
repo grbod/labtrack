@@ -115,8 +115,8 @@ All configuration is managed through environment variables. See `.env.example` f
 
 Key configurations:
 - `DATABASE_URL`: Database connection string
-- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`: For AI parsing features
-- `WATCH_FOLDER_PATH`: Folder to monitor for new COAs
+- `AI_PROVIDER`: Use `mock` for local/test extraction or OpenRouter for live extraction
+- `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`: For results-importer PDF extraction
 - `TEMPLATES_PATH`: Location of COA templates
 
 ## Development

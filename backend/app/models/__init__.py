@@ -7,7 +7,7 @@ from app.models.enums import (
     LotType,
     LotStatus,
     TestResultStatus,
-    ParsingStatus,
+    ResultImportStatus,
     AuditAction,
     COAReleaseStatus,
     RetestStatus,
@@ -18,7 +18,7 @@ from app.models.lot import Lot, Sublot, LotProduct
 from app.models.user import User
 from app.models.test_result import TestResult
 from app.models.audit import AuditLog, AuditAnnotation
-from app.models.parsing import ParsingQueue
+from app.models.result_import import ResultImport, ResultImportLedger
 from app.models.coa import COAHistory
 from app.models.lab_test_type import LabTestType
 from app.models.product_test_spec import ProductTestSpecification
@@ -41,7 +41,7 @@ __all__ = [
     "LotType",
     "LotStatus",
     "TestResultStatus",
-    "ParsingStatus",
+    "ResultImportStatus",
     "AuditAction",
     "COAReleaseStatus",
     "RetestStatus",
@@ -55,7 +55,8 @@ __all__ = [
     "TestResult",
     "AuditLog",
     "AuditAnnotation",
-    "ParsingQueue",
+    "ResultImport",
+    "ResultImportLedger",
     "COAHistory",
     "LabTestType",
     "ProductTestSpecification",

@@ -79,8 +79,17 @@ async def upload_pdf(
             # Initialize attached_pdfs if None
             if lot.attached_pdfs is None:
                 lot.attached_pdfs = []
-            # Add the storage key
-            lot.attached_pdfs = lot.attached_pdfs + [storage_key]
+            # Add the object-shaped attachment while keeping release reads
+            # compatible with older string entries.
+            lot.attached_pdfs = lot.attached_pdfs + [
+                {
+                    "filename": file.filename or new_filename,
+                    "storage_key": storage_key,
+                    "source": "manual",
+                    "import_id": None,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+            ]
             db.commit()
 
     return UploadResponse(

@@ -12,12 +12,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models import (
     Product, ProductSize, Lot, Sublot, LotProduct,
-    User, TestResult, AuditLog, ParsingQueue,
+    User, TestResult, AuditLog,
     COAHistory, LabTestType, ProductTestSpecification
 )
 from app.models.enums import (
     UserRole, LotType, LotStatus, TestResultStatus,
-    ParsingStatus, AuditAction
+    AuditAction
 )
 from app.services import (
     ProductService, LotService, UserService,
@@ -565,74 +565,7 @@ class TestCOAHistoryModel:
 
 
 # =============================================================================
-# PARSING QUEUE MODEL TESTS (Tests 40-44)
-# =============================================================================
-
-class TestParsingQueueModel:
-    """Tests for ParsingQueue model."""
-
-    # Test 40
-    def test_parsing_queue_filename_validation(self, test_db):
-        """Test filename must be PDF."""
-        with pytest.raises(ValueError, match="must be a PDF"):
-            ParsingQueue(
-                pdf_filename="test.doc"
-            )
-
-    # Test 41
-    def test_parsing_queue_retry_count_positive(self, test_db):
-        """Test retry count cannot be negative."""
-        with pytest.raises(ValueError, match="cannot be negative"):
-            ParsingQueue(
-                pdf_filename="test.pdf",
-                retry_count=-1
-            )
-
-    # Test 42
-    def test_parsing_queue_can_retry(self, test_db):
-        """Test can_retry property."""
-        can_retry = ParsingQueue(
-            pdf_filename="test.pdf",
-            status=ParsingStatus.PENDING,
-            retry_count=1
-        )
-        cannot_retry = ParsingQueue(
-            pdf_filename="test2.pdf",
-            status=ParsingStatus.PENDING,
-            retry_count=3
-        )
-
-        assert can_retry.can_retry is True
-        assert cannot_retry.can_retry is False
-
-    # Test 43
-    def test_parsing_queue_mark_processing(self, test_db):
-        """Test mark_processing method."""
-        pq = ParsingQueue(pdf_filename="test.pdf", status=ParsingStatus.PENDING)
-        test_db.add(pq)
-        test_db.commit()
-
-        pq.mark_processing()
-        test_db.commit()
-
-        assert pq.status == ParsingStatus.PROCESSING
-        assert pq.retry_count == 1
-
-    # Test 44
-    def test_parsing_queue_extracted_data_json(self, test_db):
-        """Test extracted data JSON conversion."""
-        pq = ParsingQueue(pdf_filename="test.pdf")
-
-        data = {"test": "value", "number": 123}
-        pq.set_extracted_data(data)
-
-        result = pq.get_extracted_data_dict()
-        assert result["test"] == "value"
-        assert result["number"] == 123
-
-
-# =============================================================================
-# AUDIT LOG MODEL TESTS (Tests 45-47)
+# AUDIT LOG MODEL TESTS
 # =============================================================================
 
 class TestAuditLogModel:

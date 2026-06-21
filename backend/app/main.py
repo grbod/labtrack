@@ -40,10 +40,17 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     init_db()
+    from app.services.result_import_worker import (
+        start_result_import_worker,
+        stop_result_import_worker,
+    )
+
+    await start_result_import_worker()
     cleanup_task = asyncio.create_task(_coc_cleanup_loop())
     yield
     # Shutdown
     cleanup_task.cancel()
+    await stop_result_import_worker()
 
 
 app = FastAPI(

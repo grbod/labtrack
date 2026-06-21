@@ -649,8 +649,15 @@ export function SampleModal({
     disabled: isLocked,
   })
 
-  // Get attached PDFs from lot record
-  const attachedPdfs: string[] = lotWithSpecs?.attached_pdfs || []
+  // Get attached PDFs from lot record. Supports legacy string entries and
+  // object-shaped importer/manual attachments.
+  const attachedPdfs: string[] = (lotWithSpecs?.attached_pdfs || [])
+    .map((pdf) => {
+      if (typeof pdf === "string") return pdf
+      const storageKey = pdf.storage_key
+      return typeof storageKey === "string" ? storageKey : null
+    })
+    .filter((pdf): pdf is string => Boolean(pdf))
 
   // Internal function to actually perform the submission
   const performSubmission = useCallback(async (overrideUserId?: number, note?: string) => {

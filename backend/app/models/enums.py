@@ -40,13 +40,15 @@ class TestResultStatus(str, enum.Enum):
     APPROVED = "approved"
 
 
-class ParsingStatus(str, enum.Enum):
-    """Parsing queue status enumeration."""
+class ResultImportStatus(str, enum.Enum):
+    """Results-import workflow status."""
 
-    PENDING = "pending"
     PROCESSING = "processing"
-    RESOLVED = "resolved"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    CONFIRMED = "confirmed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    REVERTED = "reverted"
 
 
 class AuditAction(str, enum.Enum):

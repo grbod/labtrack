@@ -1,8 +1,6 @@
 """Command-line interface for LabTrack."""
 
 import click
-import asyncio
-from pathlib import Path
 from datetime import datetime, date
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -19,8 +17,6 @@ from .services import (
     ProductService,
     LotService,
     UserService,
-    PDFParserService,
-    PDFWatcherService,
     COAGeneratorService,
 )
 from .utils.logger import logger
@@ -199,80 +195,6 @@ def create_sublots(parent, count, quantity):
         click.echo(f"✅ Created {len(sublots)} sublots:")
         for sublot in sublots:
             click.echo(f"   - {sublot.sublot_number}")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-    finally:
-        db.close()
-
-
-# PDF commands
-@cli.group()
-def pdf():
-    """PDF processing commands."""
-    pass
-
-
-@pdf.command("parse")
-@click.argument("pdf_path", type=click.Path(exists=True))
-def parse_pdf(pdf_path):
-    """Parse a PDF file."""
-    db = SessionLocal()
-    try:
-        service = PDFParserService(db)
-
-        click.echo(f"Parsing PDF: {pdf_path}")
-
-        # Run async function
-        result = asyncio.run(service.parse_pdf(Path(pdf_path)))
-
-        if result["status"] == "success":
-            click.echo("✅ PDF parsed successfully!")
-            click.echo(f"   Confidence: {result['confidence']:.1%}")
-
-            data = result["data"]
-            click.echo(f"   Reference: {data.get('reference_number', 'N/A')}")
-            click.echo(f"   Lot: {data.get('lot_number', 'N/A')}")
-
-        elif result["status"] == "review_needed":
-            click.echo("⚠️  PDF parsed but needs manual review")
-            click.echo(f"   Queue ID: {result['queue_id']}")
-
-        else:
-            click.echo(
-                f"❌ Failed to parse PDF: {result.get('error', 'Unknown error')}",
-                err=True,
-            )
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-    finally:
-        db.close()
-
-
-@pdf.command("watch")
-@click.option("--folder", type=click.Path(), help="Folder to watch")
-def watch_folder(folder):
-    """Start watching a folder for PDFs."""
-    db = SessionLocal()
-    try:
-        if folder:
-            service = PDFWatcherService(db, Path(folder))
-        else:
-            service = PDFWatcherService(db)
-
-        click.echo(f"👁️  Watching folder: {service.watch_dir}")
-        click.echo("Press Ctrl+C to stop...")
-
-        service.start_watching()
-
-        # Keep running until interrupted
-        try:
-            while True:
-                asyncio.run(asyncio.sleep(1))
-        except KeyboardInterrupt:
-            click.echo("\nStopping watcher...")
-            service.stop_watching()
 
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)

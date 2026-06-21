@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from "react"
 import { FileUp, Loader2, RotateCcw, Search, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -33,7 +34,7 @@ export function ResultsImporterPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const selectedQuery = useResultImport(selectedId)
   const selected = selectedQuery.data
-  const uploadMutation = useUploadResultImports()
+  const uploadMutation = useUploadResultImports(setSelectedId)
   const retryMutation = useRetryResultImport()
   const cancelMutation = useCancelResultImport()
   const revertMutation = useRevertResultImport()
@@ -194,6 +195,7 @@ function ReviewPanel({
   const [choices, setChoices] = useState<Record<string, RowChoice>>({})
   const [labTypeOverrides, setLabTypeOverrides] = useState<Record<string, number | null>>({})
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({})
+  const [appliedPreviewKey, setAppliedPreviewKey] = useState("")
   const candidatesQuery = useLinkCandidates(manualSearch)
   const confirmMutation = useConfirmResultImport(item?.id || 0)
   const previewQuery = useResultImportPreview(item?.status === "needs_confirmation" ? item.id : null, selectedLotId)
@@ -206,17 +208,22 @@ function ReviewPanel({
     return new Map((previewQuery.data?.rows || []).map((row) => [row.row_id, row]))
   }, [previewQuery.data?.rows])
   const labTypes = labTypesQuery.data?.items || []
+  const previewKey = item && selectedLotId ? `${item.id}:${selectedLotId}` : ""
+  const needsPreview = item?.status === "needs_confirmation" && !!selectedLotId
+  const previewReady = !needsPreview || (previewQuery.isSuccess && previewQuery.data?.lot_id === selectedLotId)
 
   useEffect(() => {
-    const first = item?.match_candidates?.[0]
+    const first = item?.match_candidates?.find((candidate) => candidate.score >= 0.5)
     setSelectedLotId(first?.lot_id || item?.selected_lot_id || null)
     setChoices({})
     setLabTypeOverrides({})
     setNameOverrides({})
+    setAppliedPreviewKey("")
   }, [item?.id])
 
   useEffect(() => {
     if (!previewQuery.data?.rows) return
+    if (!previewKey || appliedPreviewKey === previewKey) return
     const nextChoices: Record<string, RowChoice> = {}
     const nextLabTypes: Record<string, number | null> = {}
     for (const preview of previewQuery.data.rows) {
@@ -225,22 +232,33 @@ function ReviewPanel({
     }
     setChoices(nextChoices)
     setLabTypeOverrides(nextLabTypes)
-  }, [item?.id, selectedLotId, previewQuery.data?.rows])
+    setAppliedPreviewKey(previewKey)
+  }, [appliedPreviewKey, previewKey, previewQuery.data?.rows])
 
   const rowActions = useMemo<ResultRowAction[]>(() => {
-    return rows.map((row) => ({
-      row_id: row.row_id,
-      action: choices[row.row_id] || "apply",
-      lab_test_type_id: labTypeOverrides[row.row_id] ?? row.matched_lab_test_type_id,
-      test_name: nameOverrides[row.row_id] || row.test_name_normalized,
-    }))
-  }, [choices, labTypeOverrides, nameOverrides, rows])
+    return rows.map((row) => {
+      const preview = previews.get(row.row_id)
+      return {
+        row_id: row.row_id,
+        action: choices[row.row_id] || (previewReady ? "apply" : "skip"),
+        lab_test_type_id:
+          labTypeOverrides[row.row_id] ?? row.matched_lab_test_type_id,
+        test_name: nameOverrides[row.row_id] || row.test_name_normalized,
+        test_result_id: preview?.existing_result?.id,
+      }
+    })
+  }, [choices, labTypeOverrides, nameOverrides, previewReady, previews, rows])
 
   if (!item) {
     return <section className="bg-white p-6 text-sm text-slate-500">Select an import to review.</section>
   }
 
-  const canConfirm = item.status === "needs_confirmation" && selectedLotId && rows.some((row) => (choices[row.row_id] || "apply") !== "skip")
+  const canConfirm =
+    item.status === "needs_confirmation" &&
+    selectedLotId &&
+    previewReady &&
+    rowActions.some((action) => action.action !== "skip" && !!action.lab_test_type_id) &&
+    rowActions.every((action) => action.action === "skip" || !!action.lab_test_type_id)
 
   return (
     <section className="min-h-0 overflow-y-auto bg-white">
@@ -268,13 +286,21 @@ function ReviewPanel({
             )}
           </div>
         </div>
-        {item.error_message && <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{item.error_message}</div>}
+        {item.status !== "processing" && item.error_message && (
+          <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{item.error_message}</div>
+        )}
       </div>
 
       <div className="space-y-5 p-5">
         <LotSelection
           selectedLotId={selectedLotId}
-          onSelect={setSelectedLotId}
+          onSelect={(id) => {
+            setSelectedLotId(id)
+            setChoices({})
+            setLabTypeOverrides({})
+            setNameOverrides({})
+            setAppliedPreviewKey("")
+          }}
           candidates={candidates}
           manualCandidates={manualCandidates}
           manualSearch={manualSearch}
@@ -295,7 +321,7 @@ function ReviewPanel({
                   row={row}
                   preview={previews.get(row.row_id) || null}
                   labTypes={labTypes}
-                  choice={choices[row.row_id] || "apply"}
+                  choice={choices[row.row_id] || (previewReady ? "apply" : "skip")}
                   onChoice={(choice) => setChoices((current) => ({ ...current, [row.row_id]: choice }))}
                   labTestTypeId={labTypeOverrides[row.row_id] ?? row.matched_lab_test_type_id}
                   onLabTestType={(id) => {
@@ -306,6 +332,7 @@ function ReviewPanel({
                   }}
                   nameOverride={nameOverrides[row.row_id] || ""}
                   onNameOverride={(value) => setNameOverrides((current) => ({ ...current, [row.row_id]: value }))}
+                  disabled={!previewReady}
                 />
               ))}
             </div>
@@ -398,6 +425,7 @@ function ResultRowReview({
   onLabTestType,
   nameOverride,
   onNameOverride,
+  disabled,
 }: {
   row: ExtractedResultRow
   preview: ResultImportRowPreview | null
@@ -408,10 +436,11 @@ function ResultRowReview({
   onLabTestType: (id: number | null) => void
   nameOverride: string
   onNameOverride: (value: string) => void
+  disabled: boolean
 }) {
   const warnings = Array.from(new Set([...(row.warnings || []), ...(preview?.warnings || [])]))
   const existing = preview?.existing_result
-  const needsMapping = preview?.requires_lab_test_mapping && choice !== "create_adhoc"
+  const needsMapping = choice !== "skip" && !labTestTypeId
 
   return (
     <div className="border-b border-slate-100 p-3 last:border-b-0">
@@ -433,6 +462,7 @@ function ResultRowReview({
               value={nameOverride}
               onChange={(event) => onNameOverride(event.target.value)}
               placeholder={row.test_name_normalized || row.test_name_raw || "Ad-hoc test name"}
+              disabled={disabled}
               className="mt-2 h-8 w-full rounded-md border border-slate-300 px-2 text-sm outline-none focus:border-slate-500"
             />
           )}
@@ -440,6 +470,7 @@ function ResultRowReview({
             <select
               value={labTestTypeId || ""}
               onChange={(event) => onLabTestType(event.target.value ? Number(event.target.value) : null)}
+              disabled={disabled}
               className="mt-2 h-8 w-full rounded-md border border-amber-300 bg-white px-2 text-sm"
             >
               <option value="">Map lab test type</option>
@@ -454,6 +485,7 @@ function ResultRowReview({
         <select
           value={choice}
           onChange={(event) => onChoice(event.target.value as RowChoice)}
+          disabled={disabled}
           className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm"
         >
           <option value="apply">Apply</option>

@@ -2,9 +2,24 @@
 
 from datetime import date, datetime, timedelta
 
-from app.models import ResultImport, ResultImportStatus, TestResult, TestResultStatus
+import pytest
+import requests
+
+from app.models import (
+    Lot,
+    ResultImport,
+    ResultImportLedger,
+    ResultImportStatus,
+    TestResult,
+    TestResultStatus,
+    UserRole,
+)
+from app.models.enums import LotStatus, LotType
 from app.services.release_service import ReleaseService
-from app.services.result_extraction_provider import MockExtractionProvider
+from app.services.result_extraction_provider import (
+    MockExtractionProvider,
+    OpenRouterExtractionProvider,
+)
 from app.services.result_import_service import ResultImportService
 from app.schemas.result_import import RowAction
 
@@ -16,6 +31,73 @@ def test_mock_provider_does_not_invent_rows():
     assert extracted["warnings"]
 
 
+def test_openrouter_retries_text_only_for_pdf_input_rejection(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.result_extraction_provider.settings.openrouter_api_key",
+        "test-key",
+    )
+    calls = []
+
+    class FakeResponse:
+        status_code = 400
+        text = "unsupported pdf file input"
+
+        def raise_for_status(self):
+            if len(calls) == 1:
+                raise requests.HTTPError(response=self)
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"identifiers":[],"lab_name":"Lab","rows":[],"warnings":[]}'
+                        }
+                    }
+                ],
+                "model": "test-model",
+            }
+
+    def fake_post(*args, **kwargs):
+        calls.append(kwargs["json"]["messages"][0]["content"])
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.services.result_extraction_provider.requests.post", fake_post
+    )
+
+    result = OpenRouterExtractionProvider().extract(
+        b"%PDF", "extracted text", "coa.pdf"
+    )
+
+    assert result["lab_name"] == "Lab"
+    assert len(calls) == 2
+    assert any(part["type"] == "file" for part in calls[0])
+    assert all(part["type"] != "file" for part in calls[1])
+
+
+def test_openrouter_does_not_retry_text_only_for_auth_error(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.result_extraction_provider.settings.openrouter_api_key",
+        "test-key",
+    )
+
+    class FakeResponse:
+        status_code = 401
+        text = "invalid api key"
+
+        def raise_for_status(self):
+            raise requests.HTTPError(response=self)
+
+    monkeypatch.setattr(
+        "app.services.result_extraction_provider.requests.post",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    with pytest.raises(requests.HTTPError):
+        OpenRouterExtractionProvider().extract(b"%PDF", "extracted text", "coa.pdf")
+
+
 def test_candidate_matching_uses_lot_identifiers(test_db, sample_lot):
     service = ResultImportService()
     extracted = {"identifiers": [{"type": "reference_number", "value": "241101-001"}]}
@@ -24,9 +106,65 @@ def test_candidate_matching_uses_lot_identifiers(test_db, sample_lot):
     assert "reference matched" in candidates[0]["reasons"]
 
 
-def test_upload_fails_without_openrouter_key_when_live_provider(test_db, sample_user, monkeypatch):
-    monkeypatch.setattr("app.services.result_import_service.settings.ai_provider", "openrouter")
-    monkeypatch.setattr("app.services.result_import_service.settings.openrouter_api_key", None)
+def test_candidate_matching_uses_row_level_identifiers(test_db, sample_lot):
+    service = ResultImportService()
+    extracted = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "reference_number": sample_lot.reference_number,
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    candidates = service.match_candidates(test_db, extracted, "result.pdf")
+
+    assert candidates[0]["lot_id"] == sample_lot.id
+    assert "reference matched" in candidates[0]["reasons"]
+
+
+def test_candidate_matching_uses_row_level_batch_identifier(test_db, sample_lot):
+    sample_lot.lot_products[0].batch_number = "BATCH-123"
+    test_db.commit()
+    service = ResultImportService()
+    extracted = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "batch_number": "BATCH-123",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    candidates = service.match_candidates(test_db, extracted, "result.pdf")
+
+    assert candidates[0]["lot_id"] == sample_lot.id
+    assert "batch matched" in candidates[0]["reasons"]
+
+
+def test_upload_fails_without_openrouter_key_when_live_provider(
+    test_db, sample_user, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.services.result_import_service.settings.ai_provider", "openrouter"
+    )
+    monkeypatch.setattr(
+        "app.services.result_import_service.settings.openrouter_api_key", None
+    )
 
     try:
         ResultImportService().create_uploads(
@@ -83,12 +221,76 @@ def test_confirm_creates_draft_results_and_attachment(
     )
 
     assert result["created_result_ids"]
-    created = test_db.query(TestResult).filter(TestResult.id == result["created_result_ids"][0]).one()
+    created = (
+        test_db.query(TestResult)
+        .filter(TestResult.id == result["created_result_ids"][0])
+        .one()
+    )
     assert created.status == TestResultStatus.DRAFT
     assert created.result_value == "< 10"
     assert created.pdf_source == "pdfs/result-imports/coa.pdf"
     test_db.refresh(sample_lot)
     assert sample_lot.attached_pdfs[0]["source"] == "import"
+
+
+def test_confirm_rejects_mismatched_test_result_id(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    existing = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        status=TestResultStatus.DRAFT,
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="z" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Total Plate Count",
+                    "test_name_normalized": "Total Plate Count",
+                    "result_value_raw": "< 10",
+                    "unit_raw": "CFU/g",
+                    "target_unit": "CFU/g",
+                    "limit_raw": "< 10000",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                }
+            ],
+        },
+    )
+    test_db.add_all([existing, import_row])
+    test_db.commit()
+
+    with pytest.raises(ValueError, match="does not match extracted test"):
+        ResultImportService().confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [
+                RowAction(
+                    row_id="row-1",
+                    action="replace",
+                    test_result_id=existing.id,
+                )
+            ],
+            sample_user.id,
+        )
+
+    test_db.refresh(existing)
+    assert existing.test_type == "Lead"
+    assert existing.result_value == "0.1"
 
 
 def test_confirm_rejects_zero_applied_rows(test_db, sample_lot, sample_user):
@@ -159,6 +361,153 @@ def test_confirm_rejects_unmapped_apply(test_db, sample_lot, sample_user):
         raise AssertionError("unmapped apply should be rejected")
 
 
+def test_confirm_rejects_unmapped_adhoc(test_db, sample_lot, sample_user):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="j" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Unknown Marker",
+                    "test_name_normalized": "Unknown Marker",
+                    "result_value_raw": "12",
+                    "unit_raw": "lab unit",
+                    "target_unit": "lab unit",
+                    "limit_raw": "< 20",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                }
+            ]
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    try:
+        ResultImportService().confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [
+                RowAction(
+                    row_id="row-1", action="create_adhoc", test_name="Unknown Marker"
+                )
+            ],
+            sample_user.id,
+        )
+    except ValueError as exc:
+        assert "active lab test type" in str(exc)
+    else:
+        raise AssertionError("unmapped ad-hoc row should be rejected")
+
+
+def test_confirm_adhoc_uses_lab_type_defaults(
+    test_db, sample_lot, sample_user, sample_lab_test_types
+):
+    gluten = next(
+        test_type
+        for test_type in sample_lab_test_types
+        if test_type.test_name == "Gluten"
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="k" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Unknown Gluten Marker",
+                    "test_name_normalized": "Unknown Gluten Marker",
+                    "result_value_raw": "< 5",
+                    "unit_raw": "lab-unit",
+                    "target_unit": "lab-unit",
+                    "limit_raw": "< 10 lab limit",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                }
+            ]
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    result = ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="create_adhoc", lab_test_type_id=gluten.id)],
+        sample_user.id,
+    )
+
+    created = (
+        test_db.query(TestResult)
+        .filter(TestResult.id == result["created_result_ids"][0])
+        .one()
+    )
+    assert created.test_type == "Gluten"
+    assert created.unit == "ppm"
+    assert created.method == "ELISA"
+    assert "< 10 lab limit" in created.notes
+
+
+def test_confirm_pulls_awaiting_release_lot_out_of_release_queue(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    sample_lot.status = LotStatus.AWAITING_RELEASE
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="o" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "date_tested": "2026-06-20",
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Total Plate Count",
+                    "test_name_normalized": "Total Plate Count",
+                    "result_value_raw": "< 10",
+                    "unit_raw": "CFU/g",
+                    "target_unit": "CFU/g",
+                    "limit_raw": "< 10000",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                }
+            ],
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+
+    test_db.refresh(sample_lot)
+    assert sample_lot.status != LotStatus.AWAITING_RELEASE
+
+
 def test_preview_defaults_existing_draft_to_skip(
     test_db,
     sample_lot,
@@ -211,13 +560,201 @@ def test_harken_metal_names_normalize(test_db):
         test_db,
         {
             "rows": [
-                {"row_id": "1", "test_name_raw": "Pb (Lead)", "result_value_raw": "0.1", "confidence": 0.9},
-                {"row_id": "2", "test_name_raw": "Hg/Mercury", "result_value_raw": "0.01", "confidence": 0.9},
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Pb (Lead)",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                },
+                {
+                    "row_id": "2",
+                    "test_name_raw": "Hg/Mercury",
+                    "result_value_raw": "0.01",
+                    "confidence": 0.9,
+                },
             ]
         },
     )
 
-    assert [row["test_name_normalized"] for row in normalized["rows"]] == ["Lead", "Mercury"]
+    assert [row["test_name_normalized"] for row in normalized["rows"]] == [
+        "Lead",
+        "Mercury",
+    ]
+
+
+def test_harken_per_serving_metal_is_not_primary_result(test_db):
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "lab_name": "Harken Research",
+            "rows": [
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Pb (Lead)",
+                    "result_value_raw": "0.5",
+                    "unit_raw": "mcg/serving",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == "Lead"
+    assert row["target_unit"] == "ug/g"
+    assert row["result_value_raw"] is None
+    assert row["metadata"]["per_serving"] == "0.5"
+
+
+def test_harken_ppb_metal_converts_to_ug_per_g(test_db):
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "lab_name": "Harken Research",
+            "rows": [
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Pb (Lead)",
+                    "result_value_raw": "<50",
+                    "unit_raw": "ppb",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    row = normalized["rows"][0]
+    assert row["target_unit"] == "ug/g"
+    assert row["result_value_raw"] == "<0.05"
+
+
+def test_reference_and_lot_identifier_pair_is_not_multi_sample(test_db):
+    service = ResultImportService()
+    normalized = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [
+                {"type": "reference_number", "value": "241101-001", "confidence": 0.9},
+                {"type": "lot_number", "value": "TEST123", "confidence": 0.9},
+            ],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    assert not any(
+        warning.startswith("Multiple sample") for warning in normalized["warnings"]
+    )
+
+
+def test_multiple_reference_identifiers_are_multi_sample(test_db):
+    service = ResultImportService()
+    normalized = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [
+                {"type": "reference_number", "value": "241101-001", "confidence": 0.9},
+                {"type": "reference_number", "value": "241101-002", "confidence": 0.9},
+            ],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    assert any(
+        warning.startswith("Multiple sample") for warning in normalized["warnings"]
+    )
+
+
+def test_top_level_and_row_reference_conflict_is_multi_sample(test_db):
+    service = ResultImportService()
+    normalized = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [
+                {"type": "reference_number", "value": "241101-001", "confidence": 0.9}
+            ],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "reference_number": "241101-002",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    assert any(
+        warning.startswith("Multiple sample") for warning in normalized["warnings"]
+    )
+
+
+def test_multiple_row_lot_numbers_are_multi_sample(test_db):
+    service = ResultImportService()
+    normalized = service._normalize_extraction(
+        test_db,
+        {
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "lot_number": "LOT-A",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                },
+                {
+                    "row_id": "row-2",
+                    "lot_number": "LOT-B",
+                    "test_name_raw": "Mercury",
+                    "result_value_raw": "0.01",
+                    "confidence": 0.9,
+                },
+            ],
+        },
+    )
+
+    assert any(
+        warning.startswith("Multiple sample") for warning in normalized["warnings"]
+    )
+
+
+def test_top_level_and_row_lot_conflict_is_multi_sample(test_db):
+    service = ResultImportService()
+    normalized = service._normalize_extraction(
+        test_db,
+        {
+            "identifiers": [
+                {"type": "lot_number", "value": "LOT-A", "confidence": 0.9}
+            ],
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "lot_number": "LOT-B",
+                    "test_name_raw": "Lead",
+                    "result_value_raw": "0.1",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    assert any(
+        warning.startswith("Multiple sample") for warning in normalized["warnings"]
+    )
 
 
 def test_process_import_rejects_multi_sample_pdf(test_db, sample_user, monkeypatch):
@@ -243,8 +780,13 @@ def test_process_import_rejects_multi_sample_pdf(test_db, sample_user, monkeypat
                 "warnings": [],
             }
 
-    monkeypatch.setattr("app.services.result_import_service.get_storage_service", lambda: DummyStorage())
-    monkeypatch.setattr("app.services.result_import_service.get_extraction_provider", lambda: DummyProvider())
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service", lambda: DummyStorage()
+    )
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_extraction_provider",
+        lambda: DummyProvider(),
+    )
     import_row = ResultImport(
         original_filename="multi.pdf",
         storage_key="pdfs/result-imports/multi.pdf",
@@ -259,6 +801,379 @@ def test_process_import_rejects_multi_sample_pdf(test_db, sample_user, monkeypat
 
     assert processed.status == ResultImportStatus.FAILED
     assert "Multiple sample" in processed.error_message
+
+
+def test_queued_processing_ids_returns_restart_work(test_db, sample_user):
+    processing = ResultImport(
+        original_filename="queued.pdf",
+        storage_key="pdfs/result-imports/queued.pdf",
+        file_hash="f" * 64,
+        status=ResultImportStatus.PROCESSING,
+        uploaded_by_id=sample_user.id,
+    )
+    failed = ResultImport(
+        original_filename="failed.pdf",
+        storage_key="pdfs/result-imports/failed.pdf",
+        file_hash="g" * 64,
+        status=ResultImportStatus.FAILED,
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add_all([processing, failed])
+    test_db.commit()
+
+    assert ResultImportService().queued_processing_ids(test_db) == [processing.id]
+
+
+def test_processing_claim_allows_only_one_worker(test_db, sample_user):
+    processing = ResultImport(
+        original_filename="queued.pdf",
+        storage_key="pdfs/result-imports/queued.pdf",
+        file_hash="m" * 64,
+        status=ResultImportStatus.PROCESSING,
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(processing)
+    test_db.commit()
+
+    service = ResultImportService()
+
+    assert service.claim_processing_import(test_db, processing.id, "worker-a") is True
+    assert service.claim_processing_import(test_db, processing.id, "worker-b") is False
+
+
+def test_processing_finish_does_not_overwrite_cancelled_import(test_db, sample_user):
+    claim_id = "worker-a"
+    processing = ResultImport(
+        original_filename="queued.pdf",
+        storage_key="pdfs/result-imports/queued.pdf",
+        file_hash="n" * 64,
+        status=ResultImportStatus.PROCESSING,
+        error_message=f"{ResultImportService.PROCESSING_CLAIM_PREFIX}{claim_id}",
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(processing)
+    test_db.commit()
+
+    processing.status = ResultImportStatus.CANCELLED
+    test_db.commit()
+
+    result = ResultImportService()._finish_processing_import(
+        test_db,
+        processing.id,
+        claim_id,
+        {"status": ResultImportStatus.NEEDS_CONFIRMATION, "error_message": None},
+    )
+
+    assert result.status == ResultImportStatus.CANCELLED
+
+
+def test_upload_failure_deletes_uploaded_file(test_db, sample_user, monkeypatch):
+    class DummyStorage:
+        def __init__(self):
+            self.uploaded = []
+            self.deleted = []
+
+        def upload(self, content, key, content_type="application/octet-stream"):
+            self.uploaded.append(key)
+            return key
+
+        def delete(self, key):
+            self.deleted.append(key)
+            return True
+
+    storage = DummyStorage()
+    service = ResultImportService()
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit failed")
+
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service", lambda: storage
+    )
+    monkeypatch.setattr(service, "_page_count", lambda content: 1)
+    monkeypatch.setattr(service, "_log_audit", fail_audit)
+
+    try:
+        service.create_uploads(
+            test_db,
+            [("coa.pdf", b"not really a pdf", "application/pdf")],
+            sample_user.id,
+        )
+    except RuntimeError as exc:
+        assert "audit failed" in str(exc)
+    else:
+        raise AssertionError("upload should propagate DB/audit failure")
+
+    assert storage.uploaded
+    assert storage.deleted == storage.uploaded
+
+
+def test_revert_blocks_if_any_imported_field_changed(test_db, sample_lot, sample_user):
+    result = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        test_date=date(2026, 6, 20),
+        pdf_source="pdfs/result-imports/coa.pdf",
+        status=TestResultStatus.DRAFT,
+        notes="imported",
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="h" * 64,
+        status=ResultImportStatus.CONFIRMED,
+        uploaded_by_id=sample_user.id,
+        confirmed_by_id=sample_user.id,
+        selected_lot_id=sample_lot.id,
+        confirmed_at=datetime.utcnow(),
+    )
+    test_db.add_all([result, import_row])
+    test_db.flush()
+    ledger = ResultImportLedger(
+        result_import_id=import_row.id,
+        lot_id=sample_lot.id,
+        action_type="confirm",
+        created_result_ids=[],
+        updated_results=[
+            {
+                "id": result.id,
+                "old": {
+                    "test_type": "Lead",
+                    "result_value": None,
+                    "unit": "ppm",
+                    "test_date": None,
+                    "pdf_source": None,
+                    "confidence_score": None,
+                    "specification": None,
+                    "method": None,
+                    "notes": None,
+                    "lab_test_type_id": None,
+                    "include_on_coa": True,
+                },
+                "new": ResultImportService()._result_snapshot(result),
+            }
+        ],
+        pdf_attachment={
+            "storage_key": "pdfs/result-imports/coa.pdf",
+            "import_id": import_row.id,
+        },
+        applied_by_id=sample_user.id,
+    )
+    test_db.add(ledger)
+    test_db.commit()
+
+    result.notes = "user changed notes"
+    test_db.commit()
+
+    try:
+        ResultImportService().revert(
+            test_db, import_row.id, sample_user.id, sample_user.role
+        )
+    except ValueError as exc:
+        assert "changed after import" in str(exc)
+    else:
+        raise AssertionError("revert should block after post-import field edits")
+
+
+def test_revert_blocks_if_created_result_changed(test_db, sample_lot, sample_user):
+    result = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        pdf_source="pdfs/result-imports/coa.pdf",
+        status=TestResultStatus.DRAFT,
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="l" * 64,
+        status=ResultImportStatus.CONFIRMED,
+        uploaded_by_id=sample_user.id,
+        confirmed_by_id=sample_user.id,
+        selected_lot_id=sample_lot.id,
+        confirmed_at=datetime.utcnow(),
+    )
+    test_db.add_all([result, import_row])
+    test_db.flush()
+    snapshot = ResultImportService()._result_snapshot(result)
+    ledger = ResultImportLedger(
+        result_import_id=import_row.id,
+        lot_id=sample_lot.id,
+        action_type="confirm",
+        created_result_ids=[result.id],
+        updated_results=[],
+        pdf_attachment={
+            "storage_key": "pdfs/result-imports/coa.pdf",
+            "import_id": import_row.id,
+        },
+        applied_rows=[
+            {
+                "row_id": "row-1",
+                "test_result_id": result.id,
+                "action": "apply",
+                "result_snapshot": snapshot,
+            }
+        ],
+        applied_by_id=sample_user.id,
+    )
+    test_db.add(ledger)
+    test_db.commit()
+
+    result.result_value = "0.2"
+    test_db.commit()
+
+    try:
+        ResultImportService().revert(
+            test_db, import_row.id, sample_user.id, sample_user.role
+        )
+    except ValueError as exc:
+        assert "changed after import" in str(exc)
+    else:
+        raise AssertionError("revert should block after created row edits")
+
+
+def test_revert_does_not_delete_shared_pdf_reference(
+    test_db, sample_lot, sample_product, sample_user, monkeypatch
+):
+    class DummyStorage:
+        def __init__(self):
+            self.deleted = []
+
+        def delete(self, key):
+            self.deleted.append(key)
+            return True
+
+    storage = DummyStorage()
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service", lambda: storage
+    )
+
+    shared_key = "pdfs/result-imports/shared.pdf"
+    result = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        pdf_source=shared_key,
+        status=TestResultStatus.DRAFT,
+    )
+    import_row = ResultImport(
+        original_filename="shared.pdf",
+        storage_key=shared_key,
+        file_hash="i" * 64,
+        status=ResultImportStatus.CONFIRMED,
+        uploaded_by_id=sample_user.id,
+        confirmed_by_id=sample_user.id,
+        selected_lot_id=sample_lot.id,
+        confirmed_at=datetime.utcnow(),
+    )
+    other_lot = Lot(
+        lot_number="OTHER123",
+        lot_type=LotType.STANDARD,
+        reference_number="241101-999",
+        status=LotStatus.AWAITING_RESULTS,
+        attached_pdfs=[
+            {"storage_key": shared_key, "source": "manual", "import_id": None}
+        ],
+    )
+    test_db.add_all([result, import_row, other_lot])
+    test_db.flush()
+    snapshot = ResultImportService()._result_snapshot(result)
+    ledger = ResultImportLedger(
+        result_import_id=import_row.id,
+        lot_id=sample_lot.id,
+        action_type="confirm",
+        created_result_ids=[result.id],
+        updated_results=[],
+        pdf_attachment={"storage_key": shared_key, "import_id": import_row.id},
+        applied_rows=[
+            {
+                "row_id": "row-1",
+                "test_result_id": result.id,
+                "action": "apply",
+                "result_snapshot": snapshot,
+            }
+        ],
+        applied_by_id=sample_user.id,
+    )
+    test_db.add(ledger)
+    test_db.commit()
+
+    ResultImportService().revert(test_db, import_row.id, sample_user.id, UserRole.ADMIN)
+
+    assert storage.deleted == []
+
+
+def test_revert_deletes_unshared_pdf_reference(
+    test_db, sample_lot, sample_product, sample_user, monkeypatch
+):
+    class DummyStorage:
+        def __init__(self):
+            self.deleted = []
+
+        def delete(self, key):
+            self.deleted.append(key)
+            return True
+
+    storage = DummyStorage()
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service", lambda: storage
+    )
+
+    storage_key = "pdfs/result-imports/unshared.pdf"
+    result = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        pdf_source=storage_key,
+        status=TestResultStatus.DRAFT,
+    )
+    import_row = ResultImport(
+        original_filename="unshared.pdf",
+        storage_key=storage_key,
+        file_hash="u" * 64,
+        status=ResultImportStatus.CONFIRMED,
+        uploaded_by_id=sample_user.id,
+        confirmed_by_id=sample_user.id,
+        selected_lot_id=sample_lot.id,
+        confirmed_at=datetime.utcnow(),
+    )
+    sample_lot.attached_pdfs = [
+        {"storage_key": storage_key, "source": "import", "import_id": None}
+    ]
+    test_db.add_all([result, import_row])
+    test_db.flush()
+    snapshot = ResultImportService()._result_snapshot(result)
+    sample_lot.attached_pdfs = [
+        {"storage_key": storage_key, "source": "import", "import_id": import_row.id}
+    ]
+    ledger = ResultImportLedger(
+        result_import_id=import_row.id,
+        lot_id=sample_lot.id,
+        action_type="confirm",
+        created_result_ids=[result.id],
+        updated_results=[],
+        pdf_attachment={"storage_key": storage_key, "import_id": import_row.id},
+        applied_rows=[
+            {
+                "row_id": "row-1",
+                "test_result_id": result.id,
+                "action": "apply",
+                "result_snapshot": snapshot,
+            }
+        ],
+        applied_by_id=sample_user.id,
+    )
+    test_db.add(ledger)
+    test_db.commit()
+
+    ResultImportService().revert(test_db, import_row.id, sample_user.id, UserRole.ADMIN)
+
+    assert storage.deleted == [storage_key]
 
 
 def test_release_source_pdfs_are_ordered_and_deduped(test_db, sample_lot):

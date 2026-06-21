@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -21,31 +22,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    if "products" not in inspect(op.get_bind()).get_table_names():
+        return
     # Add serving_size column to products table
     op.add_column(
         "products",
         sa.Column("serving_size", sa.Numeric(precision=5, scale=2), nullable=True),
     )
-    
-    # Update existing products with random serving sizes between 25-32g
-    connection = op.get_bind()
-    result = connection.execute(sa.text("SELECT id FROM products"))
-    product_ids = [row[0] for row in result]
-    
-    # Use a deterministic approach for reproducibility
-    import random
-    random.seed(42)  # Fixed seed for consistent results
-    
-    for product_id in product_ids:
-        # Generate random serving size between 25 and 32 grams (to 2 decimal places)
-        serving_size = round(random.uniform(25.0, 32.0), 2)
-        connection.execute(
-            sa.text("UPDATE products SET serving_size = :size WHERE id = :id"),
-            {"size": serving_size, "id": product_id}
-        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # Remove serving_size column from products table
-    op.drop_column("products", "serving_size")
+    if "products" in inspect(op.get_bind()).get_table_names():
+        columns = {
+            column["name"] for column in inspect(op.get_bind()).get_columns("products")
+        }
+        if "serving_size" in columns:
+            op.drop_column("products", "serving_size")

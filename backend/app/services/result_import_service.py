@@ -37,6 +37,7 @@ from app.services.result_extraction_provider import (
 )
 from app.services.retest_service import retest_service
 from app.services.storage_service import get_storage_service
+from app.utils.logger import logger
 
 
 ACTIVE_MATCH_STATUSES = [
@@ -70,13 +71,20 @@ TEST_NAME_NORMALIZATION = {
     "hg mercury": "Mercury",
     "mercury hg": "Mercury",
 }
-METALS = {"lead": "Lead", "arsenic": "Arsenic", "cadmium": "Cadmium", "mercury": "Mercury"}
+METALS = {
+    "lead": "Lead",
+    "arsenic": "Arsenic",
+    "cadmium": "Cadmium",
+    "mercury": "Mercury",
+}
 
 
 class ResultImportService(BaseService[ResultImport]):
     """Business logic for uploading, parsing, applying, and reverting imports."""
 
     STALE_AFTER = timedelta(minutes=20)
+    PROCESSING_CLAIM_PREFIX = "Processing claim:"
+    PROCESSING_CLAIM_AFTER = STALE_AFTER
 
     def __init__(self) -> None:
         super().__init__(ResultImport)
@@ -93,16 +101,22 @@ class ResultImportService(BaseService[ResultImport]):
         if len(files) > 5:
             raise ValueError("Upload at most 5 PDFs at a time")
         if settings.ai_provider.lower() != "mock" and not settings.openrouter_api_key:
-            raise ValueError("OPENROUTER_API_KEY is required for results importer extraction")
+            raise ValueError(
+                "OPENROUTER_API_KEY is required for results importer extraction"
+            )
 
         max_size = settings.max_upload_size_mb * 1024 * 1024
         validated: list[dict[str, Any]] = []
 
         for filename, content, content_type in files:
-            if content_type != "application/pdf" and not filename.lower().endswith(".pdf"):
+            if content_type != "application/pdf" and not filename.lower().endswith(
+                ".pdf"
+            ):
                 raise ValueError("Only PDF files are allowed")
             if len(content) > max_size:
-                raise ValueError(f"{filename} exceeds the {settings.max_upload_size_mb}MB limit")
+                raise ValueError(
+                    f"{filename} exceeds the {settings.max_upload_size_mb}MB limit"
+                )
             page_count = self._page_count(content)
             if page_count > 8:
                 raise ValueError(f"{filename} has {page_count} pages; maximum is 8")
@@ -121,47 +135,60 @@ class ResultImportService(BaseService[ResultImport]):
         duplicates: list[ResultImport] = []
         storage = get_storage_service()
 
-        for payload in validated:
-            filename = payload["filename"]
-            duplicate = (
-                db.query(ResultImport)
-                .filter(
-                    ResultImport.file_hash == payload["file_hash"],
-                    ResultImport.status == ResultImportStatus.CONFIRMED,
+        uploaded_keys: list[str] = []
+        try:
+            for payload in validated:
+                filename = payload["filename"]
+                duplicate = (
+                    db.query(ResultImport)
+                    .filter(
+                        ResultImport.file_hash == payload["file_hash"],
+                        ResultImport.status == ResultImportStatus.CONFIRMED,
+                    )
+                    .order_by(ResultImport.confirmed_at.desc().nullslast())
+                    .first()
                 )
-                .order_by(ResultImport.confirmed_at.desc().nullslast())
-                .first()
-            )
-            if duplicate:
-                duplicates.append(duplicate)
-                continue
+                if duplicate:
+                    duplicates.append(duplicate)
+                    continue
 
-            safe_name = self._safe_filename(filename)
-            storage_key = f"pdfs/result-imports/{datetime.utcnow():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}_{safe_name}"
-            storage.upload(payload["content"], storage_key, content_type="application/pdf")
+                safe_name = self._safe_filename(filename)
+                storage_key = f"pdfs/result-imports/{datetime.utcnow():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}_{safe_name}"
+                storage.upload(
+                    payload["content"], storage_key, content_type="application/pdf"
+                )
+                uploaded_keys.append(storage_key)
 
-            item = ResultImport(
-                original_filename=filename,
-                storage_key=storage_key,
-                file_hash=payload["file_hash"],
-                status=ResultImportStatus.PROCESSING,
-                uploaded_by_id=user_id,
-                openrouter_model=settings.openrouter_model,
-                warnings=[],
-            )
-            db.add(item)
-            db.flush()
-            self._log_audit(
-                db,
-                action=AuditAction.INSERT,
-                record_id=item.id,
-                new_values={"original_filename": filename, "storage_key": storage_key},
-                user_id=user_id,
-                reason="Result import uploaded",
-            )
-            created.append(item)
+                item = ResultImport(
+                    original_filename=filename,
+                    storage_key=storage_key,
+                    file_hash=payload["file_hash"],
+                    status=ResultImportStatus.PROCESSING,
+                    uploaded_by_id=user_id,
+                    openrouter_model=settings.openrouter_model,
+                    warnings=[],
+                )
+                db.add(item)
+                db.flush()
+                self._log_audit(
+                    db,
+                    action=AuditAction.INSERT,
+                    record_id=item.id,
+                    new_values={
+                        "original_filename": filename,
+                        "storage_key": storage_key,
+                    },
+                    user_id=user_id,
+                    reason="Result import uploaded",
+                )
+                created.append(item)
 
-        db.commit()
+            db.commit()
+        except Exception:
+            db.rollback()
+            for storage_key in uploaded_keys:
+                storage.delete(storage_key)
+            raise
         for item in created + duplicates:
             db.refresh(item)
         return created, duplicates
@@ -172,16 +199,27 @@ class ResultImportService(BaseService[ResultImport]):
         return {
             "import_id": item.id,
             "original_filename": item.original_filename,
-            "confirmed_at": item.confirmed_at.isoformat() if item.confirmed_at else None,
-            "confirmed_by": (confirmer.full_name or confirmer.username) if confirmer else None,
+            "confirmed_at": (
+                item.confirmed_at.isoformat() if item.confirmed_at else None
+            ),
+            "confirmed_by": (
+                (confirmer.full_name or confirmer.username) if confirmer else None
+            ),
             "lot_id": lot.id if lot else None,
             "reference_number": lot.reference_number if lot else None,
             "lot_number": lot.lot_number if lot else None,
         }
 
-    def process_import(self, db: Session, import_id: int) -> ResultImport:
+    def process_import(
+        self, db: Session, import_id: int, claim_id: Optional[str] = None
+    ) -> ResultImport:
         item = self.get(db, import_id)
         if not item or item.status != ResultImportStatus.PROCESSING:
+            return item
+        if (
+            claim_id
+            and item.error_message != f"{self.PROCESSING_CLAIM_PREFIX}{claim_id}"
+        ):
             return item
 
         try:
@@ -193,43 +231,114 @@ class ResultImportService(BaseService[ResultImport]):
             model = raw.pop("_model", None) or settings.openrouter_model
             extracted = self._normalize_extraction(db, raw)
             multi_sample_warnings = [
-                warning for warning in extracted.get("warnings", []) if warning.startswith("Multiple sample")
+                warning
+                for warning in extracted.get("warnings", [])
+                if warning.startswith("Multiple sample")
             ]
             if multi_sample_warnings:
-                item.extracted_data = extracted
-                item.warnings = extracted.get("warnings", [])
-                item.usage_metadata = usage
-                item.openrouter_model = model
-                item.status = ResultImportStatus.FAILED
-                item.error_message = multi_sample_warnings[0]
-                db.commit()
-                db.refresh(item)
-                return item
-            candidates = self.match_candidates(db, extracted, item.original_filename)
-
-            item.extracted_data = extracted
-            item.match_candidates = candidates
-            item.warnings = extracted.get("warnings", [])
-            item.usage_metadata = usage
-            item.openrouter_model = model
-            item.error_message = None
-            item.status = ResultImportStatus.NEEDS_CONFIRMATION
+                update_values = {
+                    "extracted_data": extracted,
+                    "warnings": extracted.get("warnings", []),
+                    "usage_metadata": usage,
+                    "openrouter_model": model,
+                    "status": ResultImportStatus.FAILED,
+                    "error_message": multi_sample_warnings[0],
+                }
+            else:
+                candidates = self.match_candidates(
+                    db, extracted, item.original_filename
+                )
+                update_values = {
+                    "extracted_data": extracted,
+                    "match_candidates": candidates,
+                    "warnings": extracted.get("warnings", []),
+                    "usage_metadata": usage,
+                    "openrouter_model": model,
+                    "error_message": None,
+                    "status": ResultImportStatus.NEEDS_CONFIRMATION,
+                }
         except ExtractionConfigurationError as exc:
-            item.status = ResultImportStatus.FAILED
-            item.error_message = str(exc)
+            update_values = {
+                "status": ResultImportStatus.FAILED,
+                "error_message": str(exc),
+            }
         except Exception as exc:
-            item.status = ResultImportStatus.FAILED
-            item.error_message = f"Failed to process PDF: {exc}"
+            update_values = {
+                "status": ResultImportStatus.FAILED,
+                "error_message": f"Failed to process PDF: {exc}",
+            }
 
-        db.commit()
-        db.refresh(item)
-        return item
+        return self._finish_processing_import(db, import_id, claim_id, update_values)
 
-    def list_imports(self, db: Session, page: int, page_size: int) -> tuple[list[ResultImport], int]:
+    def list_imports(
+        self, db: Session, page: int, page_size: int
+    ) -> tuple[list[ResultImport], int]:
         self.reap_stale_processing(db)
         query = db.query(ResultImport).order_by(ResultImport.created_at.desc())
         total = query.count()
         return query.offset((page - 1) * page_size).limit(page_size).all(), total
+
+    def queued_processing_ids(self, db: Session) -> list[int]:
+        """Return imports left in processing state for startup requeue."""
+        return [
+            import_id
+            for (import_id,) in (
+                db.query(ResultImport.id)
+                .filter(ResultImport.status == ResultImportStatus.PROCESSING)
+                .order_by(ResultImport.created_at.asc())
+                .all()
+            )
+        ]
+
+    def claim_processing_import(
+        self, db: Session, import_id: int, claim_id: str
+    ) -> bool:
+        """Atomically claim a processing import before doing extraction work."""
+        cutoff = datetime.utcnow() - self.PROCESSING_CLAIM_AFTER
+        updated = (
+            db.query(ResultImport)
+            .filter(
+                ResultImport.id == import_id,
+                ResultImport.status == ResultImportStatus.PROCESSING,
+                or_(
+                    ResultImport.error_message.is_(None),
+                    ~ResultImport.error_message.like(
+                        f"{self.PROCESSING_CLAIM_PREFIX}%"
+                    ),
+                    ResultImport.updated_at < cutoff,
+                ),
+            )
+            .update(
+                {
+                    "error_message": f"{self.PROCESSING_CLAIM_PREFIX}{claim_id}",
+                    "updated_at": datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        return updated == 1
+
+    def _finish_processing_import(
+        self,
+        db: Session,
+        import_id: int,
+        claim_id: Optional[str],
+        update_values: dict[str, Any],
+    ) -> ResultImport:
+        query = db.query(ResultImport).filter(
+            ResultImport.id == import_id,
+            ResultImport.status == ResultImportStatus.PROCESSING,
+        )
+        if claim_id:
+            query = query.filter(
+                ResultImport.error_message
+                == f"{self.PROCESSING_CLAIM_PREFIX}{claim_id}"
+            )
+        update_values["updated_at"] = datetime.utcnow()
+        query.update(update_values, synchronize_session=False)
+        db.commit()
+        return self.get(db, import_id)
 
     def reap_stale_processing(self, db: Session) -> int:
         cutoff = datetime.utcnow() - self.STALE_AFTER
@@ -252,9 +361,15 @@ class ResultImportService(BaseService[ResultImport]):
         item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
-        if item.status not in [ResultImportStatus.FAILED, ResultImportStatus.PROCESSING]:
+        if item.status not in [
+            ResultImportStatus.FAILED,
+            ResultImportStatus.PROCESSING,
+        ]:
             raise ValueError("Only failed or stale imports can be retried")
-        if item.status == ResultImportStatus.PROCESSING and item.updated_at > datetime.utcnow() - self.STALE_AFTER:
+        if (
+            item.status == ResultImportStatus.PROCESSING
+            and item.updated_at > datetime.utcnow() - self.STALE_AFTER
+        ):
             raise ValueError("Import is still processing")
         if not item.storage_key or not get_storage_service().exists(item.storage_key):
             raise ValueError("Stored PDF is no longer available")
@@ -268,11 +383,14 @@ class ResultImportService(BaseService[ResultImport]):
         item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
-        if item.status not in [ResultImportStatus.PROCESSING, ResultImportStatus.NEEDS_CONFIRMATION, ResultImportStatus.FAILED]:
+        if item.status not in [
+            ResultImportStatus.PROCESSING,
+            ResultImportStatus.NEEDS_CONFIRMATION,
+            ResultImportStatus.FAILED,
+        ]:
             raise ValueError("Only unconfirmed imports can be cancelled")
         old_status = item.status.value
-        if item.storage_key:
-            get_storage_service().delete(item.storage_key)
+        storage_key = item.storage_key
         item.status = ResultImportStatus.CANCELLED
         item.cancelled_at = datetime.utcnow()
         self._log_audit(
@@ -285,6 +403,10 @@ class ResultImportService(BaseService[ResultImport]):
             reason="Result import cancelled",
         )
         db.commit()
+        if storage_key:
+            self._delete_storage_key(
+                storage_key, context=f"cancelled result import {item.id}"
+            )
         db.refresh(item)
         return item
 
@@ -296,22 +418,38 @@ class ResultImportService(BaseService[ResultImport]):
         row_actions: list[Any],
         user_id: int,
     ) -> dict[str, Any]:
-        item = (
+        claimed = (
             db.query(ResultImport)
-            .filter(ResultImport.id == import_id)
-            .with_for_update()
-            .first()
+            .filter(
+                ResultImport.id == import_id,
+                ResultImport.status == ResultImportStatus.NEEDS_CONFIRMATION,
+            )
+            .update(
+                {
+                    "status": ResultImportStatus.PROCESSING,
+                    "updated_at": datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
         )
+        if claimed != 1:
+            db.rollback()
+            item = self.get(db, import_id)
+            if not item:
+                raise ValueError("Import not found")
+            raise ValueError("Import is not ready for confirmation")
+
+        item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
-        if item.status != ResultImportStatus.NEEDS_CONFIRMATION:
-            raise ValueError("Import is not ready for confirmation")
 
         lot = db.query(Lot).filter(Lot.id == lot_id).first()
         if not lot or lot.status not in ACTIVE_MATCH_STATUSES:
             raise ValueError("Select an active lot")
 
-        rows_by_id = {row["row_id"]: row for row in (item.extracted_data or {}).get("rows", [])}
+        rows_by_id = {
+            row["row_id"]: row for row in (item.extracted_data or {}).get("rows", [])
+        }
         created_ids: list[int] = []
         updated: list[dict[str, Any]] = []
         applied_rows: list[dict[str, Any]] = []
@@ -325,45 +463,88 @@ class ResultImportService(BaseService[ResultImport]):
             if not row:
                 raise ValueError(f"Extracted row {action.row_id} not found")
 
-            test_name, unit, specification, method, lab_test_type_id = self._resolve_test_fields(
-                db, lot, row, action.lab_test_type_id, action.test_name
+            test_name, unit, specification, method, lab_test_type_id = (
+                self._resolve_test_fields(
+                    db, lot, row, action.lab_test_type_id, action.test_name
+                )
             )
-            if not lab_test_type_id and action.action != "create_adhoc":
-                raise ValueError(f"{test_name} is not mapped; choose a lab test type or create ad-hoc")
+            if not lab_test_type_id:
+                raise ValueError(
+                    f"{test_name} is not mapped; choose an active lab test type"
+                )
             if action.action == "create_adhoc" and not test_name:
-                raise ValueError(f"Row {action.row_id} needs a test name for ad-hoc creation")
+                raise ValueError(
+                    f"Row {action.row_id} needs a test name for ad-hoc creation"
+                )
             result_value = row.get("result_value_raw")
             if result_value is None or str(result_value).strip() == "":
                 raise ValueError(f"Row {action.row_id} has no result value")
 
-            existing = self._find_existing_result(db, lot.id, test_name, action.test_result_id)
+            existing = self._find_existing_result(
+                db, lot.id, test_name, action.test_result_id
+            )
+            if action.test_result_id:
+                if not existing:
+                    raise ValueError("Selected draft result was not found on this lot")
+                if not self._existing_result_matches_target(
+                    existing, test_name, lab_test_type_id
+                ):
+                    raise ValueError(
+                        "Selected draft result does not match extracted test"
+                    )
             if existing:
                 if existing.status == TestResultStatus.APPROVED:
-                    raise ValueError(f"{test_name} is already approved and cannot be modified")
+                    raise ValueError(
+                        f"{test_name} is already approved and cannot be modified"
+                    )
                 if action.action != "replace" and existing.result_value:
-                    raise ValueError(f"{test_name} already has a draft value; choose replace")
+                    raise ValueError(
+                        f"{test_name} already has a draft value; choose replace"
+                    )
                 old = self._result_snapshot(existing)
                 existing.result_value = str(result_value).strip()
                 existing.unit = unit
-                existing.test_date = self._parse_date(row.get("test_date") or (item.extracted_data or {}).get("date_tested"))
+                existing.test_date = self._parse_date(
+                    row.get("test_date")
+                    or (item.extracted_data or {}).get("date_tested")
+                )
                 existing.pdf_source = item.storage_key
                 existing.confidence_score = row.get("confidence")
                 existing.specification = specification
                 existing.method = method
                 existing.notes = self._row_notes(row)
                 existing.lab_test_type_id = lab_test_type_id
-                updated.append({"id": existing.id, "old": old, "new": self._result_snapshot(existing)})
-                applied_rows.append({"row_id": action.row_id, "test_result_id": existing.id, "action": "replace"})
-                retest_service.check_and_complete_retest(db, existing.id, user_id=user_id)
+                updated.append(
+                    {
+                        "id": existing.id,
+                        "old": old,
+                        "new": self._result_snapshot(existing),
+                    }
+                )
+                applied_rows.append(
+                    {
+                        "row_id": action.row_id,
+                        "test_result_id": existing.id,
+                        "action": "replace",
+                    }
+                )
+                retest_service.check_and_complete_retest(
+                    db, existing.id, user_id=user_id
+                )
             else:
                 if action.action not in ["apply", "create_adhoc"]:
-                    raise ValueError(f"No draft row exists for {test_name}; choose apply")
+                    raise ValueError(
+                        f"No draft row exists for {test_name}; choose apply"
+                    )
                 result = TestResult(
                     lot_id=lot.id,
                     test_type=test_name,
                     result_value=str(result_value).strip(),
                     unit=unit,
-                    test_date=self._parse_date(row.get("test_date") or (item.extracted_data or {}).get("date_tested")),
+                    test_date=self._parse_date(
+                        row.get("test_date")
+                        or (item.extracted_data or {}).get("date_tested")
+                    ),
                     pdf_source=item.storage_key,
                     confidence_score=row.get("confidence"),
                     specification=specification,
@@ -376,7 +557,14 @@ class ResultImportService(BaseService[ResultImport]):
                 db.add(result)
                 db.flush()
                 created_ids.append(result.id)
-                applied_rows.append({"row_id": action.row_id, "test_result_id": result.id, "action": action.action})
+                applied_rows.append(
+                    {
+                        "row_id": action.row_id,
+                        "test_result_id": result.id,
+                        "action": action.action,
+                        "result_snapshot": self._result_snapshot(result),
+                    }
+                )
 
         if not created_ids and not updated:
             raise ValueError("Confirm requires at least one applied result row")
@@ -417,6 +605,9 @@ class ResultImportService(BaseService[ResultImport]):
             reason="Result import confirmed",
         )
 
+        if lot.status == LotStatus.AWAITING_RELEASE:
+            lot.status = LotStatus.UNDER_REVIEW
+
         calculation = LotService().calculate_lot_status(db, lot)
         LotService()._apply_lot_status_calculation(
             db, calculation, user_id=user_id, reason_prefix="Results import"
@@ -431,14 +622,21 @@ class ResultImportService(BaseService[ResultImport]):
             "status": item.status.value,
         }
 
-    def revert(self, db: Session, import_id: int, user_id: int, user_role: UserRole) -> ResultImport:
+    def revert(
+        self, db: Session, import_id: int, user_id: int, user_role: UserRole
+    ) -> ResultImport:
         item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
         if item.status != ResultImportStatus.CONFIRMED:
             raise ValueError("Only confirmed imports can be reverted")
-        if item.confirmed_by_id != user_id and user_role not in [UserRole.ADMIN, UserRole.QC_MANAGER]:
-            raise ValueError("Only the confirmer, QC Manager, or Admin can revert this import")
+        if item.confirmed_by_id != user_id and user_role not in [
+            UserRole.ADMIN,
+            UserRole.QC_MANAGER,
+        ]:
+            raise ValueError(
+                "Only the confirmer, QC Manager, or Admin can revert this import"
+            )
 
         ledger = (
             db.query(ResultImportLedger)
@@ -455,6 +653,18 @@ class ResultImportService(BaseService[ResultImport]):
                 continue
             if result.status != TestResultStatus.DRAFT:
                 raise ValueError("Cannot revert because an imported row was approved")
+            expected = self._created_result_snapshot(ledger, result_id)
+            if not expected:
+                raise ValueError(
+                    "Cannot revert because an imported row snapshot is missing"
+                )
+            if any(
+                self._snapshot_value(result, key) != expected.get(key)
+                for key in expected
+            ):
+                raise ValueError(
+                    "Cannot revert because an imported row changed after import"
+                )
             db.delete(result)
 
         for entry in ledger.updated_results or []:
@@ -464,14 +674,20 @@ class ResultImportService(BaseService[ResultImport]):
             if result.status != TestResultStatus.DRAFT:
                 raise ValueError("Cannot revert because an updated row was approved")
             expected = entry["new"]
-            if any(getattr(result, key) != expected.get(key) for key in ["result_value", "unit", "pdf_source"]):
-                raise ValueError("Cannot revert because an updated row changed after import")
+            if any(
+                self._snapshot_value(result, key) != expected.get(key)
+                for key in expected
+            ):
+                raise ValueError(
+                    "Cannot revert because an updated row changed after import"
+                )
             for key, value in entry["old"].items():
                 if key == "test_date":
                     value = self._parse_date(value)
                 setattr(result, key, value)
 
         lot = db.query(Lot).filter(Lot.id == ledger.lot_id).first()
+        storage_key_to_delete = None
         if lot and ledger.pdf_attachment:
             lot.attached_pdfs = [
                 entry
@@ -480,7 +696,11 @@ class ResultImportService(BaseService[ResultImport]):
             ]
             storage_key = ledger.pdf_attachment.get("storage_key")
             if storage_key:
-                get_storage_service().delete(storage_key)
+                db.flush()
+                if not self._storage_key_has_references(
+                    db, storage_key, exclude_import_id=item.id
+                ):
+                    storage_key_to_delete = storage_key
 
         item.status = ResultImportStatus.REVERTED
         item.reverted_at = datetime.utcnow()
@@ -490,6 +710,10 @@ class ResultImportService(BaseService[ResultImport]):
                 db, calculation, user_id=user_id, reason_prefix="Results import revert"
             )
         db.commit()
+        if storage_key_to_delete:
+            self._delete_storage_key(
+                storage_key_to_delete, context=f"reverted result import {item.id}"
+            )
         db.refresh(item)
         return item
 
@@ -503,12 +727,14 @@ class ResultImportService(BaseService[ResultImport]):
 
         previews = []
         for row in (item.extracted_data or {}).get("rows", []):
-            test_name, unit, specification, method, lab_test_type_id = self._resolve_test_fields(
-                db,
-                lot,
-                row,
-                row.get("matched_lab_test_type_id"),
-                row.get("test_name_normalized") or row.get("test_name_raw"),
+            test_name, unit, specification, method, lab_test_type_id = (
+                self._resolve_test_fields(
+                    db,
+                    lot,
+                    row,
+                    row.get("matched_lab_test_type_id"),
+                    row.get("test_name_normalized") or row.get("test_name_raw"),
+                )
             )
             existing = self._find_existing_result(db, lot.id, test_name, None)
             warnings = list(row.get("warnings") or [])
@@ -536,12 +762,16 @@ class ResultImportService(BaseService[ResultImport]):
                     "requires_lab_test_mapping": requires_mapping,
                     "suggested_action": suggested_action,
                     "warnings": warnings,
-                    "existing_result": self._existing_result_payload(existing) if existing else None,
+                    "existing_result": (
+                        self._existing_result_payload(existing) if existing else None
+                    ),
                 }
             )
         return {"import_id": item.id, "lot_id": lot.id, "rows": previews}
 
-    def link_candidates(self, db: Session, search: str, limit: int = 20) -> list[dict[str, Any]]:
+    def link_candidates(
+        self, db: Session, search: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
         term = f"%{search.strip()}%"
         lots = (
             db.query(Lot)
@@ -560,13 +790,30 @@ class ResultImportService(BaseService[ResultImport]):
         )
         return [self._lot_candidate_payload(lot, 0, ["manual search"]) for lot in lots]
 
-    def match_candidates(self, db: Session, extracted: dict[str, Any], filename: str) -> list[dict[str, Any]]:
+    def match_candidates(
+        self, db: Session, extracted: dict[str, Any], filename: str
+    ) -> list[dict[str, Any]]:
         tokens = {
             self._normalize_token(identifier.get("value"))
             for identifier in extracted.get("identifiers", [])
             if identifier.get("value")
         }
-        tokens.update(self._normalize_token(part) for part in re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", filename.upper()))
+        for row in extracted.get("rows") or []:
+            tokens.update(
+                self._normalize_token(row.get(key))
+                for key in [
+                    "sample_id",
+                    "reference_number",
+                    "lot_number",
+                    "sublot_number",
+                    "batch_number",
+                ]
+                if row.get(key)
+            )
+        tokens.update(
+            self._normalize_token(part)
+            for part in re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", filename.upper())
+        )
         tokens.discard("")
 
         lots = (
@@ -583,18 +830,22 @@ class ResultImportService(BaseService[ResultImport]):
             score = 0.0
             reasons = []
             values = {
-                "reference": lot.reference_number,
-                "lot": lot.lot_number,
-                "sublot": " ".join(s.sublot_number for s in lot.sublots),
-                "batch": " ".join(lp.batch_number or "" for lp in lot.lot_products),
+                "reference": [lot.reference_number],
+                "lot": [lot.lot_number],
+                "sublot": [s.sublot_number for s in lot.sublots],
+                "batch": [lp.batch_number or "" for lp in lot.lot_products],
             }
-            for label, value in values.items():
-                normalized = self._normalize_token(value)
-                if normalized and normalized in tokens:
+            for label, value_list in values.items():
+                normalized_values = {
+                    self._normalize_token(value) for value in value_list if value
+                }
+                if normalized_values & tokens:
                     score += 0.5 if label in ["reference", "lot"] else 0.25
                     reasons.append(f"{label} matched")
             if score:
-                candidates.append(self._lot_candidate_payload(lot, min(score, 1.0), reasons))
+                candidates.append(
+                    self._lot_candidate_payload(lot, min(score, 1.0), reasons)
+                )
         return sorted(candidates, key=lambda item: item["score"], reverse=True)[:10]
 
     def _resolve_test_fields(
@@ -605,17 +856,28 @@ class ResultImportService(BaseService[ResultImport]):
         lab_test_type_id: Optional[int],
         override_name: Optional[str],
     ) -> tuple[str, Optional[str], Optional[str], Optional[str], Optional[int]]:
-        test_name = override_name or row.get("test_name_normalized") or row.get("test_name_raw")
+        test_name = (
+            override_name or row.get("test_name_normalized") or row.get("test_name_raw")
+        )
         lab_type = None
         if lab_test_type_id:
-            lab_type = db.query(LabTestType).filter(LabTestType.id == lab_test_type_id, LabTestType.is_active == True).first()
+            lab_type = (
+                db.query(LabTestType)
+                .filter(
+                    LabTestType.id == lab_test_type_id, LabTestType.is_active == True
+                )
+                .first()
+            )
             if not lab_type:
                 raise ValueError("Selected lab test type not found")
             test_name = lab_type.test_name
         elif row.get("matched_lab_test_type_id"):
             lab_type = (
                 db.query(LabTestType)
-                .filter(LabTestType.id == row["matched_lab_test_type_id"], LabTestType.is_active == True)
+                .filter(
+                    LabTestType.id == row["matched_lab_test_type_id"],
+                    LabTestType.is_active == True,
+                )
                 .first()
             )
 
@@ -623,15 +885,28 @@ class ResultImportService(BaseService[ResultImport]):
         if spec and spec.lab_test_type:
             lab_type = spec.lab_test_type
             test_name = lab_type.test_name
-        unit = spec.test_unit if spec else (lab_type.default_unit if lab_type else row.get("target_unit") or row.get("unit_raw"))
-        specification = spec.specification if spec else (lab_type.default_specification if lab_type else row.get("limit_raw"))
-        method = spec.lab_test_type.test_method if spec and spec.lab_test_type else (lab_type.test_method if lab_type else None)
+        unit = spec.test_unit if spec else (lab_type.default_unit if lab_type else None)
+        specification = (
+            spec.specification
+            if spec
+            else (lab_type.default_specification if lab_type else None)
+        )
+        method = (
+            spec.lab_test_type.test_method
+            if spec and spec.lab_test_type
+            else (lab_type.test_method if lab_type else None)
+        )
         return test_name, unit, specification, method, lab_type.id if lab_type else None
 
-    def _find_lot_spec(self, lot: Lot, test_name: str) -> Optional[ProductTestSpecification]:
+    def _find_lot_spec(
+        self, lot: Lot, test_name: str
+    ) -> Optional[ProductTestSpecification]:
         for lot_product in lot.lot_products:
             for spec in lot_product.product.test_specifications:
-                if spec.test_name and spec.test_name.lower() == (test_name or "").lower():
+                if (
+                    spec.test_name
+                    and spec.test_name.lower() == (test_name or "").lower()
+                ):
                     return spec
         return None
 
@@ -641,8 +916,16 @@ class ResultImportService(BaseService[ResultImport]):
             "test_type": result.test_type,
             "result_value": result.result_value,
             "unit": result.unit,
-            "status": result.status.value if hasattr(result.status, "value") else result.status,
-            "test_date": result.test_date.isoformat() if isinstance(result.test_date, date) else result.test_date,
+            "status": (
+                result.status.value
+                if hasattr(result.status, "value")
+                else result.status
+            ),
+            "test_date": (
+                result.test_date.isoformat()
+                if isinstance(result.test_date, date)
+                else result.test_date
+            ),
             "pdf_source": result.pdf_source,
         }
 
@@ -650,7 +933,11 @@ class ResultImportService(BaseService[ResultImport]):
         self, db: Session, lot_id: int, test_name: str, result_id: Optional[int]
     ) -> Optional[TestResult]:
         if result_id:
-            return db.query(TestResult).filter(TestResult.id == result_id, TestResult.lot_id == lot_id).first()
+            return (
+                db.query(TestResult)
+                .filter(TestResult.id == result_id, TestResult.lot_id == lot_id)
+                .first()
+            )
         return (
             db.query(TestResult)
             .filter(TestResult.lot_id == lot_id, TestResult.test_type == test_name)
@@ -658,34 +945,82 @@ class ResultImportService(BaseService[ResultImport]):
             .first()
         )
 
+    def _existing_result_matches_target(
+        self, result: TestResult, test_name: str, lab_test_type_id: Optional[int]
+    ) -> bool:
+        if result.test_type.strip().casefold() != test_name.strip().casefold():
+            return False
+        if (
+            result.lab_test_type_id
+            and lab_test_type_id
+            and result.lab_test_type_id != lab_test_type_id
+        ):
+            return False
+        return True
+
     def _normalize_extraction(self, db: Session, raw: dict[str, Any]) -> dict[str, Any]:
         rows = []
         warnings = list(raw.get("warnings") or [])
-        lab_types = {lt.test_name.lower(): lt for lt in db.query(LabTestType).filter(LabTestType.is_active == True).all()}
+        lab_types = {
+            lt.test_name.lower(): lt
+            for lt in db.query(LabTestType).filter(LabTestType.is_active == True).all()
+        }
         for index, row in enumerate(raw.get("rows") or [], start=1):
             raw_name = row.get("test_name_raw") or ""
             normalized_name = self._normalize_test_name(raw_name)
             lab_type = lab_types.get(normalized_name.lower())
             unit_raw = row.get("unit_raw")
             target_unit = lab_type.default_unit if lab_type else unit_raw
-            metadata = {key: row.get(key) for key in ["per_serving", "lod", "loq"] if row.get(key)}
+            metadata = {
+                key: row.get(key)
+                for key in ["per_serving", "lod", "loq"]
+                if row.get(key)
+            }
             confidence = float(row.get("confidence") or 0)
+            result_value = row.get("result_value_raw")
             row_warnings = []
             if confidence < 0.7:
                 row_warnings.append("Low confidence extraction")
-            if row.get("per_serving") or self._looks_per_serving(unit_raw) or self._looks_per_serving(row.get("limit_raw")):
-                row_warnings.append("Result appears to be per serving; verify COA basis")
+            if self._is_harken_metal(raw.get("lab_name"), normalized_name):
+                target_unit = "ug/g"
+                if self._looks_per_serving(unit_raw):
+                    metadata["per_serving"] = row.get("per_serving") or result_value
+                    result_value = None
+                    row_warnings.append(
+                        "Harken per-serving value was not saved as the primary result"
+                    )
+                elif row.get("per_serving"):
+                    metadata["per_serving"] = row.get("per_serving")
+                result_value = self._normalize_harken_metal_value(
+                    result_value, unit_raw
+                )
+            if (
+                row.get("per_serving")
+                or self._looks_per_serving(unit_raw)
+                or self._looks_per_serving(row.get("limit_raw"))
+            ):
+                row_warnings.append(
+                    "Result appears to be per serving; verify COA basis"
+                )
             rows.append(
                 {
                     "row_id": row.get("row_id") or f"row-{index}",
                     "test_name_raw": raw_name,
                     "test_name_normalized": normalized_name,
-                    "result_value_raw": row.get("result_value_raw"),
+                    "result_value_raw": result_value,
                     "unit_raw": unit_raw,
                     "target_unit": target_unit,
                     "limit_raw": row.get("limit_raw"),
-                    "test_date": row.get("test_date") or raw.get("date_tested") or raw.get("report_date"),
-                    "received_date": row.get("received_date") or raw.get("received_date"),
+                    "sample_id": row.get("sample_id"),
+                    "reference_number": row.get("reference_number"),
+                    "lot_number": row.get("lot_number"),
+                    "sublot_number": row.get("sublot_number"),
+                    "batch_number": row.get("batch_number"),
+                    "test_date": row.get("test_date")
+                    or raw.get("date_tested")
+                    or raw.get("report_date"),
+                    "received_date": row.get("received_date")
+                    or raw.get("received_date"),
                     "confidence": confidence,
                     "warnings": row_warnings,
                     "metadata": metadata,
@@ -695,7 +1030,9 @@ class ResultImportService(BaseService[ResultImport]):
         return {
             "identifiers": raw.get("identifiers") or [],
             "lab_name": raw.get("lab_name"),
-            "date_tested": raw.get("date_tested") or raw.get("report_date") or raw.get("received_date"),
+            "date_tested": raw.get("date_tested")
+            or raw.get("report_date")
+            or raw.get("received_date"),
             "report_date": raw.get("report_date"),
             "received_date": raw.get("received_date"),
             "rows": rows,
@@ -711,24 +1048,73 @@ class ResultImportService(BaseService[ResultImport]):
         return value.strip()
 
     def _extraction_warnings(self, raw: dict[str, Any]) -> list[str]:
-        identifier_values = {
-            self._normalize_token(identifier.get("value"))
-            for identifier in raw.get("identifiers") or []
-            if identifier.get("value")
-        }
-        row_refs = {
-            self._normalize_token(row.get("reference_number") or row.get("lot_number") or row.get("sample_id"))
-            for row in raw.get("rows") or []
-        }
-        identifier_values.discard("")
-        row_refs.discard("")
+        row_sample_refs = set()
+        row_lot_refs = set()
+        for row in raw.get("rows") or []:
+            refs = {
+                self._normalize_token(row.get("sample_id")),
+                self._normalize_token(row.get("reference_number")),
+            }
+            refs.discard("")
+            row_sample_refs.update(refs)
+            lot_ref = self._normalize_token(row.get("lot_number"))
+            if lot_ref:
+                row_lot_refs.add(lot_ref)
+
+        identifiers_by_type: dict[str, set[str]] = {}
+        lot_identifier_values = set()
+        for identifier in raw.get("identifiers") or []:
+            identifier_type = str(identifier.get("type") or "").strip().lower()
+            value = self._normalize_token(identifier.get("value"))
+            if not value:
+                continue
+            if identifier_type in {"lot", "lot_number", "batch", "batch_number"}:
+                lot_identifier_values.add(value)
+            elif identifier_type in {"sample", "sample_id", "reference_number"}:
+                identifiers_by_type.setdefault(identifier_type, set()).add(value)
+
+        top_level_sample_refs = (
+            set().union(*identifiers_by_type.values()) if identifiers_by_type else set()
+        )
+        sample_refs = row_sample_refs | top_level_sample_refs
+        lot_refs = row_lot_refs | lot_identifier_values
+
         warnings = []
-        if len(identifier_values | row_refs) > 1:
-            warnings.append("Multiple sample identifiers detected; split this PDF before importing")
+        if (
+            len(sample_refs) > 1
+            or any(len(values) > 1 for values in identifiers_by_type.values())
+            or len(lot_refs) > 1
+        ):
+            warnings.append(
+                "Multiple sample identifiers detected; split this PDF before importing"
+            )
         return warnings
 
     def _looks_per_serving(self, value: Any) -> bool:
         return "serving" in str(value or "").lower()
+
+    def _is_harken_metal(self, lab_name: Any, test_name: str) -> bool:
+        return "harken" in str(lab_name or "").lower() and test_name in {
+            "Lead",
+            "Arsenic",
+            "Cadmium",
+            "Mercury",
+        }
+
+    def _normalize_harken_metal_value(self, value: Any, unit: Any) -> Any:
+        if value is None:
+            return None
+        unit_token = self._normalize_token(str(unit or ""))
+        factor = {"PPB": 0.001, "NGG": 0.001}.get(unit_token)
+        if factor is None:
+            return value
+        match = re.match(r"^\s*([<>]=?)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*$", str(value))
+        if not match:
+            return value
+        prefix = match.group(1) or ""
+        number = float(match.group(2).replace(",", "")) * factor
+        converted = f"{number:.6f}".rstrip("0").rstrip(".")
+        return f"{prefix}{converted}"
 
     def _page_count(self, content: bytes) -> int:
         try:
@@ -745,12 +1131,16 @@ class ResultImportService(BaseService[ResultImport]):
 
     def _safe_filename(self, filename: str) -> str:
         name = filename or "result.pdf"
-        return "".join(char if char.isalnum() or char in ".-_" else "_" for char in name)
+        return "".join(
+            char if char.isalnum() or char in ".-_" else "_" for char in name
+        )
 
     def _normalize_token(self, value: Optional[str]) -> str:
         return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
 
-    def _lot_candidate_payload(self, lot: Lot, score: float, reasons: list[str]) -> dict[str, Any]:
+    def _lot_candidate_payload(
+        self, lot: Lot, score: float, reasons: list[str]
+    ) -> dict[str, Any]:
         return {
             "lot_id": lot.id,
             "reference_number": lot.reference_number,
@@ -758,7 +1148,9 @@ class ResultImportService(BaseService[ResultImport]):
             "status": lot.status.value,
             "score": score,
             "reasons": reasons,
-            "products": [lp.product.display_name for lp in lot.lot_products if lp.product],
+            "products": [
+                lp.product.display_name for lp in lot.lot_products if lp.product
+            ],
         }
 
     def _result_snapshot(self, result: TestResult) -> dict[str, Any]:
@@ -766,15 +1158,47 @@ class ResultImportService(BaseService[ResultImport]):
             "test_type": result.test_type,
             "result_value": result.result_value,
             "unit": result.unit,
-            "test_date": result.test_date.isoformat() if isinstance(result.test_date, date) else result.test_date,
+            "test_date": (
+                result.test_date.isoformat()
+                if isinstance(result.test_date, date)
+                else result.test_date
+            ),
             "pdf_source": result.pdf_source,
-            "confidence_score": float(result.confidence_score) if result.confidence_score is not None else None,
+            "confidence_score": (
+                float(result.confidence_score)
+                if result.confidence_score is not None
+                else None
+            ),
             "specification": result.specification,
             "method": result.method,
             "notes": result.notes,
             "lab_test_type_id": result.lab_test_type_id,
             "include_on_coa": result.include_on_coa,
         }
+
+    def _snapshot_value(self, result: TestResult, key: str) -> Any:
+        value = getattr(result, key)
+        if key == "test_date" and isinstance(value, date):
+            return value.isoformat()
+        if key == "confidence_score" and value is not None:
+            return float(value)
+        return value
+
+    def _created_result_snapshot(
+        self, ledger: ResultImportLedger, result_id: int
+    ) -> Optional[dict[str, Any]]:
+        for row in ledger.applied_rows or []:
+            if row.get("test_result_id") == result_id and row.get("result_snapshot"):
+                return row["result_snapshot"]
+        return None
+
+    def _delete_storage_key(self, storage_key: str, context: str) -> None:
+        try:
+            get_storage_service().delete(storage_key)
+        except Exception as exc:
+            logger.warning(
+                f"Failed to delete storage key {storage_key} for {context}: {exc}"
+            )
 
     def _row_notes(self, row: dict[str, Any]) -> Optional[str]:
         metadata = row.get("metadata") or {}
@@ -798,9 +1222,13 @@ class ResultImportService(BaseService[ResultImport]):
         except ValueError:
             return None
 
-    def _append_pdf_attachment(self, existing: Any, attachment: dict[str, Any]) -> list[dict[str, Any]]:
+    def _append_pdf_attachment(
+        self, existing: Any, attachment: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         entries = self._normalize_pdf_attachments(existing)
-        if not any(entry.get("storage_key") == attachment["storage_key"] for entry in entries):
+        if not any(
+            entry.get("storage_key") == attachment["storage_key"] for entry in entries
+        ):
             entries.append(attachment)
         return entries
 
@@ -813,10 +1241,38 @@ class ResultImportService(BaseService[ResultImport]):
                 entries.append(
                     {
                         "filename": entry.split("/")[-1],
-                        "storage_key": entry if entry.startswith("pdfs/") else f"pdfs/{entry}",
+                        "storage_key": (
+                            entry if entry.startswith("pdfs/") else f"pdfs/{entry}"
+                        ),
                         "source": "legacy",
                         "import_id": None,
                         "added_at": None,
                     }
                 )
         return entries
+
+    def _storage_key_has_references(
+        self, db: Session, storage_key: str, exclude_import_id: Optional[int] = None
+    ) -> bool:
+        result_reference = (
+            db.query(TestResult.id).filter(TestResult.pdf_source == storage_key).first()
+        )
+        if result_reference:
+            return True
+
+        imports = db.query(ResultImport.id).filter(
+            ResultImport.storage_key == storage_key
+        )
+        if exclude_import_id is not None:
+            imports = imports.filter(ResultImport.id != exclude_import_id)
+        if imports.first():
+            return True
+
+        for lot in db.query(Lot).filter(Lot.attached_pdfs.isnot(None)).all():
+            for entry in self._normalize_pdf_attachments(lot.attached_pdfs):
+                if (
+                    entry.get("storage_key") == storage_key
+                    and entry.get("import_id") != exclude_import_id
+                ):
+                    return True
+        return False

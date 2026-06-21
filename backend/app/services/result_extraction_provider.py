@@ -33,7 +33,10 @@ class MockExtractionProvider(ExtractionProvider):
         source = f"{filename}\n{text}"
         identifiers = []
         for label, pattern in (
-            ("reference_number", r"(?:ref(?:erence)?|sample)\s*[:#-]?\s*([A-Z0-9-]{4,})"),
+            (
+                "reference_number",
+                r"(?:ref(?:erence)?|sample)\s*[:#-]?\s*([A-Z0-9-]{4,})",
+            ),
             ("lot_number", r"(?:lot|batch)\s*[:#-]?\s*([A-Z0-9-]{3,})"),
         ):
             match = re.search(pattern, source, re.IGNORECASE)
@@ -80,7 +83,9 @@ class MockExtractionProvider(ExtractionProvider):
             "report_date": date.today().isoformat(),
             "received_date": None,
             "rows": rows,
-            "warnings": [] if rows else ["No known result rows found in mock extraction"],
+            "warnings": (
+                [] if rows else ["No known result rows found in mock extraction"]
+            ),
         }
 
 
@@ -97,9 +102,11 @@ class OpenRouterExtractionProvider(ExtractionProvider):
 
         try:
             return self._call_openrouter(pdf_bytes, text, filename, include_pdf=True)
-        except requests.HTTPError:
-            if text.strip():
-                return self._call_openrouter(pdf_bytes, text, filename, include_pdf=False)
+        except requests.HTTPError as exc:
+            if text.strip() and self._is_pdf_input_rejection(exc):
+                return self._call_openrouter(
+                    pdf_bytes, text, filename, include_pdf=False
+                )
             raise
 
     def _call_openrouter(
@@ -116,8 +123,8 @@ class OpenRouterExtractionProvider(ExtractionProvider):
                     "Extract lab-result data from this PDF into the requested JSON "
                     "schema. Do not choose the authoritative app lot. Preserve printed "
                     "result text exactly, including commas and less-than signs. Include "
-                    "row sample_id, reference_number, or lot_number fields when printed "
-                    "per row. For metals, preserve names like Pb/Lead, As/Arsenic, "
+                    "row sample_id, reference_number, lot_number, sublot_number, or "
+                    "batch_number fields when printed per row. For metals, preserve names like Pb/Lead, As/Arsenic, "
                     "Cd/Cadmium, and Hg/Mercury in test_name_raw. Put per-serving basis "
                     "text in per_serving when present.\n\n"
                     f"Filename: {filename}\n\nExtracted text:\n{text[:20000]}"
@@ -171,9 +178,18 @@ class OpenRouterExtractionProvider(ExtractionProvider):
                                     "properties": {
                                         "row_id": {"type": "string"},
                                         "test_name_raw": {"type": "string"},
-                                        "result_value_raw": {"type": ["string", "null"]},
+                                        "result_value_raw": {
+                                            "type": ["string", "null"]
+                                        },
                                         "unit_raw": {"type": ["string", "null"]},
                                         "limit_raw": {"type": ["string", "null"]},
+                                        "sample_id": {"type": ["string", "null"]},
+                                        "reference_number": {
+                                            "type": ["string", "null"]
+                                        },
+                                        "lot_number": {"type": ["string", "null"]},
+                                        "sublot_number": {"type": ["string", "null"]},
+                                        "batch_number": {"type": ["string", "null"]},
                                         "per_serving": {"type": ["string", "null"]},
                                         "lod": {"type": ["string", "null"]},
                                         "loq": {"type": ["string", "null"]},
@@ -216,6 +232,15 @@ class OpenRouterExtractionProvider(ExtractionProvider):
         parsed["_usage_metadata"] = data.get("usage")
         parsed["_model"] = data.get("model") or settings.openrouter_model
         return parsed
+
+    def _is_pdf_input_rejection(self, exc: requests.HTTPError) -> bool:
+        response = exc.response
+        if response is None or response.status_code not in {400, 413, 415, 422}:
+            return False
+        body = (response.text or "").lower()
+        return any(
+            token in body for token in ["pdf", "file", "base64", "unsupported", "input"]
+        )
 
 
 def get_extraction_provider() -> ExtractionProvider:

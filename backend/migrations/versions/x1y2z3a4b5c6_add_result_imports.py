@@ -7,6 +7,7 @@ Create Date: 2026-06-21
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import sqlalchemy as sa
@@ -22,6 +23,97 @@ depends_on = None
 
 def _json_type():
     return sa.JSON().with_variant(sa.Text(), "sqlite")
+
+
+def _normalize_storage_key(value: str | None) -> str:
+    if not value:
+        return ""
+    return value if value.startswith("pdfs/") else f"pdfs/{value}"
+
+
+def _decode_attached_pdfs(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return [value]
+    return value
+
+
+def _backfill_attached_pdfs_to_objects(bind) -> None:
+    lots = sa.table(
+        "lots",
+        sa.column("id", sa.Integer),
+        sa.column("created_at", sa.DateTime),
+        sa.column("attached_pdfs", sa.JSON),
+    )
+    rows = list(
+        bind.execute(
+            sa.select(lots.c.id, lots.c.created_at, lots.c.attached_pdfs).where(
+                lots.c.attached_pdfs.isnot(None)
+            )
+        )
+    )
+    for lot_id, created_at, attached_pdfs in rows:
+        decoded = _decode_attached_pdfs(attached_pdfs)
+        if not isinstance(decoded, list):
+            continue
+        added_at = (created_at or datetime.utcnow()).isoformat()
+        converted = []
+        changed = False
+        for entry in decoded:
+            if isinstance(entry, str):
+                storage_key = _normalize_storage_key(entry)
+                converted.append(
+                    {
+                        "filename": storage_key.rsplit("/", 1)[-1],
+                        "storage_key": storage_key,
+                        "source": "legacy",
+                        "import_id": None,
+                        "added_at": added_at,
+                    }
+                )
+                changed = True
+            else:
+                converted.append(entry)
+        if changed:
+            bind.execute(
+                lots.update().where(lots.c.id == lot_id).values(attached_pdfs=converted)
+            )
+
+
+def _downgrade_attached_pdfs_to_filenames(bind) -> None:
+    lots = sa.table(
+        "lots",
+        sa.column("id", sa.Integer),
+        sa.column("attached_pdfs", sa.JSON),
+    )
+    rows = list(
+        bind.execute(
+            sa.select(lots.c.id, lots.c.attached_pdfs).where(
+                lots.c.attached_pdfs.isnot(None)
+            )
+        )
+    )
+    for lot_id, attached_pdfs in rows:
+        decoded = _decode_attached_pdfs(attached_pdfs)
+        if not isinstance(decoded, list):
+            continue
+        converted = [
+            (
+                _normalize_storage_key(
+                    entry.get("storage_key") or entry.get("filename")
+                )
+                if isinstance(entry, dict)
+                else entry
+            )
+            for entry in decoded
+        ]
+        bind.execute(
+            lots.update().where(lots.c.id == lot_id).values(attached_pdfs=converted)
+        )
 
 
 def upgrade() -> None:
@@ -53,9 +145,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["duplicate_of_id"], ["result_imports.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("idx_result_import_hash_status", "result_imports", ["file_hash", "status"])
+    op.create_index(
+        "idx_result_import_hash_status", "result_imports", ["file_hash", "status"]
+    )
     op.create_index("idx_result_import_created", "result_imports", ["created_at"])
-    op.create_index(op.f("ix_result_imports_file_hash"), "result_imports", ["file_hash"])
+    op.create_index(
+        op.f("ix_result_imports_file_hash"), "result_imports", ["file_hash"]
+    )
     op.create_index(op.f("ix_result_imports_status"), "result_imports", ["status"])
 
     op.create_table(
@@ -71,22 +167,39 @@ def upgrade() -> None:
         sa.Column("pdf_attachment", _json_type(), nullable=True),
         sa.Column("applied_rows", _json_type(), nullable=True),
         sa.Column("applied_by_id", sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(["result_import_id"], ["result_imports.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["result_import_id"], ["result_imports.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["lot_id"], ["lots.id"]),
         sa.ForeignKeyConstraint(["applied_by_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_result_import_ledgers_result_import_id"), "result_import_ledgers", ["result_import_id"])
-    op.create_index(op.f("ix_result_import_ledgers_lot_id"), "result_import_ledgers", ["lot_id"])
+    op.create_index(
+        op.f("ix_result_import_ledgers_result_import_id"),
+        "result_import_ledgers",
+        ["result_import_id"],
+    )
+    op.create_index(
+        op.f("ix_result_import_ledgers_lot_id"), "result_import_ledgers", ["lot_id"]
+    )
 
     bind = op.get_bind()
+    _backfill_attached_pdfs_to_objects(bind)
     if "parsing_queue" in inspect(bind).get_table_names():
         op.drop_table("parsing_queue")
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_result_import_ledgers_lot_id"), table_name="result_import_ledgers")
-    op.drop_index(op.f("ix_result_import_ledgers_result_import_id"), table_name="result_import_ledgers")
+    bind = op.get_bind()
+    _downgrade_attached_pdfs_to_filenames(bind)
+
+    op.drop_index(
+        op.f("ix_result_import_ledgers_lot_id"), table_name="result_import_ledgers"
+    )
+    op.drop_index(
+        op.f("ix_result_import_ledgers_result_import_id"),
+        table_name="result_import_ledgers",
+    )
     op.drop_table("result_import_ledgers")
     op.drop_index(op.f("ix_result_imports_status"), table_name="result_imports")
     op.drop_index(op.f("ix_result_imports_file_hash"), table_name="result_imports")

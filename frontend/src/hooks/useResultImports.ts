@@ -48,7 +48,7 @@ export function useResultImportPreview(id: number | null, lotId: number | null) 
   })
 }
 
-export function useUploadResultImports() {
+export function useUploadResultImports(onDuplicateSelect?: (importId: number) => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: resultImportsApi.upload,
@@ -62,6 +62,7 @@ export function useUploadResultImports() {
         toast.warning(`${data.duplicates.length} PDF${data.duplicates.length === 1 ? "" : "s"} already imported`, {
           description: detail,
         })
+        onDuplicateSelect?.(data.duplicates[0].id)
       }
       if (data.items.length > 0) {
         toast.success(`${data.items.length} PDF${data.items.length === 1 ? "" : "s"} queued`)

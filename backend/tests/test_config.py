@@ -30,9 +30,9 @@ def test_paths_created():
     from app.config import settings
 
     # Check that directory attributes exist
-    assert hasattr(settings, 'templates_path')
-    assert hasattr(settings, 'watch_folder_path')
-    assert hasattr(settings, 'coa_output_folder')
+    assert hasattr(settings, "templates_path")
+    assert hasattr(settings, "coa_output_folder")
+    assert hasattr(settings, "upload_path")
 
 
 def test_env_override():

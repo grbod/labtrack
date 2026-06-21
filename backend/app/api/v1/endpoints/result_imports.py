@@ -30,7 +30,9 @@ def _serialize(item: ResultImport) -> ResultImportRead:
     return data
 
 
-@router.post("", response_model=ResultImportUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=ResultImportUploadResponse, status_code=status.HTTP_201_CREATED
+)
 async def upload_result_imports(
     db: DbSession,
     current_user: LabTechOrAbove,
@@ -39,7 +41,13 @@ async def upload_result_imports(
     try:
         payload = []
         for file in files:
-            payload.append((file.filename or "result.pdf", await file.read(), file.content_type or ""))
+            payload.append(
+                (
+                    file.filename or "result.pdf",
+                    await file.read(),
+                    file.content_type or "",
+                )
+            )
         created, duplicates = service.create_uploads(db, payload, current_user.id)
         for item in created:
             await enqueue_result_import(item.id)
@@ -86,7 +94,9 @@ async def get_result_import(
 ) -> ResultImportRead:
     item = service.get(db, import_id)
     if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Import not found"
+        )
     return _serialize(item)
 
 
@@ -112,7 +122,9 @@ async def confirm_result_import(
 ) -> ConfirmResultImportResponse:
     try:
         return ConfirmResultImportResponse(
-            **service.confirm(db, import_id, request.lot_id, request.row_actions, current_user.id)
+            **service.confirm(
+                db, import_id, request.lot_id, request.row_actions, current_user.id
+            )
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -125,7 +137,7 @@ async def retry_result_import(
     current_user: LabTechOrAbove,
 ) -> ResultImportRead:
     try:
-        item = service.retry(db, import_id)
+        item = service.retry(db, import_id, current_user.id)
         await enqueue_result_import(item.id)
         return _serialize(item)
     except ValueError as exc:
@@ -151,6 +163,8 @@ async def revert_result_import(
     current_user: CurrentUser,
 ) -> ResultImportRead:
     try:
-        return _serialize(service.revert(db, import_id, current_user.id, current_user.role))
+        return _serialize(
+            service.revert(db, import_id, current_user.id, current_user.role)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

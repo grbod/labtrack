@@ -7,7 +7,7 @@ import io
 import re
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from PyPDF2 import PdfReader
 from sqlalchemy import or_
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.models import (
     AuditAction,
+    AuditLog,
     LabTestType,
     Lot,
     LotStatus,
@@ -38,7 +39,6 @@ from app.services.result_extraction_provider import (
 from app.services.retest_service import retest_service
 from app.services.storage_service import get_storage_service
 from app.utils.logger import logger
-
 
 ACTIVE_MATCH_STATUSES = [
     LotStatus.AWAITING_RESULTS,
@@ -357,7 +357,9 @@ class ResultImportService(BaseService[ResultImport]):
             db.commit()
         return len(stale)
 
-    def retry(self, db: Session, import_id: int) -> ResultImport:
+    def retry(
+        self, db: Session, import_id: int, user_id: Optional[int] = None
+    ) -> ResultImport:
         item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
@@ -373,8 +375,19 @@ class ResultImportService(BaseService[ResultImport]):
             raise ValueError("Import is still processing")
         if not item.storage_key or not get_storage_service().exists(item.storage_key):
             raise ValueError("Stored PDF is no longer available")
+        old_status = item.status.value
         item.status = ResultImportStatus.PROCESSING
         item.error_message = None
+        self._audit_entity(
+            db,
+            table_name="result_imports",
+            action=AuditAction.UPDATE,
+            record_id=item.id,
+            old_values={"status": old_status},
+            new_values={"status": ResultImportStatus.PROCESSING.value},
+            user_id=user_id,
+            reason="Result import retried (re-queued from stored PDF)",
+        )
         db.commit()
         db.refresh(item)
         return item
@@ -514,12 +527,23 @@ class ResultImportService(BaseService[ResultImport]):
                 existing.method = method
                 existing.notes = self._row_notes(row)
                 existing.lab_test_type_id = lab_test_type_id
+                new = self._result_snapshot(existing)
                 updated.append(
                     {
                         "id": existing.id,
                         "old": old,
-                        "new": self._result_snapshot(existing),
+                        "new": new,
                     }
+                )
+                self._audit_entity(
+                    db,
+                    table_name="test_results",
+                    action=AuditAction.UPDATE,
+                    record_id=existing.id,
+                    old_values=old,
+                    new_values=new,
+                    user_id=user_id,
+                    reason="Result import: replaced existing draft value",
                 )
                 applied_rows.append(
                     {
@@ -557,12 +581,26 @@ class ResultImportService(BaseService[ResultImport]):
                 db.add(result)
                 db.flush()
                 created_ids.append(result.id)
+                result_snapshot = self._result_snapshot(result)
+                self._audit_entity(
+                    db,
+                    table_name="test_results",
+                    action=AuditAction.INSERT,
+                    record_id=result.id,
+                    new_values=result_snapshot,
+                    user_id=user_id,
+                    reason=(
+                        f"Result import: ad-hoc test '{action.test_name}' created"
+                        if action.action == "create_adhoc"
+                        else "Result import: draft result created"
+                    ),
+                )
                 applied_rows.append(
                     {
                         "row_id": action.row_id,
                         "test_result_id": result.id,
                         "action": action.action,
-                        "result_snapshot": self._result_snapshot(result),
+                        "result_snapshot": result_snapshot,
                     }
                 )
 
@@ -576,7 +614,18 @@ class ResultImportService(BaseService[ResultImport]):
             "import_id": item.id,
             "added_at": datetime.utcnow().isoformat(),
         }
+        previous_attachments = list(lot.attached_pdfs or [])
         lot.attached_pdfs = self._append_pdf_attachment(lot.attached_pdfs, attachment)
+        self._audit_entity(
+            db,
+            table_name="lots",
+            action=AuditAction.UPDATE,
+            record_id=lot.id,
+            old_values={"attached_pdfs": previous_attachments},
+            new_values={"attached_pdfs": lot.attached_pdfs},
+            user_id=user_id,
+            reason="Result import: source PDF attached",
+        )
 
         ledger = ResultImportLedger(
             result_import_id=item.id,
@@ -607,6 +656,16 @@ class ResultImportService(BaseService[ResultImport]):
 
         if lot.status == LotStatus.AWAITING_RELEASE:
             lot.status = LotStatus.UNDER_REVIEW
+            self._audit_entity(
+                db,
+                table_name="lots",
+                action=AuditAction.UPDATE,
+                record_id=lot.id,
+                old_values={"status": LotStatus.AWAITING_RELEASE.value},
+                new_values={"status": LotStatus.UNDER_REVIEW.value},
+                user_id=user_id,
+                reason="Result import: lot pulled back from release queue into review",
+            )
 
         calculation = LotService().calculate_lot_status(db, lot)
         LotService()._apply_lot_status_calculation(
@@ -665,6 +724,15 @@ class ResultImportService(BaseService[ResultImport]):
                 raise ValueError(
                     "Cannot revert because an imported row changed after import"
                 )
+            self._audit_entity(
+                db,
+                table_name="test_results",
+                action=AuditAction.DELETE,
+                record_id=result.id,
+                old_values=self._result_snapshot(result),
+                user_id=user_id,
+                reason="Result import reverted: draft result removed",
+            )
             db.delete(result)
 
         for entry in ledger.updated_results or []:
@@ -685,15 +753,36 @@ class ResultImportService(BaseService[ResultImport]):
                 if key == "test_date":
                     value = self._parse_date(value)
                 setattr(result, key, value)
+            self._audit_entity(
+                db,
+                table_name="test_results",
+                action=AuditAction.UPDATE,
+                record_id=result.id,
+                old_values=entry["new"],
+                new_values=entry["old"],
+                user_id=user_id,
+                reason="Result import reverted: draft value restored",
+            )
 
         lot = db.query(Lot).filter(Lot.id == ledger.lot_id).first()
         storage_key_to_delete = None
         if lot and ledger.pdf_attachment:
+            previous_attachments = list(lot.attached_pdfs or [])
             lot.attached_pdfs = [
                 entry
                 for entry in self._normalize_pdf_attachments(lot.attached_pdfs)
                 if entry.get("storage_key") != ledger.pdf_attachment.get("storage_key")
             ]
+            self._audit_entity(
+                db,
+                table_name="lots",
+                action=AuditAction.UPDATE,
+                record_id=lot.id,
+                old_values={"attached_pdfs": previous_attachments},
+                new_values={"attached_pdfs": lot.attached_pdfs},
+                user_id=user_id,
+                reason="Result import reverted: source PDF detached",
+            )
             storage_key = ledger.pdf_attachment.get("storage_key")
             if storage_key:
                 db.flush()
@@ -704,6 +793,16 @@ class ResultImportService(BaseService[ResultImport]):
 
         item.status = ResultImportStatus.REVERTED
         item.reverted_at = datetime.utcnow()
+        self._audit_entity(
+            db,
+            table_name="result_imports",
+            action=AuditAction.UPDATE,
+            record_id=item.id,
+            old_values={"status": ResultImportStatus.CONFIRMED.value},
+            new_values={"status": ResultImportStatus.REVERTED.value},
+            user_id=user_id,
+            reason="Result import reverted",
+        )
         if lot:
             calculation = LotService().calculate_lot_status(db, lot)
             LotService()._apply_lot_status_calculation(
@@ -1175,6 +1274,37 @@ class ResultImportService(BaseService[ResultImport]):
             "lab_test_type_id": result.lab_test_type_id,
             "include_on_coa": result.include_on_coa,
         }
+
+    def _audit_entity(
+        self,
+        db: Session,
+        table_name: str,
+        action: AuditAction,
+        record_id: int,
+        old_values: Optional[Dict[str, Any]] = None,
+        new_values: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Write a non-fatal audit row for an arbitrary table."""
+        try:
+            AuditLog.log_change(
+                session=db,
+                table_name=table_name,
+                record_id=record_id,
+                action=action,
+                old_values=old_values,
+                new_values=new_values,
+                user=user_id,
+                reason=reason,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "Failed to create audit log for %s#%s: %s",
+                table_name,
+                record_id,
+                exc,
+            )
 
     def _snapshot_value(self, result: TestResult, key: str) -> Any:
         value = getattr(result, key)

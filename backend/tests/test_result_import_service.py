@@ -6,6 +6,8 @@ import pytest
 import requests
 
 from app.models import (
+    AuditAction,
+    AuditLog,
     Lot,
     ResultImport,
     ResultImportLedger,
@@ -15,13 +17,73 @@ from app.models import (
     UserRole,
 )
 from app.models.enums import LotStatus, LotType
+from app.schemas.result_import import RowAction
 from app.services.release_service import ReleaseService
 from app.services.result_extraction_provider import (
     MockExtractionProvider,
     OpenRouterExtractionProvider,
 )
 from app.services.result_import_service import ResultImportService
-from app.schemas.result_import import RowAction
+
+
+def _audit_row(row_id: str = "row-1", value: str = "Negative") -> dict:
+    return {
+        "row_id": row_id,
+        "test_name_raw": "Total Plate Count",
+        "test_name_normalized": "Total Plate Count",
+        "result_value_raw": value,
+        "unit_raw": "CFU/g",
+        "target_unit": "CFU/g",
+        "limit_raw": None,
+        "confidence": 0.9,
+        "warnings": [],
+        "metadata": {},
+        "matched_lab_test_type_id": None,
+    }
+
+
+def test_audit_entity_writes_row_for_arbitrary_table(test_db, sample_user):
+    service = ResultImportService()
+    service._audit_entity(
+        test_db,
+        table_name="test_results",
+        action=AuditAction.INSERT,
+        record_id=12345,
+        new_values={"result_value": "Negative"},
+        user_id=sample_user.id,
+    )
+    test_db.commit()
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(AuditLog.table_name == "test_results", AuditLog.record_id == 12345)
+        .first()
+    )
+    assert entry is not None
+    assert entry.action == AuditAction.INSERT
+    assert entry.user_id == sample_user.id
+    assert entry.get_new_values_dict().get("result_value") == "Negative"
+
+
+def test_audit_entity_swallows_failures(test_db, sample_user):
+    service = ResultImportService()
+    service._audit_entity(
+        test_db,
+        table_name="test_results",
+        action=AuditAction.DELETE,
+        record_id=999,
+        old_values={"result_value": "x"},
+        user_id=sample_user.id,
+        reason=None,
+    )
+    test_db.commit()
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(AuditLog.table_name == "test_results", AuditLog.record_id == 999)
+        .first()
+    )
+    assert entry is None
 
 
 def test_mock_provider_does_not_invent_rows():
@@ -291,6 +353,180 @@ def test_confirm_rejects_mismatched_test_result_id(
     test_db.refresh(existing)
     assert existing.test_type == "Lead"
     assert existing.result_value == "0.1"
+
+
+def test_confirm_audits_created_result(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa.pdf",
+        file_hash="hash-create-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row(value="< 10,000 CFU/g")]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    result = ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+    created_id = result["created_result_ids"][0]
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "test_results",
+            AuditLog.record_id == created_id,
+            AuditLog.action == AuditAction.INSERT,
+        )
+        .first()
+    )
+    assert entry is not None
+    assert entry.user_id == sample_user.id
+    assert entry.get_new_values_dict().get("result_value") == "< 10,000 CFU/g"
+
+
+def test_confirm_audits_replaced_result(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    existing = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Total Plate Count",
+        result_value="old value",
+        status=TestResultStatus.DRAFT,
+    )
+    test_db.add(existing)
+    test_db.commit()
+
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa2.pdf",
+        file_hash="hash-replace-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row(value="new value")]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="replace")],
+        sample_user.id,
+    )
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "test_results",
+            AuditLog.record_id == existing.id,
+            AuditLog.action == AuditAction.UPDATE,
+        )
+        .first()
+    )
+    assert entry is not None
+    assert entry.get_old_values_dict().get("result_value") == "old value"
+    assert entry.get_new_values_dict().get("result_value") == "new value"
+
+
+def test_confirm_audits_pdf_attachment_on_lot(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa3.pdf",
+        file_hash="hash-pdf-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row()]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "lots",
+            AuditLog.record_id == sample_lot.id,
+            AuditLog.action == AuditAction.UPDATE,
+            AuditLog.reason == "Result import: source PDF attached",
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert entry is not None
+    assert "attached_pdfs" in entry.get_new_values_dict()
+
+
+def test_confirm_audits_awaiting_release_pullback(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    sample_lot.status = LotStatus.AWAITING_RELEASE
+    test_db.commit()
+
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa-pullback.pdf",
+        file_hash="hash-pullback-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row()]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+
+    lot_audits = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "lots",
+            AuditLog.record_id == sample_lot.id,
+            AuditLog.action == AuditAction.UPDATE,
+        )
+        .all()
+    )
+    pullback = [
+        entry
+        for entry in lot_audits
+        if entry.get_old_values_dict().get("status") == "awaiting_release"
+        and entry.get_new_values_dict().get("status") == "under_review"
+    ]
+    assert pullback
 
 
 def test_confirm_rejects_zero_applied_rows(test_db, sample_lot, sample_user):
@@ -867,6 +1103,44 @@ def test_processing_finish_does_not_overwrite_cancelled_import(test_db, sample_u
     assert result.status == ResultImportStatus.CANCELLED
 
 
+def test_retry_audits_requeue(test_db, sample_user, monkeypatch):
+    class DummyStorage:
+        def exists(self, key):
+            return True
+
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service",
+        lambda: DummyStorage(),
+    )
+
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa-retry.pdf",
+        file_hash="hash-retry-audit",
+        status=ResultImportStatus.FAILED,
+        error_message="Failed to process PDF: boom",
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().retry(test_db, import_row.id, sample_user.id)
+
+    entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "result_imports",
+            AuditLog.record_id == import_row.id,
+            AuditLog.action == AuditAction.UPDATE,
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert entry is not None
+    assert entry.user_id == sample_user.id
+    assert entry.get_new_values_dict().get("status") == "processing"
+
+
 def test_upload_failure_deletes_uploaded_file(test_db, sample_user, monkeypatch):
     class DummyStorage:
         def __init__(self):
@@ -906,6 +1180,124 @@ def test_upload_failure_deletes_uploaded_file(test_db, sample_user, monkeypatch)
 
     assert storage.uploaded
     assert storage.deleted == storage.uploaded
+
+
+def test_revert_audits_deletes_and_revert_event(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa-revert.pdf",
+        file_hash="hash-revert-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row()]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    service = ResultImportService()
+    result = service.confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+    created_id = result["created_result_ids"][0]
+
+    service.revert(test_db, import_row.id, sample_user.id, UserRole.QC_MANAGER)
+
+    delete_entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "test_results",
+            AuditLog.record_id == created_id,
+            AuditLog.action == AuditAction.DELETE,
+        )
+        .first()
+    )
+    assert delete_entry is not None
+    assert delete_entry.reason
+
+    revert_event = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "result_imports",
+            AuditLog.record_id == import_row.id,
+            AuditLog.action == AuditAction.UPDATE,
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert revert_event is not None
+    assert revert_event.get_new_values_dict().get("status") == "reverted"
+
+
+def test_revert_audits_updated_result_restore_and_pdf_detach(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    existing = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Total Plate Count",
+        result_value="old value",
+        status=TestResultStatus.DRAFT,
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/coa-revert-update.pdf",
+        file_hash="hash-revert-update-audit",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        extracted_data={"rows": [_audit_row(value="new value")]},
+        uploaded_by_id=sample_user.id,
+    )
+    test_db.add_all([existing, import_row])
+    test_db.commit()
+
+    service = ResultImportService()
+    service.confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="replace")],
+        sample_user.id,
+    )
+
+    service.revert(test_db, import_row.id, sample_user.id, UserRole.QC_MANAGER)
+
+    restore_entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "test_results",
+            AuditLog.record_id == existing.id,
+            AuditLog.action == AuditAction.UPDATE,
+            AuditLog.reason == "Result import reverted: draft value restored",
+        )
+        .first()
+    )
+    assert restore_entry is not None
+    assert restore_entry.get_old_values_dict().get("result_value") == "new value"
+    assert restore_entry.get_new_values_dict().get("result_value") == "old value"
+
+    detach_entry = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "lots",
+            AuditLog.record_id == sample_lot.id,
+            AuditLog.action == AuditAction.UPDATE,
+            AuditLog.reason == "Result import reverted: source PDF detached",
+        )
+        .first()
+    )
+    assert detach_entry is not None
+    assert detach_entry.get_old_values_dict().get("attached_pdfs")
+    assert detach_entry.get_new_values_dict().get("attached_pdfs") == []
 
 
 def test_revert_blocks_if_any_imported_field_changed(test_db, sample_lot, sample_user):

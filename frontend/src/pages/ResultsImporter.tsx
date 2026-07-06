@@ -1,10 +1,12 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useParams } from "react-router-dom"
 import { Document, Page, pdfjs } from "react-pdf"
 import {
-  ChevronDown,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   FileText,
-  FileUp,
   Info,
   Loader2,
   RotateCcw,
@@ -15,6 +17,7 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
 import { resultImportsApi } from "@/api/resultImports"
 import {
   useCancelResultImport,
@@ -38,6 +41,10 @@ import {
   type SpecReviewRowState,
 } from "@/lib/buildRowActions"
 import { RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE } from "@/lib/resultsImporterConfig"
+import {
+  resultImportStatusDotClass as statusDotClass,
+  resultImportStatusLabels as statusLabels,
+} from "@/lib/resultImportStatus"
 import type {
   ExtractedResultRow,
   LabTestType,
@@ -69,24 +76,6 @@ const PDF_CROP_SCALE = 1 / (1 - 2 * PAGE_MARGIN_FRACTION * PDF_MARGIN_CROP)
 const SPLIT_RATIO_KEY = "lab-test-import-split"
 const DEFAULT_SPLIT_RATIO = 0.4
 
-const statusLabels: Record<ResultImport["status"], string> = {
-  processing: "Processing",
-  needs_confirmation: "Needs confirmation",
-  confirmed: "Confirmed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  reverted: "Reverted",
-}
-
-const statusDotClass: Record<ResultImport["status"], string> = {
-  processing: "bg-amber-400 animate-pulse",
-  needs_confirmation: "bg-blue-500",
-  confirmed: "bg-emerald-500",
-  failed: "bg-red-500",
-  cancelled: "bg-slate-300",
-  reverted: "bg-slate-300",
-}
-
 const LOT_TYPE_TAG: Record<LotType, { label: string; tag: string }> = {
   standard: { label: "Single SKU", tag: "bg-blue-100 text-blue-700" },
   parent_lot: { label: "Parent Lot", tag: "bg-green-100 text-green-700" },
@@ -99,23 +88,29 @@ const LOT_COLOR = "text-green-700"
 
 // ---------------------------------------------------------------------------
 
-export function ResultsImporterPage() {
+export function ResultsImporterReviewPage() {
+  const navigate = useNavigate()
+  const { importId } = useParams()
+  const id = Number(importId)
+  const validId = Number.isInteger(id) && id > 0
+
   const importsQuery = useResultImports()
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const selectedQuery = useResultImport(selectedId)
-  const selected = selectedQuery.data
-  const uploadMutation = useUploadResultImports(setSelectedId)
+  const detailQuery = useResultImport(validId ? id : null)
+  const item = detailQuery.data
+  const uploadMutation = useUploadResultImports((duplicateId) =>
+    navigate(`/results-importer/${duplicateId}`)
+  )
   const retryMutation = useRetryResultImport()
   const cancelMutation = useCancelResultImport()
   const revertMutation = useRevertResultImport()
+  const [pendingAction, setPendingAction] = useState<"revert" | "cancel" | null>(null)
 
   const items = useMemo(() => importsQuery.data?.items || [], [importsQuery.data?.items])
-
-  useEffect(() => {
-    if (!selectedId && items.length) {
-      setSelectedId(items[0].id)
-    }
-  }, [items, selectedId])
+  const reviewQueue = useMemo(
+    () => items.filter((entry) => entry.status === "needs_confirmation"),
+    [items]
+  )
+  const queueIndex = reviewQueue.findIndex((entry) => entry.id === id)
 
   const handleFiles = useCallback(
     (files: FileList | null) => {
@@ -125,16 +120,28 @@ export function ResultsImporterPage() {
     [uploadMutation]
   )
 
-  /** Advance to the next import still awaiting confirmation (skipping `doneId`). */
+  /** After Apply, advance to the next import awaiting review, else back to the list. */
   const advanceToNext = useCallback(
     (doneId: number) => {
-      const next = items.find(
-        (item) => item.id !== doneId && item.status === "needs_confirmation"
-      )
-      setSelectedId(next ? next.id : null)
+      const next = reviewQueue.find((entry) => entry.id !== doneId)
+      if (next) navigate(`/results-importer/${next.id}`)
+      else navigate("/results-importer")
     },
-    [items]
+    [reviewQueue, navigate]
   )
+
+  // Esc returns to the list (ignored while typing or when a dialog is open).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || pendingAction !== null) return
+      const target = event.target instanceof HTMLElement ? event.target : null
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return
+      if (target?.closest('[role="dialog"]')) return
+      navigate("/results-importer")
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [navigate, pendingAction])
 
   const { ratio, splitRef, startDrag } = useResizableRatio()
 
@@ -147,48 +154,124 @@ export function ResultsImporterPage() {
         handleFiles(event.dataTransfer.files)
       }}
     >
-      <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold text-slate-900">Lab Test Import</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Drag lab COA PDFs to extract results, then review against the sample's spec.
-          </p>
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => navigate("/results-importer")}
+            aria-label="Back to imports"
+          >
+            <ArrowLeft className="mr-1.5 h-4 w-4" /> Imports
+          </Button>
+          {item && (
+            <div className="min-w-0 border-l border-slate-200 pl-3">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {item.original_filename}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
+                <span className={cn("h-2 w-2 rounded-full", statusDotClass[item.status])} />
+                {statusLabels[item.status]}
+              </p>
+            </div>
+          )}
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <QueueDropdown
-            items={items}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            loading={importsQuery.isLoading}
-          />
-          <HeaderDropzone onFiles={handleFiles} isUploading={uploadMutation.isPending} />
-        </div>
+        {reviewQueue.length > 0 && (
+          <div className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+            {queueIndex >= 0 ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={queueIndex <= 0}
+                  onClick={() => navigate(`/results-importer/${reviewQueue[queueIndex - 1].id}`)}
+                  aria-label="Previous import to review"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="whitespace-nowrap">
+                  {queueIndex + 1} of {reviewQueue.length} to review
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={queueIndex >= reviewQueue.length - 1}
+                  onClick={() => navigate(`/results-importer/${reviewQueue[queueIndex + 1].id}`)}
+                  aria-label="Next import to review"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate(`/results-importer/${reviewQueue[0].id}`)}
+              >
+                {reviewQueue.length} to review <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      <div ref={splitRef} className="flex min-h-0 flex-1">
-        <div style={{ width: `${ratio * 100}%` }} className="min-w-0">
-          <PdfPreview item={selected || null} />
+      {!validId || detailQuery.isError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-slate-500">
+          <p>This import could not be found.</p>
+          <Button variant="outline" onClick={() => navigate("/results-importer")}>
+            <ArrowLeft className="mr-1.5 h-4 w-4" /> Back to imports
+          </Button>
         </div>
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onPointerDown={startDrag}
-          className="group relative w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400"
-          title="Drag to resize"
-        >
-          <div className="absolute inset-y-0 -left-1 -right-1" />
+      ) : !item ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading import
         </div>
-        <div className="min-w-0 flex-1">
-          <ReviewPane
-            item={selected || null}
-            onRetry={(id) => retryMutation.mutate(id)}
-            onCancel={(id) => cancelMutation.mutate(id)}
-            onRevert={(id) => revertMutation.mutate(id)}
-            onApplied={advanceToNext}
-            hasAnyImports={items.length > 0}
-          />
+      ) : (
+        <div ref={splitRef} className="flex min-h-0 flex-1">
+          <div style={{ width: `${ratio * 100}%` }} className="min-w-0">
+            <PdfPreview item={item} />
+          </div>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={startDrag}
+            className="group relative w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400"
+            title="Drag to resize"
+          >
+            <div className="absolute inset-y-0 -left-1 -right-1" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <ReviewPane
+              item={item}
+              onRetry={(retryId) => retryMutation.mutate(retryId)}
+              onCancel={() => setPendingAction("cancel")}
+              onRevert={() => setPendingAction("revert")}
+              onApplied={advanceToNext}
+            />
+          </div>
         </div>
-      </div>
+      )}
+
+      <ConfirmActionDialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAction(null)
+        }}
+        title={pendingAction === "revert" ? "Revert this import?" : "Cancel this import?"}
+        description={
+          pendingAction === "revert"
+            ? `Draft results applied from "${item?.original_filename ?? "this PDF"}" will be removed from the lot. Results that were edited or approved since are kept.`
+            : item?.status === "needs_confirmation"
+              ? "Cancelling discards the extracted results; you would need to re-upload the PDF to import it again."
+              : "This stops the import. You can re-upload the PDF later if needed."
+        }
+        confirmLabel={pendingAction === "revert" ? "Revert import" : "Cancel import"}
+        onConfirm={() => {
+          if (!item) return
+          if (pendingAction === "revert") revertMutation.mutate(item.id)
+          else cancelMutation.mutate(item.id)
+        }}
+      />
     </div>
   )
 }
@@ -224,133 +307,6 @@ function useResizableRatio() {
   }, [])
 
   return { ratio, splitRef, startDrag }
-}
-
-function HeaderDropzone({
-  onFiles,
-  isUploading,
-}: {
-  onFiles: (files: FileList | null) => void
-  isUploading: boolean
-}) {
-  const [dragOver, setDragOver] = useState(false)
-  return (
-    <label
-      onDragOver={(event) => {
-        event.preventDefault()
-        setDragOver(true)
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        setDragOver(false)
-        onFiles(event.dataTransfer.files)
-      }}
-      className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed px-4 py-2 text-sm font-medium transition-colors",
-        dragOver
-          ? "border-blue-500 bg-blue-50 text-blue-700"
-          : "border-slate-300 bg-slate-50 text-slate-600 hover:border-slate-400 hover:bg-slate-100"
-      )}
-    >
-      {isUploading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <FileUp className="h-4 w-4" />
-      )}
-      <span>Drop COA PDFs</span>
-      <input
-        type="file"
-        accept="application/pdf"
-        multiple
-        className="hidden"
-        onChange={(event) => onFiles(event.target.files)}
-      />
-    </label>
-  )
-}
-
-function QueueDropdown({
-  items,
-  selectedId,
-  onSelect,
-  loading,
-}: {
-  items: ResultImport[]
-  selectedId: number | null
-  onSelect: (id: number) => void
-  loading: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const selected = items.find((item) => item.id === selectedId) || null
-
-  useEffect(() => {
-    if (!open) return
-    const onClick = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener("mousedown", onClick)
-    return () => window.removeEventListener("mousedown", onClick)
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((value) => !value)}
-        className="flex h-10 min-w-[220px] max-w-[320px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"
-      >
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Queue</span>
-        {selected ? (
-          <>
-            <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDotClass[selected.status])} />
-            <span className="truncate">{selected.original_filename}</span>
-          </>
-        ) : (
-          <span className="text-slate-400">{items.length ? "Select an import" : "Empty"}</span>
-        )}
-        <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-slate-400" />
-      </button>
-
-      {open && (
-        <div className="absolute right-0 z-30 mt-1 max-h-[60vh] w-[340px] overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-          {loading ? (
-            <div className="flex items-center gap-2 px-4 py-4 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading
-            </div>
-          ) : items.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-500">Drop up to 5 PDFs to begin.</div>
-          ) : (
-            items.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  onSelect(item.id)
-                  setOpen(false)
-                }}
-                className={cn(
-                  "flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50",
-                  selectedId === item.id && "bg-slate-100"
-                )}
-              >
-                <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", statusDotClass[item.status])} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-slate-900">
-                    {item.original_filename}
-                  </span>
-                  <span className="mt-0.5 flex items-center justify-between gap-2 text-xs text-slate-500">
-                    <span>{statusLabels[item.status]}</span>
-                    <span>{new Date(item.created_at).toLocaleDateString()}</span>
-                  </span>
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function PdfPreview({ item }: { item: ResultImport | null }) {
@@ -480,14 +436,12 @@ function ReviewPane({
   onCancel,
   onRevert,
   onApplied,
-  hasAnyImports,
 }: {
-  item: ResultImport | null
+  item: ResultImport
   onRetry: (id: number) => void
   onCancel: (id: number) => void
   onRevert: (id: number) => void
   onApplied: (doneId: number) => void
-  hasAnyImports: boolean
 }) {
   const [selectedLotId, setSelectedLotId] = useState<number | null>(null)
   const [manualSearch, setManualSearch] = useState("")
@@ -501,9 +455,9 @@ function ReviewPane({
   >({})
 
   const candidatesQuery = useLinkCandidates(manualSearch)
-  const confirmMutation = useConfirmResultImport(item?.id || 0)
+  const confirmMutation = useConfirmResultImport(item.id)
   const previewQuery = useResultImportPreview(
-    item?.status === "needs_confirmation" ? item.id : null,
+    item.status === "needs_confirmation" ? item.id : null,
     selectedLotId
   )
   const labTypesQuery = useLabTestTypes({ page_size: 500, is_active: true })
@@ -514,8 +468,8 @@ function ReviewPane({
       : {}
   )
 
-  const rows = useMemo(() => item?.extracted_data?.rows || [], [item?.extracted_data?.rows])
-  const candidates = item?.match_candidates || []
+  const rows = useMemo(() => item.extracted_data?.rows || [], [item.extracted_data?.rows])
+  const candidates = item.match_candidates || []
   const manualCandidates = candidatesQuery.data || []
   const labTypes = useMemo(() => labTypesQuery.data?.items || [], [labTypesQuery.data?.items])
 
@@ -695,12 +649,6 @@ function ReviewPane({
       vm.actionExistingResult?.status === "approved"
   )
 
-  if (!item) {
-    return (
-      <EmptyReviewState hasAnyImports={hasAnyImports} />
-    )
-  }
-
   const previewReady =
     item.status === "needs_confirmation" &&
     !!selectedLotId &&
@@ -870,25 +818,6 @@ function ReviewPane({
   )
 }
 
-function EmptyReviewState({ hasAnyImports }: { hasAnyImports: boolean }) {
-  return (
-    <section className="flex h-full flex-col items-center justify-center gap-3 bg-white p-10 text-center">
-      <div className="rounded-2xl bg-slate-100 p-4">
-        <FileUp className="h-8 w-8 text-slate-400" />
-      </div>
-      <p className="text-sm font-medium text-slate-700">
-        {hasAnyImports ? "All caught up" : "No imports yet"}
-      </p>
-      <p className="max-w-xs text-sm text-slate-500">
-        {hasAnyImports
-          ? "Every import has been reviewed. Drop more COA PDFs to keep going."
-          : "Drop lab COA PDFs above to extract results and review them here."}
-      </p>
-    </section>
-  )
-}
-
-// --- Matched-lot card -------------------------------------------------------
 
 function MatchedLotCard({
   product,

@@ -26,6 +26,8 @@ class ExtractedResultRow(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     matched_lab_test_type_id: Optional[int] = None
+    match_source: Optional[str] = None
+    alias_id: Optional[int] = None
 
 
 class ResultExtraction(BaseModel):
@@ -91,6 +93,10 @@ class RowAction(BaseModel):
     test_result_id: Optional[int] = None
     lab_test_type_id: Optional[int] = None
     test_name: Optional[str] = None
+    result_value: Optional[str] = None
+    unit: Optional[str] = None
+    specification: Optional[str] = None
+    method: Optional[str] = None
 
 
 class ConfirmResultImportRequest(BaseModel):

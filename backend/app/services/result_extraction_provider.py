@@ -125,8 +125,12 @@ class OpenRouterExtractionProvider(ExtractionProvider):
                     "result text exactly, including commas and less-than signs. Include "
                     "row sample_id, reference_number, lot_number, sublot_number, or "
                     "batch_number fields when printed per row. For metals, preserve names like Pb/Lead, As/Arsenic, "
-                    "Cd/Cadmium, and Hg/Mercury in test_name_raw. Put per-serving basis "
-                    "text in per_serving when present.\n\n"
+                    "Cd/Cadmium, and Hg/Mercury in test_name_raw. When a metals table "
+                    "prints both a per-gram (micrograms/gram, ug/g) and a per-serving "
+                    "(micrograms/serving, ug/srv) column, put the per-serving value in "
+                    "per_serving and the per-gram value in result_value_raw/unit_raw. "
+                    "Never drop <LOD, <LOQ, or other less-than values. Capture the "
+                    "serving size text when present.\n\n"
                     f"Filename: {filename}\n\nExtracted text:\n{text[:20000]}"
                 ),
             }

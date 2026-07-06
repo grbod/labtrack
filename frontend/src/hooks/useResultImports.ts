@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { resultImportsApi } from "@/api/resultImports"
+import { lotKeys } from "@/hooks/useLots"
+import { releaseKeys } from "@/hooks/useRelease"
 import type { ConfirmResultImportRequest, ResultImport } from "@/types"
 import { extractApiErrorMessage } from "@/lib/api-utils"
 
@@ -76,8 +78,13 @@ export function useConfirmResultImport(id: number) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (payload: ConfirmResultImportRequest) => resultImportsApi.confirm(id, payload),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: resultImportKeys.all })
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(result.lot_id) })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(result.lot_id) })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
       toast.success("Results applied as drafts")
     },
     onError: (error) => toast.error(extractApiErrorMessage(error, "Failed to confirm import")),

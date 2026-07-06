@@ -202,6 +202,8 @@ export interface ExtractedResultRow {
   warnings: string[]
   metadata: Record<string, unknown>
   matched_lab_test_type_id: number | null
+  match_source?: "exact" | "builtin_alias" | "approved_alias" | "fuzzy" | "unmatched" | null
+  alias_id?: number | null
 }
 
 export interface ResultExtraction {
@@ -275,6 +277,10 @@ export interface ResultRowAction {
   test_result_id?: number | null
   lab_test_type_id?: number | null
   test_name?: string | null
+  result_value?: string | null
+  unit?: string | null
+  specification?: string | null
+  method?: string | null
 }
 
 export interface ExistingResultPreview {
@@ -336,6 +342,59 @@ export interface LabTestType {
   archive_reason: string | null
   created_at: string
   updated_at: string | null
+}
+
+export interface LabTestAlias {
+  id: number
+  raw_phrase: string
+  normalized_key: string
+  lab_name: string | null
+  lab_test_type_id: number
+  target_test_name: string | null
+  target_test_category: string | null
+  target_default_unit: string | null
+  target_default_specification: string | null
+  target_test_method: string | null
+  status: "pending" | "approved" | "disabled"
+  source: "fuzzy" | "manual_override" | string
+  suggestion_count: number
+  first_seen_at: string | null
+  last_seen_at: string | null
+  last_result_import_id: number | null
+  last_lot_id: number | null
+  last_filename: string | null
+  last_suggested_by_id: number | null
+  approved_by_id: number | null
+  approved_at: string | null
+  disabled_by_id: number | null
+  disabled_at: string | null
+  disable_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LabTestAliasList {
+  items: LabTestAlias[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface LabTestBuiltinAlias {
+  raw_phrase: string
+  normalized_key: string
+  lab_test_type_id: number | null
+  target_test_name: string
+  target_test_category: string | null
+  target_default_unit: string | null
+  target_default_specification: string | null
+  target_test_method: string | null
+}
+
+export interface LabTestBuiltinAliasList {
+  items: LabTestBuiltinAlias[]
+  total: number
 }
 
 export interface LabTestTypeCategoryCount {

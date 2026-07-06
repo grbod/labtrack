@@ -8,6 +8,8 @@ import requests
 from app.models import (
     AuditAction,
     AuditLog,
+    LabTestAlias,
+    LabTestType,
     Lot,
     ResultImport,
     ResultImportLedger,
@@ -18,6 +20,7 @@ from app.models import (
 )
 from app.models.enums import LotStatus, LotType
 from app.schemas.result_import import RowAction
+from app.services.lab_test_alias_service import normalize_alias_key
 from app.services.release_service import ReleaseService
 from app.services.result_extraction_provider import (
     MockExtractionProvider,
@@ -165,7 +168,10 @@ def test_candidate_matching_uses_lot_identifiers(test_db, sample_lot):
     extracted = {"identifiers": [{"type": "reference_number", "value": "241101-001"}]}
     candidates = service.match_candidates(test_db, extracted, "result.pdf")
     assert candidates[0]["lot_id"] == sample_lot.id
-    assert "reference matched" in candidates[0]["reasons"]
+    assert any(
+        "matched COA reference" in reason and sample_lot.reference_number in reason
+        for reason in candidates[0]["reasons"]
+    )
 
 
 def test_candidate_matching_uses_row_level_identifiers(test_db, sample_lot):
@@ -189,7 +195,10 @@ def test_candidate_matching_uses_row_level_identifiers(test_db, sample_lot):
     candidates = service.match_candidates(test_db, extracted, "result.pdf")
 
     assert candidates[0]["lot_id"] == sample_lot.id
-    assert "reference matched" in candidates[0]["reasons"]
+    assert any(
+        "matched COA reference" in reason and sample_lot.reference_number in reason
+        for reason in candidates[0]["reasons"]
+    )
 
 
 def test_candidate_matching_uses_row_level_batch_identifier(test_db, sample_lot):
@@ -215,7 +224,7 @@ def test_candidate_matching_uses_row_level_batch_identifier(test_db, sample_lot)
     candidates = service.match_candidates(test_db, extracted, "result.pdf")
 
     assert candidates[0]["lot_id"] == sample_lot.id
-    assert "batch matched" in candidates[0]["reasons"]
+    assert "Batch BATCH-123 matched COA batch number" in candidates[0]["reasons"]
 
 
 def test_upload_fails_without_openrouter_key_when_live_provider(
@@ -293,6 +302,55 @@ def test_confirm_creates_draft_results_and_attachment(
     assert created.pdf_source == "pdfs/result-imports/coa.pdf"
     test_db.refresh(sample_lot)
     assert sample_lot.attached_pdfs[0]["source"] == "import"
+
+
+def test_confirm_persists_corrected_result_value(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="b" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Total Plate Count",
+                    "test_name_normalized": "Total Plate Count",
+                    "result_value_raw": "15,000",
+                    "unit_raw": "CFU/g",
+                    "target_unit": "CFU/g",
+                    "limit_raw": "< 10000",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                }
+            ],
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    result = ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply", result_value="8,000")],
+        sample_user.id,
+    )
+
+    created = (
+        test_db.query(TestResult)
+        .filter(TestResult.id == result["created_result_ids"][0])
+        .one()
+    )
+    assert created.result_value == "8,000"
 
 
 def test_confirm_rejects_mismatched_test_result_id(
@@ -818,7 +876,936 @@ def test_harken_metal_names_normalize(test_db):
     ]
 
 
-def test_harken_per_serving_metal_is_not_primary_result(test_db):
+def test_total_yeast_mold_count_uses_builtin_without_fuzzy(
+    test_db, sample_lab_test_types
+):
+    yeast_mold = LabTestType(
+        test_name="Yeast & Mold",
+        test_category="Microbiological",
+        default_unit="CFU/g",
+        test_method="AOAC 997.02",
+        is_active=True,
+    )
+    test_db.add(yeast_mold)
+    test_db.commit()
+
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "rows": [
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Total Yeast & Mold Count",
+                    "confidence": 0.95,
+                }
+            ]
+        },
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == "Yeast & Mold"
+    assert row["matched_lab_test_type_id"] == yeast_mold.id
+    assert row["match_source"] == "builtin_alias"
+    assert row["warnings"] == []
+
+
+def test_builtin_alias_can_find_punctuation_equivalent_lab_type(test_db):
+    yeast_mold = LabTestType(
+        test_name="Yeast and Mold",
+        test_category="Microbiological",
+        default_unit="CFU/g",
+        test_method="AOAC 997.02",
+        is_active=True,
+    )
+    test_db.add(yeast_mold)
+    test_db.commit()
+
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "rows": [
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Total Yeast & Mold Count",
+                    "confidence": 0.95,
+                }
+            ]
+        },
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == "Yeast and Mold"
+    assert row["matched_lab_test_type_id"] == yeast_mold.id
+    assert row["match_source"] == "builtin_alias"
+    assert row["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    ("raw_name", "expected"),
+    [
+        ("Yst Mold", "Yeast & Mold"),
+        ("Plate Count", "Total Plate Count"),
+    ],
+)
+def test_safe_fuzzy_matches_record_warning(
+    test_db, sample_lab_test_types, raw_name, expected
+):
+    if expected == "Yeast & Mold":
+        test_db.add(
+            LabTestType(
+                test_name="Yeast & Mold",
+                test_category="Microbiological",
+                default_unit="CFU/g",
+                test_method="AOAC 997.02",
+                is_active=True,
+            )
+        )
+        test_db.commit()
+
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {"rows": [{"row_id": "1", "test_name_raw": raw_name, "confidence": 0.95}]},
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == expected
+    assert row["match_source"] == "fuzzy"
+    assert row["metadata"]["fuzzy_source"] == raw_name
+    assert row["metadata"]["fuzzy_target"] == expected
+    assert any("Fuzzy matched" in warning for warning in row["warnings"])
+
+
+@pytest.mark.parametrize(
+    "raw_name",
+    [
+        "Mold",
+        "Total Count",
+        "Heavy Metals",
+        "Heavy Metal",  # singular variant must also be rejected
+        "Metals Panel",  # category + grouping word
+        "Yeast",  # bare component of a combined test (Yeast & Mold)
+    ],
+)
+def test_broad_fuzzy_phrases_remain_unmatched(test_db, sample_lab_test_types, raw_name):
+    test_db.add(
+        LabTestType(
+            test_name="Yeast & Mold",
+            test_category="Microbiological",
+            default_unit="CFU/g",
+            test_method="AOAC 997.02",
+            is_active=True,
+        )
+    )
+    test_db.commit()
+
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {"rows": [{"row_id": "1", "test_name_raw": raw_name, "confidence": 0.95}]},
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == raw_name
+    assert row["matched_lab_test_type_id"] is None
+    assert row["match_source"] == "unmatched"
+
+
+def test_near_tie_fuzzy_phrase_remains_unmatched(test_db):
+    test_db.add_all(
+        [
+            LabTestType(
+                test_name="Alpha Beta",
+                test_category="Chemical",
+                default_unit="ppm",
+                is_active=True,
+            ),
+            LabTestType(
+                test_name="Alpha Beto",
+                test_category="Chemical",
+                default_unit="ppm",
+                is_active=True,
+            ),
+        ]
+    )
+    test_db.commit()
+
+    row = ResultImportService()._normalize_extraction(
+        test_db,
+        {"rows": [{"row_id": "1", "test_name_raw": "Alpha Bet", "confidence": 0.95}]},
+    )["rows"][0]
+
+    assert row["test_name_normalized"] == "Alpha Bet"
+    assert row["matched_lab_test_type_id"] is None
+    assert row["match_source"] == "unmatched"
+
+
+def test_approved_lab_scoped_alias_beats_global_and_pending_disabled_ignored(
+    test_db, sample_lab_test_types
+):
+    tpc, lead = sample_lab_test_types[0], sample_lab_test_types[2]
+    test_db.add_all(
+        [
+            LabTestAlias(
+                raw_phrase="TPC Count",
+                normalized_key=normalize_alias_key("TPC Count"),
+                lab_name="Acme",
+                lab_test_type_id=lead.id,
+                status="disabled",
+                source="manual_override",
+            ),
+            LabTestAlias(
+                raw_phrase="TPC Count",
+                normalized_key=normalize_alias_key("TPC Count"),
+                lab_name="Acme",
+                lab_test_type_id=lead.id,
+                status="pending",
+                source="manual_override",
+            ),
+            LabTestAlias(
+                raw_phrase="TPC Count",
+                normalized_key=normalize_alias_key("TPC Count"),
+                lab_name=None,
+                lab_test_type_id=lead.id,
+                status="approved",
+                source="manual_override",
+            ),
+        ]
+    )
+    scoped_alias = LabTestAlias(
+        raw_phrase="TPC Count",
+        normalized_key=normalize_alias_key("TPC Count"),
+        lab_name="Acme",
+        lab_test_type_id=tpc.id,
+        status="approved",
+        source="manual_override",
+    )
+    test_db.add(scoped_alias)
+    test_db.commit()
+
+    row = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "lab_name": "Acme",
+            "rows": [{"row_id": "1", "test_name_raw": "TPC Count", "confidence": 0.95}],
+        },
+    )["rows"][0]
+
+    assert row["test_name_normalized"] == "Total Plate Count"
+    assert row["matched_lab_test_type_id"] == tpc.id
+    assert row["match_source"] == "approved_alias"
+    assert row["alias_id"] == scoped_alias.id
+
+
+def test_alias_target_inactive_is_ignored(test_db, sample_lab_test_types):
+    lead = sample_lab_test_types[2]
+    lead.is_active = False
+    alias = LabTestAlias(
+        raw_phrase="Pb Alias",
+        normalized_key=normalize_alias_key("Pb Alias"),
+        lab_name=None,
+        lab_test_type_id=lead.id,
+        status="approved",
+        source="manual_override",
+    )
+    test_db.add(alias)
+    test_db.commit()
+
+    row = ResultImportService()._normalize_extraction(
+        test_db,
+        {"rows": [{"row_id": "1", "test_name_raw": "Pb Alias", "confidence": 0.95}]},
+    )["rows"][0]
+
+    assert row["matched_lab_test_type_id"] is None
+    assert row["match_source"] == "unmatched"
+
+
+def test_fuzzy_off_panel_preview_uses_lab_type_defaults(
+    test_db, sample_lot, sample_product_with_specs, sample_user
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    gluten.default_specification = "< 20 ppm"
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="c" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Glutn",
+                        "result_value_raw": "5",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ]
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    preview = ResultImportService().preview_rows(test_db, import_row.id, sample_lot.id)[
+        "rows"
+    ][0]
+
+    assert preview["resolved_test_name"] == "Gluten"
+    assert preview["lab_test_type_id"] == gluten.id
+    assert preview["suggested_action"] == "create_adhoc"
+    assert preview["unit"] == "ppm"
+    assert preview["specification"] == "< 20 ppm"
+    assert preview["method"] == "ELISA"
+
+
+def test_normalize_alias_key_transformations():
+    assert normalize_alias_key("Yeast & Mold (Total)!") == "yeast and mold total"
+    assert normalize_alias_key("  Heavy   Metals  ") == "heavy metals"
+    assert normalize_alias_key("E. coli") == "e coli"
+
+
+def _fuzzy_import_row(test_db, sample_user, raw_name, file_hash):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key=f"pdfs/result-imports/{file_hash}.pdf",
+        file_hash=file_hash,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": raw_name,
+                        "result_value_raw": "5",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ]
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+    return import_row
+
+
+def test_fuzzy_on_panel_preview_uses_product_spec(
+    test_db, sample_lot, sample_product_with_specs, sample_user
+):
+    # "Plate Count" fuzzy-matches the on-panel "Total Plate Count" spec, so the
+    # preview is on-panel and uses the product spec/method.
+    import_row = _fuzzy_import_row(test_db, sample_user, "Plate Count", "a" * 64)
+    preview = ResultImportService().preview_rows(test_db, import_row.id, sample_lot.id)[
+        "rows"
+    ][0]
+    assert preview["resolved_test_name"] == "Total Plate Count"
+    assert preview["suggested_action"] == "apply"
+    assert preview["specification"] == "< 10000"
+    assert preview["method"] == "AOAC 990.12"
+
+
+def test_fuzzy_target_with_approved_result_previews_skip(
+    test_db, sample_lot, sample_product_with_specs, sample_user
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    test_db.add(
+        TestResult(
+            lot_id=sample_lot.id,
+            test_type="Gluten",
+            result_value="3",
+            unit="ppm",
+            status=TestResultStatus.APPROVED,
+            lab_test_type_id=gluten.id,
+        )
+    )
+    test_db.commit()
+    import_row = _fuzzy_import_row(test_db, sample_user, "Glutn", "b" * 64)
+    preview = ResultImportService().preview_rows(test_db, import_row.id, sample_lot.id)[
+        "rows"
+    ][0]
+    assert preview["suggested_action"] == "skip"
+
+
+def test_fuzzy_target_with_existing_draft_previews_replace(
+    test_db, sample_lot, sample_product_with_specs, sample_user
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    test_db.add(
+        TestResult(
+            lot_id=sample_lot.id,
+            test_type="Gluten",
+            result_value="3",
+            unit="ppm",
+            status=TestResultStatus.DRAFT,
+            lab_test_type_id=gluten.id,
+        )
+    )
+    test_db.commit()
+    import_row = _fuzzy_import_row(test_db, sample_user, "Glutn", "d" * 64)
+    preview = ResultImportService().preview_rows(test_db, import_row.id, sample_lot.id)[
+        "rows"
+    ][0]
+    assert preview["suggested_action"] == "replace"
+
+
+@pytest.mark.parametrize(
+    ("unit", "specification", "method"),
+    [
+        ("", "< 20 ppm", "ELISA"),
+        ("ppm", "   ", "ELISA"),
+        ("ppm", "< 20 ppm", "\t"),
+    ],
+)
+def test_confirm_rejects_adhoc_missing_metadata(
+    unit,
+    specification,
+    method,
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/coa.pdf",
+        file_hash="d" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Gluten",
+                    "test_name_normalized": "Gluten",
+                    "result_value_raw": "5",
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": gluten.id,
+                }
+            ],
+            "lab_name": "Acme",
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    with pytest.raises(ValueError, match="needs Unit, Spec, and Method"):
+        ResultImportService().confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [
+                RowAction(
+                    row_id="row-1",
+                    action="create_adhoc",
+                    lab_test_type_id=gluten.id,
+                    test_name="Gluten",
+                    unit=unit,
+                    specification=specification,
+                    method=method,
+                )
+            ],
+            sample_user.id,
+        )
+
+
+def test_confirm_saves_adhoc_metadata_and_records_fuzzy_alias_suggestion(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/glutn.pdf",
+        file_hash="e" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "lab_name": "Acme",
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Glutn",
+                        "result_value_raw": "5",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ],
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    result = ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="create_adhoc",
+                lab_test_type_id=gluten.id,
+                test_name="Gluten",
+                result_value="5",
+                unit="ppm",
+                specification="< 20 ppm",
+                method="ELISA",
+            )
+        ],
+        sample_user.id,
+    )
+
+    created = (
+        test_db.query(TestResult).filter_by(id=result["created_result_ids"][0]).one()
+    )
+    assert created.unit == "ppm"
+    assert created.specification == "< 20 ppm"
+    assert created.method == "ELISA"
+    audit = (
+        test_db.query(AuditLog)
+        .filter(AuditLog.table_name == "test_results", AuditLog.record_id == created.id)
+        .one()
+    )
+    assert audit.get_new_values_dict()["unit"] == "ppm"
+    alias = test_db.query(LabTestAlias).one()
+    assert alias.raw_phrase == "Glutn"
+    assert alias.lab_name == "Acme"
+    assert alias.lab_test_type_id == gluten.id
+    assert alias.status == "pending"
+
+
+def test_confirm_records_fuzzy_override_as_manual_alias_suggestion(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    lead = test_db.query(LabTestType).filter_by(test_name="Lead").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/glutn.pdf",
+        file_hash="f" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "lab_name": "Acme",
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Glutn",
+                        "result_value_raw": "0.1",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ],
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="apply",
+                lab_test_type_id=lead.id,
+                test_name="Lead",
+                result_value="0.1",
+            )
+        ],
+        sample_user.id,
+    )
+
+    alias = test_db.query(LabTestAlias).one()
+    assert alias.raw_phrase == "Glutn"
+    assert alias.lab_test_type_id == lead.id
+    assert alias.source == "manual_override"
+
+
+def test_confirm_records_unmatched_manual_mapping_alias_suggestion(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/manual.pdf",
+        file_hash="4" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "lab_name": "Acme",
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Outside Gluten",
+                    "test_name_normalized": "Outside Gluten",
+                    "result_value_raw": "5",
+                    "unit_raw": "ppm",
+                    "confidence": 0.95,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": None,
+                    "match_source": "unmatched",
+                }
+            ],
+        },
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="create_adhoc",
+                lab_test_type_id=gluten.id,
+                test_name="Gluten",
+                result_value="5",
+                unit="ppm",
+                specification="< 20 ppm",
+                method="ELISA",
+            )
+        ],
+        sample_user.id,
+    )
+
+    alias = test_db.query(LabTestAlias).one()
+    assert alias.raw_phrase == "Outside Gluten"
+    assert alias.lab_test_type_id == gluten.id
+    assert alias.source == "manual_override"
+
+
+def test_confirm_create_adhoc_on_panel_uses_product_spec_and_ignores_client_metadata(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    # A create_adhoc that resolves onto the lot's panel must use the product
+    # spec and ignore client-sent Unit/Spec/Method (no ad-hoc requirement).
+    lead = test_db.query(LabTestType).filter_by(test_name="Lead").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/onpanel.pdf",
+        file_hash="1" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Lead",
+                        "result_value_raw": "0.1",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ]
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    result = ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="create_adhoc",
+                lab_test_type_id=lead.id,
+                test_name="Lead",
+                result_value="0.1",
+                unit="WRONG-UNIT",
+                specification="WRONG-SPEC",
+                method="WRONG-METHOD",
+            )
+        ],
+        sample_user.id,
+    )
+
+    created = (
+        test_db.query(TestResult).filter_by(id=result["created_result_ids"][0]).one()
+    )
+    assert created.specification == "< 0.5"  # product spec, not the client value
+    assert created.unit != "WRONG-UNIT"
+    assert created.method != "WRONG-METHOD"
+
+
+def test_confirm_does_not_record_suggestion_for_builtin_match(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    yeast_mold = LabTestType(
+        test_name="Yeast & Mold",
+        test_category="Microbiological",
+        default_unit="CFU/g",
+        test_method="AOAC 997.02",
+        is_active=True,
+    )
+    test_db.add(yeast_mold)
+    test_db.commit()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/builtin.pdf",
+        file_hash="2" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Total Yeast & Mold Count",
+                        "result_value_raw": "10",
+                        "unit_raw": "CFU/g",
+                        "confidence": 0.95,
+                    }
+                ]
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="create_adhoc",
+                lab_test_type_id=yeast_mold.id,
+                test_name="Yeast & Mold",
+                result_value="10",
+                unit="CFU/g",
+                specification="< 100 CFU/g",
+                method="AOAC 997.02",
+            )
+        ],
+        sample_user.id,
+    )
+
+    assert test_db.query(LabTestAlias).count() == 0
+
+
+def test_confirm_does_not_record_suggestion_for_exact_match(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    lead = test_db.query(LabTestType).filter_by(test_name="Lead").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/exact.pdf",
+        file_hash="5" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Lead",
+                        "result_value_raw": "0.1",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ]
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="apply",
+                lab_test_type_id=lead.id,
+                test_name="Lead",
+                result_value="0.1",
+            )
+        ],
+        sample_user.id,
+    )
+
+    assert test_db.query(LabTestAlias).count() == 0
+
+
+def test_confirm_does_not_record_suggestion_for_approved_alias_match(
+    test_db, sample_lot, sample_user, sample_product_with_specs
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    test_db.add(
+        LabTestAlias(
+            raw_phrase="Acme Gluten",
+            normalized_key=normalize_alias_key("Acme Gluten"),
+            lab_name="Acme",
+            lab_test_type_id=gluten.id,
+            status="approved",
+            source="manual_override",
+        )
+    )
+    test_db.commit()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/approved-alias.pdf",
+        file_hash="6" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "lab_name": "Acme",
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Acme Gluten",
+                        "result_value_raw": "5",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ],
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    ResultImportService().confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [
+            RowAction(
+                row_id="row-1",
+                action="create_adhoc",
+                lab_test_type_id=gluten.id,
+                test_name="Gluten",
+                result_value="5",
+                unit="ppm",
+                specification="< 20 ppm",
+                method="ELISA",
+            )
+        ],
+        sample_user.id,
+    )
+
+    aliases = test_db.query(LabTestAlias).all()
+    assert len(aliases) == 1
+    assert aliases[0].status == "approved"
+
+
+def test_confirm_rolls_back_results_when_alias_suggestion_fails(
+    test_db, sample_lot, sample_user, sample_product_with_specs, monkeypatch
+):
+    gluten = test_db.query(LabTestType).filter_by(test_name="Gluten").one()
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/rollback.pdf",
+        file_hash="3" * 64,
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data=ResultImportService()._normalize_extraction(
+            test_db,
+            {
+                "lab_name": "Acme",
+                "rows": [
+                    {
+                        "row_id": "row-1",
+                        "test_name_raw": "Glutn",
+                        "result_value_raw": "5",
+                        "unit_raw": "ppm",
+                        "confidence": 0.95,
+                    }
+                ],
+            },
+        ),
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("alias suggestion write failed")
+
+    monkeypatch.setattr(
+        ResultImportService, "_record_alias_suggestion_for_action", _boom
+    )
+
+    with pytest.raises(RuntimeError):
+        ResultImportService().confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [
+                RowAction(
+                    row_id="row-1",
+                    action="create_adhoc",
+                    lab_test_type_id=gluten.id,
+                    test_name="Gluten",
+                    result_value="5",
+                    unit="ppm",
+                    specification="< 20 ppm",
+                    method="ELISA",
+                )
+            ],
+            sample_user.id,
+        )
+
+    # Nothing was committed: no draft result and no alias suggestion persisted.
+    test_db.rollback()
+    assert test_db.query(TestResult).filter_by(lot_id=sample_lot.id).count() == 0
+    assert test_db.query(LabTestAlias).count() == 0
+
+
+def test_metal_per_serving_column_is_primary_result(test_db):
+    # Any metals COA (lab-agnostic): when both per-gram and per-serving columns
+    # are printed, the per-serving value is stored as the primary result and the
+    # mass-basis value is preserved in metadata.
+    normalized = ResultImportService()._normalize_extraction(
+        test_db,
+        {
+            "rows": [
+                {
+                    "row_id": "1",
+                    "test_name_raw": "Pb (Lead)",
+                    "result_value_raw": "0.023",
+                    "unit_raw": "ug/g",
+                    "per_serving": "0.842",
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+
+    row = normalized["rows"][0]
+    assert row["test_name_normalized"] == "Lead"
+    assert row["result_value_raw"] == "0.842"
+    assert row["metadata"]["serving_value"] == "0.842"
+    assert row["metadata"]["mass_basis_value"] == "0.023"
+    assert row["metadata"]["conversion_note"] == "Reported on per-serving basis"
+
+
+def test_metal_per_serving_unit_value_is_primary_result(test_db):
+    # When the printed primary value itself is per-serving (no separate column),
+    # keep it as-is instead of discarding it.
     normalized = ResultImportService()._normalize_extraction(
         test_db,
         {
@@ -837,9 +1824,46 @@ def test_harken_per_serving_metal_is_not_primary_result(test_db):
 
     row = normalized["rows"][0]
     assert row["test_name_normalized"] == "Lead"
-    assert row["target_unit"] == "ug/g"
-    assert row["result_value_raw"] is None
-    assert row["metadata"]["per_serving"] == "0.5"
+    assert row["result_value_raw"] == "0.5"
+    assert row["metadata"]["serving_value"] == "0.5"
+
+
+def test_is_metal_detects_non_named_heavy_metals_by_category(test_db):
+    # Guards against the singular/plural property-name regression: a heavy-metal
+    # test not in the hard-coded METALS map is still detected via test_category.
+    service = ResultImportService()
+    chromium = LabTestType(test_name="Chromium", test_category="Heavy Metals")
+    assert chromium.is_heavy_metal is True
+    assert service._is_metal("Chromium", chromium) is True
+    micro = LabTestType(test_name="Total Plate Count", test_category="Microbiological")
+    assert service._is_metal("Total Plate Count", micro) is False
+    # Named metals are detected even without a resolved lab type.
+    assert service._is_metal("Lead", None) is True
+
+
+def test_resolve_test_fields_uses_per_serving_unit_for_promoted_metal(
+    test_db, sample_lot
+):
+    # A promoted per-serving metal result carries the per-serving unit, not the
+    # spec's mass-basis (ppm) unit, so the COA labels it correctly.
+    service = ResultImportService()
+    row = {"metadata": {"serving_value": "0.842"}, "test_name_normalized": "Lead"}
+    _, unit, _, _, _ = service._resolve_test_fields(
+        test_db, sample_lot, row, None, "Lead"
+    )
+    assert unit == "µg/serving"
+
+
+def test_existing_result_matches_on_lab_test_type_despite_name_drift(test_db):
+    # A shared lab_test_type_id accepts the replacement even when the stored
+    # test_type text differs (legacy naming).
+    service = ResultImportService()
+    legacy = TestResult(test_type="Pb", lab_test_type_id=43)
+    assert service._existing_result_matches_target(legacy, "Lead", 43) is True
+    assert service._existing_result_matches_target(legacy, "Lead", 99) is False
+    name_only = TestResult(test_type="Lead", lab_test_type_id=None)
+    assert service._existing_result_matches_target(name_only, "Lead", 43) is True
+    assert service._existing_result_matches_target(name_only, "Arsenic", 43) is False
 
 
 def test_harken_ppb_metal_converts_to_ug_per_g(test_db):

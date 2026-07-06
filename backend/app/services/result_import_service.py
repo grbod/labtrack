@@ -31,6 +31,7 @@ from app.models import (
 from app.models.lot import LotProduct
 from app.models.product_test_spec import ProductTestSpecification
 from app.services.base import BaseService
+from app.services.lab_test_alias_service import LabTestAliasService, normalize_alias_key
 from app.services.lot_service import LotService
 from app.services.result_extraction_provider import (
     ExtractionConfigurationError,
@@ -51,6 +52,7 @@ ACTIVE_MATCH_STATUSES = [
 TEST_NAME_NORMALIZATION = {
     "total yeast & mold count": "Yeast & Mold",
     "total yeast and mold count": "Yeast & Mold",
+    "total yeast mold count": "Yeast & Mold",
     "yeast/mold": "Yeast & Mold",
     "yeast and mold": "Yeast & Mold",
     "e. coli": "Escherichia coli",
@@ -78,6 +80,9 @@ METALS = {
     "mercury": "Mercury",
 }
 
+# Unit label for metal results reported on the per-serving basis.
+PER_SERVING_UNIT = "µg/serving"
+
 
 class ResultImportService(BaseService[ResultImport]):
     """Business logic for uploading, parsing, applying, and reverting imports."""
@@ -88,6 +93,7 @@ class ResultImportService(BaseService[ResultImport]):
 
     def __init__(self) -> None:
         super().__init__(ResultImport)
+        self.alias_service = LabTestAliasService()
 
     def create_uploads(
         self,
@@ -489,7 +495,38 @@ class ResultImportService(BaseService[ResultImport]):
                 raise ValueError(
                     f"Row {action.row_id} needs a test name for ad-hoc creation"
                 )
-            result_value = row.get("result_value_raw")
+            is_on_panel = self._find_lot_spec(lot, test_name) is not None
+            # create_adhoc is the OFF-panel path. If a create_adhoc resolves onto
+            # the lot's panel, use the product spec and ignore client-sent
+            # Unit/Spec/Method (i.e. behave like a normal apply). Only a genuine
+            # off-panel ad-hoc takes operator-entered Unit/Spec/Method, which are
+            # all required.
+            treat_as_adhoc = action.action == "create_adhoc" and not is_on_panel
+            if treat_as_adhoc:
+                if getattr(action, "unit", None) is not None:
+                    unit = str(action.unit).strip()
+                if getattr(action, "specification", None) is not None:
+                    specification = str(action.specification).strip()
+                if getattr(action, "method", None) is not None:
+                    method = str(action.method).strip()
+                missing = [
+                    label
+                    for label, value in [
+                        ("Unit", unit),
+                        ("Spec", specification),
+                        ("Method", method),
+                    ]
+                    if value is None or str(value).strip() == ""
+                ]
+                if missing:
+                    raise ValueError(
+                        f"{test_name} needs Unit, Spec, and Method before it can be added as an ad-hoc draft"
+                    )
+            result_value = (
+                action.result_value
+                if action.result_value is not None
+                else row.get("result_value_raw")
+            )
             if result_value is None or str(result_value).strip() == "":
                 raise ValueError(f"Row {action.row_id} has no result value")
 
@@ -552,6 +589,9 @@ class ResultImportService(BaseService[ResultImport]):
                         "action": "replace",
                     }
                 )
+                self._record_alias_suggestion_for_action(
+                    db, item, lot, row, action, lab_test_type_id, user_id
+                )
                 retest_service.check_and_complete_retest(
                     db, existing.id, user_id=user_id
                 )
@@ -602,6 +642,9 @@ class ResultImportService(BaseService[ResultImport]):
                         "action": action.action,
                         "result_snapshot": result_snapshot,
                     }
+                )
+                self._record_alias_suggestion_for_action(
+                    db, item, lot, row, action, lab_test_type_id, user_id
                 )
 
         if not created_ids and not updated:
@@ -838,15 +881,24 @@ class ResultImportService(BaseService[ResultImport]):
             existing = self._find_existing_result(db, lot.id, test_name, None)
             warnings = list(row.get("warnings") or [])
             requires_mapping = not lab_test_type_id
+            is_on_panel = self._find_lot_spec(lot, test_name) is not None
             if requires_mapping:
                 warnings.append("No active lab test type matched")
 
             if existing and existing.status == TestResultStatus.APPROVED:
                 suggested_action = "skip"
+            elif (
+                existing
+                and existing.result_value
+                and row.get("match_source") == "fuzzy"
+            ):
+                suggested_action = "replace"
             elif existing and existing.result_value:
                 suggested_action = "skip"
             elif requires_mapping:
                 suggested_action = "skip"
+            elif not is_on_panel:
+                suggested_action = "create_adhoc"
             else:
                 suggested_action = "apply"
 
@@ -934,13 +986,24 @@ class ResultImportService(BaseService[ResultImport]):
                 "sublot": [s.sublot_number for s in lot.sublots],
                 "batch": [lp.batch_number or "" for lp in lot.lot_products],
             }
+            reason_labels = {
+                "reference": "Reference {value} matched COA reference",
+                "lot": "Lot {value} matched COA lot",
+                "sublot": "Sublot {value} matched COA sublot",
+                "batch": "Batch {value} matched COA batch number",
+            }
             for label, value_list in values.items():
-                normalized_values = {
-                    self._normalize_token(value) for value in value_list if value
-                }
-                if normalized_values & tokens:
+                matched_value = next(
+                    (
+                        value
+                        for value in value_list
+                        if value and self._normalize_token(value) in tokens
+                    ),
+                    None,
+                )
+                if matched_value:
                     score += 0.5 if label in ["reference", "lot"] else 0.25
-                    reasons.append(f"{label} matched")
+                    reasons.append(reason_labels[label].format(value=matched_value))
             if score:
                 candidates.append(
                     self._lot_candidate_payload(lot, min(score, 1.0), reasons)
@@ -985,10 +1048,18 @@ class ResultImportService(BaseService[ResultImport]):
             lab_type = spec.lab_test_type
             test_name = lab_type.test_name
         unit = spec.test_unit if spec else (lab_type.default_unit if lab_type else None)
+        # A metal result promoted to the per-serving basis carries a per-serving
+        # unit, not the spec's mass-basis (ppm/ug-g) unit.
+        if (row.get("metadata") or {}).get("serving_value") is not None:
+            unit = PER_SERVING_UNIT
         specification = (
             spec.specification
             if spec
-            else (lab_type.default_specification if lab_type else None)
+            else (
+                (lab_type.default_specification or row.get("limit_raw"))
+                if lab_type
+                else row.get("limit_raw")
+            )
         )
         method = (
             spec.lab_test_type.test_method
@@ -1047,27 +1118,76 @@ class ResultImportService(BaseService[ResultImport]):
     def _existing_result_matches_target(
         self, result: TestResult, test_name: str, lab_test_type_id: Optional[int]
     ) -> bool:
-        if result.test_type.strip().casefold() != test_name.strip().casefold():
-            return False
-        if (
-            result.lab_test_type_id
-            and lab_test_type_id
-            and result.lab_test_type_id != lab_test_type_id
-        ):
-            return False
-        return True
+        # A shared, non-null lab_test_type_id is authoritative: accept the
+        # replacement even when the stored test_type text differs (e.g. legacy
+        # naming). Otherwise fall back to matching the test name.
+        if result.lab_test_type_id and lab_test_type_id:
+            return result.lab_test_type_id == lab_test_type_id
+        return result.test_type.strip().casefold() == test_name.strip().casefold()
+
+    def _record_alias_suggestion_for_action(
+        self,
+        db: Session,
+        item: ResultImport,
+        lot: Lot,
+        row: dict[str, Any],
+        action: Any,
+        final_lab_test_type_id: Optional[int],
+        user_id: int,
+    ) -> None:
+        if not final_lab_test_type_id:
+            return
+        match_source = row.get("match_source")
+        if match_source in {"exact", "builtin_alias", "approved_alias"}:
+            return
+        original_fuzzy_id = row.get("matched_lab_test_type_id")
+        should_suggest = match_source == "fuzzy" or (
+            match_source == "unmatched" and getattr(action, "lab_test_type_id", None)
+        )
+        if match_source == "fuzzy" and original_fuzzy_id != final_lab_test_type_id:
+            should_suggest = True
+        if not should_suggest:
+            return
+        raw_phrase = (row.get("metadata") or {}).get("fuzzy_source") or row.get(
+            "test_name_raw"
+        )
+        if not raw_phrase:
+            return
+        source = (
+            "manual_override"
+            if match_source == "unmatched"
+            or (match_source == "fuzzy" and original_fuzzy_id != final_lab_test_type_id)
+            else "fuzzy"
+        )
+        self.alias_service.record_alias_suggestion(
+            db,
+            raw_phrase=raw_phrase,
+            lab_name=(item.extracted_data or {}).get("lab_name"),
+            lab_test_type_id=final_lab_test_type_id,
+            source=source,
+            import_context={
+                "result_import_id": item.id,
+                "lot_id": lot.id,
+                "filename": item.original_filename,
+            },
+            user_id=user_id,
+        )
 
     def _normalize_extraction(self, db: Session, raw: dict[str, Any]) -> dict[str, Any]:
         rows = []
         warnings = list(raw.get("warnings") or [])
-        lab_types = {
-            lt.test_name.lower(): lt
-            for lt in db.query(LabTestType).filter(LabTestType.is_active == True).all()
-        }
+        active_lab_types = (
+            db.query(LabTestType).filter(LabTestType.is_active == True).all()
+        )
+        lab_types = {lt.test_name.casefold(): lt for lt in active_lab_types}
+        lab_name = raw.get("lab_name")
         for index, row in enumerate(raw.get("rows") or [], start=1):
             raw_name = row.get("test_name_raw") or ""
-            normalized_name = self._normalize_test_name(raw_name)
-            lab_type = lab_types.get(normalized_name.lower())
+            normalized_name, lab_type, match_source, alias_id = (
+                self._resolve_lab_type_match(
+                    db, raw_name, lab_name, lab_types, active_lab_types
+                )
+            )
             unit_raw = row.get("unit_raw")
             target_unit = lab_type.default_unit if lab_type else unit_raw
             metadata = {
@@ -1080,27 +1200,45 @@ class ResultImportService(BaseService[ResultImport]):
             row_warnings = []
             if confidence < 0.7:
                 row_warnings.append("Low confidence extraction")
-            if self._is_harken_metal(raw.get("lab_name"), normalized_name):
-                target_unit = "ug/g"
-                if self._looks_per_serving(unit_raw):
-                    metadata["per_serving"] = row.get("per_serving") or result_value
-                    result_value = None
-                    row_warnings.append(
-                        "Harken per-serving value was not saved as the primary result"
+            if match_source == "fuzzy" and lab_type:
+                metadata["fuzzy_source"] = raw_name
+                metadata["fuzzy_target"] = lab_type.test_name
+                warning = (
+                    f'Fuzzy matched "{raw_name}" to "{lab_type.test_name}". '
+                    "Applying will suggest this alias for QC review."
+                )
+                metadata["fuzzy_warning"] = warning
+                row_warnings.append(warning)
+            if self._is_metal(normalized_name, lab_type):
+                serving_value = row.get("per_serving")
+                primary_is_serving = self._looks_per_serving(unit_raw)
+                if not serving_value and primary_is_serving:
+                    # The extracted primary value is itself a per-serving figure.
+                    serving_value = result_value
+                if serving_value:
+                    # Metals are reported and judged on the per-serving basis.
+                    # Keep the printed value as-is (including <LOD/<LOQ/less-than).
+                    if result_value and not primary_is_serving:
+                        metadata["mass_basis_value"] = (
+                            self._normalize_harken_metal_value(result_value, unit_raw)
+                        )
+                        metadata["mass_basis_unit"] = "ug/g"
+                    metadata["serving_value"] = serving_value
+                    metadata["serving_unit"] = (
+                        unit_raw if primary_is_serving else "per serving"
                     )
-                elif row.get("per_serving"):
-                    metadata["per_serving"] = row.get("per_serving")
-                result_value = self._normalize_harken_metal_value(
-                    result_value, unit_raw
-                )
-            if (
-                row.get("per_serving")
-                or self._looks_per_serving(unit_raw)
-                or self._looks_per_serving(row.get("limit_raw"))
-            ):
-                row_warnings.append(
-                    "Result appears to be per serving; verify COA basis"
-                )
+                    metadata["conversion_note"] = "Reported on per-serving basis"
+                    # The per-serving value is now the primary result; drop the
+                    # duplicate per_serving note (provenance lives in serving_value
+                    # / mass_basis_value).
+                    metadata.pop("per_serving", None)
+                    result_value = serving_value
+                else:
+                    # No per-serving column: keep the mass basis, normalized to ppm.
+                    target_unit = "ug/g"
+                    result_value = self._normalize_harken_metal_value(
+                        result_value, unit_raw
+                    )
             rows.append(
                 {
                     "row_id": row.get("row_id") or f"row-{index}",
@@ -1124,11 +1262,13 @@ class ResultImportService(BaseService[ResultImport]):
                     "warnings": row_warnings,
                     "metadata": metadata,
                     "matched_lab_test_type_id": lab_type.id if lab_type else None,
+                    "match_source": match_source,
+                    "alias_id": alias_id,
                 }
             )
         return {
             "identifiers": raw.get("identifiers") or [],
-            "lab_name": raw.get("lab_name"),
+            "lab_name": lab_name,
             "date_tested": raw.get("date_tested")
             or raw.get("report_date")
             or raw.get("received_date"),
@@ -1145,6 +1285,60 @@ class ResultImportService(BaseService[ResultImport]):
         if key in METALS:
             return METALS[key]
         return value.strip()
+
+    def _resolve_lab_type_match(
+        self,
+        db: Session,
+        raw_name: str,
+        lab_name: Optional[str],
+        lab_types_by_name: dict[str, LabTestType],
+        active_lab_types: list[LabTestType],
+    ) -> tuple[str, Optional[LabTestType], str, Optional[int]]:
+        raw_clean = (raw_name or "").strip()
+        exact = lab_types_by_name.get(raw_clean.casefold())
+        if exact:
+            return exact.test_name, exact, "exact", None
+
+        built_in_name = self._normalize_test_name(raw_clean)
+        if built_in_name != raw_clean:
+            built_in = lab_types_by_name.get(built_in_name.casefold())
+            if not built_in:
+                built_in = self._find_lab_type_by_alias_key(
+                    built_in_name, active_lab_types
+                )
+            if built_in:
+                return built_in.test_name, built_in, "builtin_alias", None
+            return built_in_name, None, "builtin_alias", None
+
+        alias_match = self.alias_service.resolve_approved_alias(db, raw_clean, lab_name)
+        if alias_match:
+            return (
+                alias_match.lab_test_type.test_name,
+                alias_match.lab_test_type,
+                "approved_alias",
+                alias_match.alias_id,
+            )
+
+        fuzzy = self.alias_service.find_fuzzy_lab_test_type(raw_clean, active_lab_types)
+        if fuzzy:
+            return fuzzy.lab_test_type.test_name, fuzzy.lab_test_type, "fuzzy", None
+
+        return raw_clean, None, "unmatched", None
+
+    def _find_lab_type_by_alias_key(
+        self, test_name: str, active_lab_types: list[LabTestType]
+    ) -> Optional[LabTestType]:
+        key = normalize_alias_key(test_name)
+        if not key:
+            return None
+        return next(
+            (
+                lab_type
+                for lab_type in active_lab_types
+                if normalize_alias_key(lab_type.test_name) == key
+            ),
+            None,
+        )
 
     def _extraction_warnings(self, raw: dict[str, Any]) -> list[str]:
         row_sample_refs = set()
@@ -1192,13 +1386,11 @@ class ResultImportService(BaseService[ResultImport]):
     def _looks_per_serving(self, value: Any) -> bool:
         return "serving" in str(value or "").lower()
 
-    def _is_harken_metal(self, lab_name: Any, test_name: str) -> bool:
-        return "harken" in str(lab_name or "").lower() and test_name in {
-            "Lead",
-            "Arsenic",
-            "Cadmium",
-            "Mercury",
-        }
+    def _is_metal(self, test_name: str, lab_type: Any) -> bool:
+        """Lab-agnostic heavy-metal detection (any lab, not just Harken)."""
+        if test_name in set(METALS.values()):
+            return True
+        return bool(lab_type is not None and getattr(lab_type, "is_heavy_metal", False))
 
     def _normalize_harken_metal_value(self, value: Any, unit: Any) -> Any:
         if value is None:
@@ -1340,6 +1532,9 @@ class ResultImportService(BaseService[ResultImport]):
         for key in ["lod", "loq", "per_serving"]:
             if metadata.get(key):
                 parts.append(f"{key.upper()}: {metadata[key]}")
+        if metadata.get("mass_basis_value"):
+            unit = metadata.get("mass_basis_unit") or "ug/g"
+            parts.append(f"Mass basis: {metadata['mass_basis_value']} {unit}")
         return "; ".join(parts) or None
 
     def _parse_date(self, value: Any) -> Optional[date]:

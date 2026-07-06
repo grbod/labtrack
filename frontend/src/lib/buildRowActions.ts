@@ -1,5 +1,11 @@
 import type { ResultImportRowPreview, ResultRowAction } from "@/types"
 
+export interface ExistingResultForAction {
+  id: number
+  result_value?: string | null
+  status: string
+}
+
 /**
  * Per-row UI state for the Lab Test Import spec table. One entry per parsed
  * result row. The action posted to the backend is INFERRED from this state
@@ -19,6 +25,9 @@ export interface SpecReviewRowState {
   labTestTypeId: number | null
   /** Test name to send for ad-hoc (off-panel) creation. */
   testName: string | null
+  unit?: string | null
+  specification?: string | null
+  method?: string | null
 }
 
 /**
@@ -36,20 +45,24 @@ export interface SpecReviewRowState {
  */
 export function buildRowActions(
   rows: SpecReviewRowState[],
-  previews: Map<string, Pick<ResultImportRowPreview, "existing_result">>
+  previews: Map<string, Pick<ResultImportRowPreview, "existing_result">>,
+  existingByLabType: Map<number, ExistingResultForAction> = new Map()
 ): ResultRowAction[] {
   return rows.map((row) => {
+    const value = (row.resultValue || "").trim()
     const base = {
       row_id: row.row_id,
       lab_test_type_id: row.labTestTypeId,
       test_name: row.testName,
+      result_value: value || null,
     }
-    const value = (row.resultValue || "").trim()
     if (!value || !row.labTestTypeId) {
       return { ...base, action: "skip" as const }
     }
 
-    const existing = previews.get(row.row_id)?.existing_result
+    const existing =
+      (row.labTestTypeId ? existingByLabType.get(row.labTestTypeId) : null) ??
+      previews.get(row.row_id)?.existing_result
     if (existing) {
       if (existing.status === "approved") {
         // Approved results are immutable on the backend; never touch them.
@@ -62,9 +75,25 @@ export function buildRowActions(
       return { ...base, action: "apply" as const, test_result_id: existing.id }
     }
 
+    if (!row.onPanel) {
+      const unit = (row.unit || "").trim()
+      const specification = (row.specification || "").trim()
+      const method = (row.method || "").trim()
+      if (!unit || !specification || !method) {
+        return { ...base, action: "skip" as const }
+      }
+      return {
+        ...base,
+        action: "create_adhoc" as const,
+        unit,
+        specification,
+        method,
+      }
+    }
+
     return {
       ...base,
-      action: row.onPanel ? ("apply" as const) : ("create_adhoc" as const),
+      action: "apply" as const,
     }
   })
 }

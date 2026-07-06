@@ -5,6 +5,7 @@ import {
   ChevronDown,
   FileText,
   FileUp,
+  Info,
   Loader2,
   RotateCcw,
   Search,
@@ -31,7 +32,12 @@ import { useLotWithSpecs } from "@/hooks/useLots"
 import { useTestResults } from "@/hooks/useTestResults"
 import { PassFailBadge } from "@/components/domain/SampleModal/PassFailBadge"
 import { calculatePassFail } from "@/lib/spec-validation"
-import { buildRowActions, type SpecReviewRowState } from "@/lib/buildRowActions"
+import {
+  buildRowActions,
+  type ExistingResultForAction,
+  type SpecReviewRowState,
+} from "@/lib/buildRowActions"
+import { RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE } from "@/lib/resultsImporterConfig"
 import type {
   ExtractedResultRow,
   LabTestType,
@@ -485,12 +491,14 @@ function ReviewPane({
 }) {
   const [selectedLotId, setSelectedLotId] = useState<number | null>(null)
   const [manualSearch, setManualSearch] = useState("")
-  // Per-row Result-cell state: a row is "cleared" (-> skipped) when its id maps
-  // to true. We do NOT carry an edited value because the backend persists the
-  // original parsed `result_value_raw`; allowing free edits would silently drop
-  // corrections on a regulated COA. Clearing is the only payload-affecting edit.
+  // Per-row Result-cell state. Corrections are posted in row_actions.result_value;
+  // clearing a row leaves resultValue blank so the row is skipped.
+  const [resultOverrides, setResultOverrides] = useState<Record<string, string>>({})
   const [clearedRows, setClearedRows] = useState<Record<string, boolean>>({})
   const [labTypeOverrides, setLabTypeOverrides] = useState<Record<string, number | null>>({})
+  const [adhocMetadata, setAdhocMetadata] = useState<
+    Record<string, { unit?: string; specification?: string; method?: string }>
+  >({})
 
   const candidatesQuery = useLinkCandidates(manualSearch)
   const confirmMutation = useConfirmResultImport(item?.id || 0)
@@ -501,13 +509,15 @@ function ReviewPane({
   const labTypesQuery = useLabTestTypes({ page_size: 500, is_active: true })
   const lotSpecsQuery = useLotWithSpecs(selectedLotId || 0)
   const lotResultsQuery = useTestResults(
-    selectedLotId ? { lot_id: selectedLotId, page_size: 500 } : {}
+    selectedLotId
+      ? { lot_id: selectedLotId, page_size: RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE }
+      : {}
   )
 
   const rows = useMemo(() => item?.extracted_data?.rows || [], [item?.extracted_data?.rows])
   const candidates = item?.match_candidates || []
   const manualCandidates = candidatesQuery.data || []
-  const labTypes = labTypesQuery.data?.items || []
+  const labTypes = useMemo(() => labTypesQuery.data?.items || [], [labTypesQuery.data?.items])
 
   const previews = useMemo(
     () => new Map((previewQuery.data?.rows || []).map((row) => [row.row_id, row])),
@@ -523,21 +533,39 @@ function ReviewPane({
     () => new Set(mergedPanel.map((spec) => spec.lab_test_type_id)),
     [mergedPanel]
   )
-  const matchScore = candidates.find((c) => c.lot_id === selectedLotId)?.score ?? null
+  const existingByLabType = useMemo(() => {
+    const mapped = new Map<number, ExistingResultForAction>()
+    for (const result of lotResultsQuery.data?.items || []) {
+      if (result.lab_test_type_id == null || mapped.has(result.lab_test_type_id)) continue
+      mapped.set(result.lab_test_type_id, {
+        id: result.id,
+        result_value: result.result_value,
+        status: result.status,
+      })
+    }
+    return mapped
+  }, [lotResultsQuery.data?.items])
+  const selectedCandidate = candidates.find((c) => c.lot_id === selectedLotId) ?? null
+  const matchScore = selectedCandidate?.score ?? null
+  const matchReasons = selectedCandidate?.reasons ?? []
 
   // Reset per-import state when the import changes.
   useEffect(() => {
     const first = item?.match_candidates?.find((candidate) => candidate.score >= 0.5)
     setSelectedLotId(first?.lot_id || item?.selected_lot_id || null)
+    setResultOverrides({})
     setClearedRows({})
     setLabTypeOverrides({})
+    setAdhocMetadata({})
     setManualSearch("")
   }, [item?.id, item?.match_candidates, item?.selected_lot_id])
 
   const switchLot = useCallback((id: number) => {
     setSelectedLotId(id)
+    setResultOverrides({})
     setClearedRows({})
     setLabTypeOverrides({})
+    setAdhocMetadata({})
   }, [])
 
   // Build the per-row view models for the table + summary.
@@ -545,32 +573,93 @@ function ReviewPane({
     () =>
       rows.map((row) => {
         const preview = previews.get(row.row_id)
-        const onPanel = preview?.lab_test_type_id != null && panelIds.has(preview.lab_test_type_id)
-        const resolvedLabTypeId = onPanel
-          ? preview?.lab_test_type_id ?? null
-          : labTypeOverrides[row.row_id] ?? null
+        const isFuzzy = row.match_source === "fuzzy"
+        const originalOnPanel =
+          preview?.lab_test_type_id != null && panelIds.has(preview.lab_test_type_id)
+        // Off-panel rows still inherit the backend's name-match so recognized
+        // tests (e.g. Lead/Arsenic) auto-include as ad-hoc drafts. A manual
+        // override (incl. clearing to null) always wins.
+        const overrideId = labTypeOverrides[row.row_id]
+        const resolvedLabTypeId =
+          overrideId !== undefined
+            ? overrideId
+            : preview?.lab_test_type_id ?? null
+        const onPanel = resolvedLabTypeId != null && panelIds.has(resolvedLabTypeId)
+        const mappedExisting =
+          resolvedLabTypeId != null ? existingByLabType.get(resolvedLabTypeId) : null
+        const selectedLabType =
+          resolvedLabTypeId != null ? labTypes.find((type) => type.id === resolvedLabTypeId) : null
         const parsedValue = row.result_value_raw ?? ""
         const cleared = !!clearedRows[row.row_id]
-        const resultValue = cleared ? "" : parsedValue
-        const specification = preview?.specification ?? null
-        const unit = preview?.unit || row.target_unit || row.unit_raw || null
+        const resultValue = cleared ? "" : resultOverrides[row.row_id] ?? parsedValue
+        const metadataOverride = adhocMetadata[row.row_id] || {}
+        // When the row still points at the backend-resolved lab type, the
+        // preview's resolved Unit/Spec/Method are authoritative — they already
+        // encode the per-serving unit for promoted metals and the lab-type
+        // defaults. Only when the operator overrides to a DIFFERENT off-panel
+        // type is that chosen type's catalog default the better prefill.
+        const usePreview = resolvedLabTypeId === (preview?.lab_test_type_id ?? null)
+        const baseSpecification = onPanel
+          ? preview?.specification ?? null
+          : usePreview
+            ? preview?.specification || selectedLabType?.default_specification || row.limit_raw || null
+            : selectedLabType?.default_specification || row.limit_raw || null
+        const baseUnit = onPanel
+          ? preview?.unit || row.target_unit || row.unit_raw || null
+          : usePreview
+            ? preview?.unit || selectedLabType?.default_unit || row.target_unit || row.unit_raw || null
+            : selectedLabType?.default_unit || row.target_unit || row.unit_raw || null
+        const baseMethod = onPanel
+          ? preview?.method ?? null
+          : usePreview
+            ? preview?.method || selectedLabType?.test_method || null
+            : selectedLabType?.test_method || null
+        const specification = !onPanel && resolvedLabTypeId
+          ? metadataOverride.specification ?? baseSpecification
+          : baseSpecification
+        const unit = !onPanel && resolvedLabTypeId
+          ? metadataOverride.unit ?? baseUnit
+          : baseUnit
+        const method = !onPanel && resolvedLabTypeId
+          ? metadataOverride.method ?? baseMethod
+          : baseMethod
         return {
           row,
           preview: preview ?? null,
+          actionExistingResult:
+            mappedExisting ?? (overrideId === undefined ? preview?.existing_result : null) ?? null,
           onPanel,
+          originalOnPanel,
+          isFuzzy,
+          matchSource: row.match_source ?? null,
           resolvedLabTypeId,
           parsedValue,
           resultValue,
           cleared,
           specification,
           unit,
-          testName: preview?.resolved_test_name || row.test_name_normalized || row.test_name_raw,
-          method: preview?.method ?? null,
+          testName:
+            selectedLabType?.test_name ||
+            preview?.resolved_test_name ||
+            row.test_name_normalized ||
+            row.test_name_raw,
+          method,
+          isAdhoc: !onPanel && resolvedLabTypeId != null,
           notes: deriveNotes(row),
           passFail: calculatePassFail(resultValue, specification, unit),
         }
       }),
-    [rows, previews, panelIds, labTypeOverrides, clearedRows]
+    [
+      rows,
+      previews,
+      panelIds,
+      labTypeOverrides,
+      existingByLabType,
+      resultOverrides,
+      clearedRows,
+      labTypes,
+      adhocMetadata,
+    ]
   )
 
   const rowActions = useMemo(() => {
@@ -580,13 +669,30 @@ function ReviewPane({
       onPanel: vm.onPanel,
       labTestTypeId: vm.resolvedLabTypeId,
       testName: vm.testName,
+      unit: vm.unit,
+      specification: vm.specification,
+      method: vm.method,
     }))
-    return buildRowActions(states, previews)
-  }, [reviewRows, previews])
+    return buildRowActions(states, previews, existingByLabType)
+  }, [reviewRows, previews, existingByLabType])
 
   const summary = useMemo(
     () => computeSummary(reviewRows, mergedPanel, lotResultsQuery.data?.items || []),
     [reviewRows, mergedPanel, lotResultsQuery.data?.items]
+  )
+  const missingAdhocMetadata = reviewRows.find(
+    (vm) =>
+      vm.isAdhoc &&
+      vm.resultValue.trim() &&
+      (!vm.unit?.trim() || !vm.specification?.trim() || !vm.method?.trim())
+  )
+  // A fuzzy row that resolves to an already-approved result can't be applied
+  // (approved results are immutable) — the operator must remap or skip it.
+  const fuzzyApprovedRow = reviewRows.find(
+    (vm) =>
+      vm.isFuzzy &&
+      !vm.cleared &&
+      vm.actionExistingResult?.status === "approved"
   )
 
   if (!item) {
@@ -599,9 +705,35 @@ function ReviewPane({
     item.status === "needs_confirmation" &&
     !!selectedLotId &&
     previewQuery.isSuccess &&
-    previewQuery.data?.lot_id === selectedLotId
+    previewQuery.data?.lot_id === selectedLotId &&
+    // The off-panel action-builder relies on existingByLabType (from the lot's
+    // results) to choose replace vs create; wait for it so we never post an
+    // action that the backend rejects as "already has a draft value".
+    lotResultsQuery.isSuccess
   const appliedCount = rowActions.filter((action) => action.action !== "skip").length
-  const canConfirm = item.status === "needs_confirmation" && previewReady && appliedCount > 0
+  const canConfirm =
+    item.status === "needs_confirmation" &&
+    previewReady &&
+    appliedCount > 0 &&
+    !missingAdhocMetadata
+  let applyDisabledReason: string | null = null
+  if (!selectedLotId) {
+    applyDisabledReason = "Select a matched lot to apply."
+  } else if (previewQuery.isError) {
+    applyDisabledReason = "Could not load parsed row preview for this lot."
+  } else if (!previewQuery.isSuccess || previewQuery.data?.lot_id !== selectedLotId) {
+    applyDisabledReason = "Loading parsed row preview..."
+  } else if (lotResultsQuery.isError) {
+    applyDisabledReason = "Could not load existing draft results for this lot."
+  } else if (!lotResultsQuery.isSuccess) {
+    applyDisabledReason = "Loading existing draft results..."
+  } else if (missingAdhocMetadata) {
+    applyDisabledReason = `${missingAdhocMetadata.testName} needs Unit, Spec, and Method before it can be added as an ad-hoc draft.`
+  } else if (appliedCount === 0 && fuzzyApprovedRow) {
+    applyDisabledReason = "Fuzzy match points to an approved result; choose an alternate test or leave it skipped."
+  } else if (appliedCount === 0) {
+    applyDisabledReason = "Nothing to apply yet - enter a result or map an off-panel test to an alternate."
+  }
 
   const lotRef =
     lotSpecsQuery.data?.reference_number ||
@@ -651,6 +783,7 @@ function ReviewPane({
           product={mergedPanel.length ? lotSpecsQuery.data?.products?.[0] ?? null : null}
           lot={lotSpecsQuery.data ?? null}
           matchScore={matchScore}
+          matchReasons={matchReasons}
           panelCount={mergedPanel.length}
         />
 
@@ -682,11 +815,25 @@ function ReviewPane({
               <SpecReviewTable
                 rows={reviewRows}
                 labTypes={labTypes}
+                onResultChange={(rowId, value) =>
+                  setResultOverrides((current) => ({ ...current, [rowId]: value }))
+                }
                 onToggleClear={(rowId, cleared) =>
-                  setClearedRows((current) => ({ ...current, [rowId]: cleared }))
+                  setClearedRows((current) => {
+                    if (cleared) return { ...current, [rowId]: true }
+                    const next = { ...current }
+                    delete next[rowId]
+                    return next
+                  })
                 }
                 onMapLabType={(rowId, id) =>
                   setLabTypeOverrides((current) => ({ ...current, [rowId]: id }))
+                }
+                onMetadataChange={(rowId, field, value) =>
+                  setAdhocMetadata((current) => ({
+                    ...current,
+                    [rowId]: { ...(current[rowId] || {}), [field]: value },
+                  }))
                 }
                 disabled={!previewReady}
               />
@@ -706,6 +853,9 @@ function ReviewPane({
                 ) : null}
                 Apply {appliedCount > 0 ? `${appliedCount} ` : ""}as Drafts to {lotRef}
               </Button>
+              {applyDisabledReason && !confirmMutation.isPending && (
+                <p className="text-center text-[11px] text-slate-500">{applyDisabledReason}</p>
+              )}
             </>
           )
         ) : (
@@ -744,11 +894,13 @@ function MatchedLotCard({
   product,
   lot,
   matchScore,
+  matchReasons,
   panelCount,
 }: {
   product: ProductInLotWithSpecs | null | undefined
   lot: { lot_number: string; reference_number: string; lot_type: LotType; status: string; products?: ProductInLotWithSpecs[] } | null
   matchScore: number | null
+  matchReasons: string[]
   panelCount: number
 }) {
   if (!lot) {
@@ -775,12 +927,21 @@ function MatchedLotCard({
             {typeTag.label}
           </span>
           {matchScore != null && (
-            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">
+            <span
+              className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700"
+              title={matchReasons.length ? matchReasons.join("\n") : undefined}
+            >
               {Math.round(matchScore * 100)}% match
             </span>
           )}
         </div>
       </div>
+      {matchReasons.length > 0 && (
+        <p className="mt-0.5 truncate text-[10px] text-slate-500" title={matchReasons.join("\n")}>
+          {matchReasons[0]}
+          {matchReasons.length > 1 ? ` +${matchReasons.length - 1} more` : ""}
+        </p>
+      )}
       {product?.product_name && (
         <p className="truncate text-xs text-slate-700">{product.product_name}</p>
       )}
@@ -841,9 +1002,15 @@ function LotSwitcher({
   manualSearch: string
   onManualSearch: (value: string) => void
 }) {
+  // Hide the switcher when there's a single candidate that's already selected —
+  // the matched-lot card already shows its Lab Ref, so the chip is redundant.
+  const showCandidates =
+    candidates.length > 1 ||
+    (candidates.length === 1 && candidates[0].lot_id !== selectedLotId)
+
   return (
     <div>
-      {candidates.length > 0 && (
+      {showCandidates && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {candidates.map((candidate) => (
             <button
@@ -892,19 +1059,33 @@ function LotSwitcher({
 function SummaryChips({ summary }: { summary: ImportSummary }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <Chip label="Parsing now" value={summary.parsingNow} className="bg-amber-100 text-amber-800" />
+      <Chip
+        label="Parsing now"
+        value={summary.parsingNow}
+        className="bg-blue-100 text-blue-700"
+        items={summary.parsingNowItems}
+      />
       <Chip
         label="Completed / Passed"
         value={summary.completedPassed}
         className="bg-emerald-100 text-emerald-700"
+        items={summary.completedPassedItems}
       />
       <Chip
         label="Pending"
         value={summary.pending}
         className="bg-slate-100 text-slate-600"
         caption={`excludes the ${summary.parsingNowOnPanel} being imported`}
+        items={summary.pendingItems}
       />
-      <Chip label="Other" value={summary.other} className="bg-red-100 text-red-700" caption="failed or off-panel" />
+      <Chip
+        label="Other"
+        value={summary.other}
+        className="bg-amber-100 text-amber-800"
+        caption="off-panel or needs attention"
+        items={summary.otherItems}
+        alignRight
+      />
     </div>
   )
 }
@@ -914,19 +1095,45 @@ function Chip({
   value,
   className,
   caption,
+  items,
+  alignRight,
 }: {
   label: string
   value: number
   className: string
   caption?: string
+  items?: BucketItem[]
+  alignRight?: boolean
 }) {
   return (
-    <div className={cn("rounded-md px-2.5 py-1.5", className)} title={caption}>
+    <div className={cn("group relative rounded-md px-2.5 py-1.5", className)}>
       <div className="flex items-baseline gap-1.5">
         <span className="text-sm font-semibold">{value}</span>
         <span className="text-[11px] font-medium">{label}</span>
       </div>
       {caption && <div className="text-[10px] opacity-70">({caption})</div>}
+      {items && items.length > 0 && (
+        <div
+          className={cn(
+            "pointer-events-none absolute top-full z-30 mt-1 hidden min-w-[14rem] max-w-xs rounded-md border border-slate-200 bg-white p-2 text-left shadow-lg group-hover:block",
+            alignRight ? "right-0" : "left-0"
+          )}
+        >
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            {label}
+          </p>
+          <ul className="space-y-0.5">
+            {items.map((bucketItem, idx) => (
+              <li key={idx} className="flex items-baseline justify-between gap-2 text-[11px]">
+                <span className="truncate text-slate-700">{bucketItem.name}</span>
+                <span className="shrink-0 text-slate-400">
+                  {bucketItem.value ? bucketItem.value : bucketItem.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
@@ -936,14 +1143,22 @@ function Chip({
 function SpecReviewTable({
   rows,
   labTypes,
+  onResultChange,
   onToggleClear,
   onMapLabType,
+  onMetadataChange,
   disabled,
 }: {
   rows: ReviewRowVM[]
   labTypes: LabTestType[]
+  onResultChange: (rowId: string, value: string) => void
   onToggleClear: (rowId: string, cleared: boolean) => void
   onMapLabType: (rowId: string, id: number | null) => void
+  onMetadataChange: (
+    rowId: string,
+    field: "unit" | "specification" | "method",
+    value: string
+  ) => void
   disabled: boolean
 }) {
   return (
@@ -966,8 +1181,12 @@ function SpecReviewTable({
               key={vm.row.row_id}
               vm={vm}
               labTypes={labTypes}
+              onResultChange={(value) => onResultChange(vm.row.row_id, value)}
               onToggleClear={(cleared) => onToggleClear(vm.row.row_id, cleared)}
               onMapLabType={(id) => onMapLabType(vm.row.row_id, id)}
+              onMetadataChange={(field, value) =>
+                onMetadataChange(vm.row.row_id, field, value)
+              }
               disabled={disabled}
             />
           ))}
@@ -980,14 +1199,18 @@ function SpecReviewTable({
 function SpecReviewRow({
   vm,
   labTypes,
+  onResultChange,
   onToggleClear,
   onMapLabType,
+  onMetadataChange,
   disabled,
 }: {
   vm: ReviewRowVM
   labTypes: LabTestType[]
+  onResultChange: (value: string) => void
   onToggleClear: (cleared: boolean) => void
   onMapLabType: (id: number | null) => void
+  onMetadataChange: (field: "unit" | "specification" | "method", value: string) => void
   disabled: boolean
 }) {
   const warnings = Array.from(
@@ -995,8 +1218,11 @@ function SpecReviewRow({
   )
   const lowConfidence = (vm.row.confidence ?? 1) < 0.7
   const flagged = lowConfidence || warnings.length > 0
-  const hasParsedValue = vm.parsedValue.trim() !== ""
-  const existing = vm.preview?.existing_result
+  const aliasNotice = getAliasNotice(vm)
+  const hasResultValue = vm.resultValue.trim() !== ""
+  const edited = !vm.cleared && vm.resultValue !== vm.parsedValue
+  const existing = vm.actionExistingResult
+  const approvedExisting = existing?.status === "approved"
   const replacingDraft =
     !vm.cleared &&
     existing &&
@@ -1005,6 +1231,12 @@ function SpecReviewRow({
     existing.status !== "approved"
 
   const offPanelSkipped = !vm.onPanel && !vm.resolvedLabTypeId
+  const showMappingControl = !vm.originalOnPanel || vm.isFuzzy
+  // A fuzzy row already auto-resolved to a target; keep the override combobox
+  // tucked behind a compact control so the common (accept-the-fuzzy) case stays
+  // clean. Genuinely-unmapped rows always show the picker.
+  const [showOverride, setShowOverride] = useState(false)
+  const isResolvedFuzzy = vm.isFuzzy && vm.resolvedLabTypeId != null
 
   return (
     <tr
@@ -1031,39 +1263,73 @@ function SpecReviewRow({
               <TriangleAlert className="h-3.5 w-3.5 text-amber-500" />
             </span>
           )}
-        </div>
-        {!vm.onPanel && (
-          <div className="mt-1">
-            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-medium text-slate-600">
-              Off-panel
+          {aliasNotice && (
+            <span title={aliasNotice}>
+              <Info className="h-3.5 w-3.5 text-sky-500" />
             </span>
-            <select
-              value={vm.resolvedLabTypeId ?? ""}
-              disabled={disabled}
-              onChange={(event) =>
-                onMapLabType(event.target.value ? Number(event.target.value) : null)
-              }
-              className="mt-1 h-7 w-full rounded-md border border-amber-300 bg-white px-1.5 text-xs text-slate-700"
-            >
-              <option value="">Map to apply…</option>
-              {labTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.test_name}
-                </option>
-              ))}
-            </select>
+          )}
+        </div>
+        {showMappingControl && (
+          <div className="mt-1 space-y-1">
+            <div className="flex items-center gap-1">
+              {!vm.onPanel && (
+                <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-medium text-slate-600">
+                  Off-panel
+                </span>
+              )}
+              {vm.isFuzzy && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+                  Fuzzy match
+                </span>
+              )}
+              {vm.resolvedLabTypeId != null && (
+                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700">
+                  {vm.onPanel ? "On-panel draft" : "Ad-hoc draft"}
+                </span>
+              )}
+            </div>
+            {vm.resolvedLabTypeId == null && (
+              <p className="text-[10px] text-slate-400">
+                Pick a lab test type to include this row, or leave it skipped.
+              </p>
+            )}
+            {isResolvedFuzzy && !showOverride ? (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setShowOverride(true)}
+                className="text-[10px] font-medium text-blue-600 hover:underline disabled:opacity-50"
+              >
+                Override mapping
+              </button>
+            ) : (
+              <LabTypeCombobox
+                value={vm.resolvedLabTypeId}
+                labTypes={labTypes}
+                disabled={disabled}
+                onChange={onMapLabType}
+              />
+            )}
           </div>
         )}
       </td>
 
       {/* Spec */}
       <td className="px-3 py-2 align-top font-mono text-xs text-slate-600">
-        {vm.specification || "—"}
+        {vm.isAdhoc ? (
+          <input
+            value={vm.specification || ""}
+            disabled={disabled}
+            onChange={(event) => onMetadataChange("specification", event.target.value)}
+            placeholder="Spec"
+            className="h-7 w-full rounded-md border border-amber-300 bg-white px-1.5 font-mono text-xs text-slate-700 outline-none focus:border-amber-400"
+          />
+        ) : (
+          vm.specification || "—"
+        )}
       </td>
 
-      {/* Result: the parsed value, highlighted. Read-only because the backend
-          persists the original `result_value_raw` — the only edit that changes
-          the outcome is clearing the row (-> skipped). */}
+      {/* Result */}
       <td className="px-3 py-2 align-top">
         {vm.cleared ? (
           <button
@@ -1076,17 +1342,20 @@ function SpecReviewRow({
           </button>
         ) : (
           <div className="flex items-start gap-1">
-            <span
+            <input
+              value={vm.resultValue}
+              disabled={disabled}
+              onChange={(event) => onResultChange(event.target.value)}
+              placeholder="Blank"
               className={cn(
-                "min-w-0 flex-1 rounded-md px-2 py-1 font-medium",
-                hasParsedValue
+                "min-w-0 flex-1 rounded-md px-2 py-1 font-medium outline-none",
+                hasResultValue
                   ? "bg-amber-100 text-slate-900 ring-1 ring-amber-300"
-                  : "text-slate-400"
+                  : "bg-white text-slate-400 ring-1 ring-slate-200",
+                edited && "ring-blue-300"
               )}
-            >
-              {hasParsedValue ? vm.parsedValue : "Blank"}
-            </span>
-            {hasParsedValue && (
+            />
+            {hasResultValue && (
               <button
                 type="button"
                 disabled={disabled}
@@ -1099,9 +1368,15 @@ function SpecReviewRow({
             )}
           </div>
         )}
-        {hasParsedValue && !vm.cleared && (
-          <div className="mt-0.5 flex items-center gap-0.5 text-[10px] font-medium text-amber-600">
-            <Sparkles className="h-2.5 w-2.5" /> from PDF
+        {!vm.cleared && hasResultValue && (
+          <div
+            className={cn(
+              "mt-0.5 flex items-center gap-0.5 text-[10px] font-medium",
+              edited ? "text-blue-600" : "text-amber-600"
+            )}
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            {edited ? `edited; PDF: ${vm.parsedValue || "Blank"}` : "from PDF"}
           </div>
         )}
         {replacingDraft && (
@@ -1109,13 +1384,42 @@ function SpecReviewRow({
             was: <span className="line-through">{existing?.result_value}</span>
           </div>
         )}
+        {approvedExisting && (
+          <div className="mt-0.5 text-[10px] text-slate-400">
+            Approved result exists - skipped
+          </div>
+        )}
       </td>
 
       {/* Unit */}
-      <td className="px-3 py-2 align-top text-xs text-slate-500">{vm.unit || "—"}</td>
+      <td className="px-3 py-2 align-top text-xs text-slate-500">
+        {vm.isAdhoc ? (
+          <input
+            value={vm.unit || ""}
+            disabled={disabled}
+            onChange={(event) => onMetadataChange("unit", event.target.value)}
+            placeholder="Unit"
+            className="h-7 w-full rounded-md border border-amber-300 bg-white px-1.5 text-xs text-slate-700 outline-none focus:border-amber-400"
+          />
+        ) : (
+          vm.unit || "—"
+        )}
+      </td>
 
       {/* Method */}
-      <td className="px-3 py-2 align-top text-xs text-slate-500">{vm.method || "—"}</td>
+      <td className="px-3 py-2 align-top text-xs text-slate-500">
+        {vm.isAdhoc ? (
+          <input
+            value={vm.method || ""}
+            disabled={disabled}
+            onChange={(event) => onMetadataChange("method", event.target.value)}
+            placeholder="Method"
+            className="h-7 w-full rounded-md border border-amber-300 bg-white px-1.5 text-xs text-slate-700 outline-none focus:border-amber-400"
+          />
+        ) : (
+          vm.method || "—"
+        )}
+      </td>
 
       {/* Notes (parsed; saved server-side on confirm) */}
       <td className="px-3 py-2 align-top text-xs text-slate-500">
@@ -1136,12 +1440,112 @@ function SpecReviewRow({
   )
 }
 
+/**
+ * Searchable "Map to Alternate" picker for off-panel rows. Filters the full
+ * active lab-test-type catalog by name or abbreviation so e.g. "arsenic"/"as"
+ * finds Arsenic without scrolling a 200+ entry native select.
+ */
+function LabTypeCombobox({
+  value,
+  labTypes,
+  disabled,
+  onChange,
+}: {
+  value: number | null
+  labTypes: LabTestType[]
+  disabled: boolean
+  onChange: (id: number | null) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const selected = labTypes.find((t) => t.id === value) ?? null
+  const q = query.trim().toLowerCase()
+  const matches = (
+    q
+      ? labTypes.filter(
+          (t) =>
+            t.test_name.toLowerCase().includes(q) ||
+            (t.abbreviations || "").toLowerCase().includes(q)
+        )
+      : labTypes
+  ).slice(0, 8)
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1">
+        <input
+          value={open ? query : selected?.test_name ?? ""}
+          disabled={disabled}
+          placeholder="Map to Alternate…"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setOpen(true)
+          }}
+          onBlur={() =>
+            window.setTimeout(() => {
+              setOpen(false)
+              setQuery("")
+            }, 120)
+          }
+          className="h-7 w-full rounded-md border border-amber-300 bg-white px-1.5 text-xs text-slate-700 outline-none focus:border-amber-400"
+        />
+        {selected && !disabled && (
+          <button
+            type="button"
+            title="Clear mapping"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              onChange(null)
+              setQuery("")
+              setOpen(false)
+            }}
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {open && matches.length > 0 && (
+        <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+          {matches.map((type) => (
+            <li key={type.id}>
+              <button
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  onChange(type.id)
+                  setQuery("")
+                  setOpen(false)
+                }}
+                className={cn(
+                  "block w-full px-2 py-1.5 text-left text-xs hover:bg-slate-50",
+                  type.id === value ? "font-medium text-slate-900" : "text-slate-600"
+                )}
+              >
+                {type.test_name}
+                {type.test_category && (
+                  <span className="ml-1 text-[10px] text-slate-400">{type.test_category}</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // --- View-model helpers -----------------------------------------------------
 
 interface ReviewRowVM {
   row: ExtractedResultRow
   preview: ResultImportRowPreview | null
+  actionExistingResult: ExistingResultForAction | null
   onPanel: boolean
+  originalOnPanel: boolean
+  isFuzzy: boolean
+  matchSource: ExtractedResultRow["match_source"]
   resolvedLabTypeId: number | null
   parsedValue: string
   resultValue: string
@@ -1150,8 +1554,19 @@ interface ReviewRowVM {
   unit: string | null
   testName: string
   method: string | null
+  isAdhoc: boolean
   notes: string | null
   passFail: "pass" | "fail" | null
+}
+
+function getAliasNotice(vm: ReviewRowVM) {
+  if (vm.matchSource === "builtin_alias") {
+    return `Matched PDF wording "${vm.row.test_name_raw}" to "${vm.testName}" using built-in normalization.`
+  }
+  if (vm.matchSource === "approved_alias") {
+    return `Matched approved alias "${vm.row.test_name_raw}" to "${vm.testName}".`
+  }
+  return null
 }
 
 /**
@@ -1167,7 +1582,17 @@ function deriveNotes(row: ExtractedResultRow): string | null {
     const value = metadata[key]
     if (value) parts.push(`${key.toUpperCase()}: ${String(value)}`)
   }
+  if (metadata.mass_basis_value) {
+    const unit = metadata.mass_basis_unit || "ug/g"
+    parts.push(`Mass basis: ${String(metadata.mass_basis_value)} ${String(unit)}`)
+  }
   return parts.join("; ") || null
+}
+
+interface BucketItem {
+  name: string
+  value?: string | null
+  reason?: string
 }
 
 interface ImportSummary {
@@ -1177,6 +1602,10 @@ interface ImportSummary {
   completedPassed: number
   pending: number
   other: number
+  parsingNowItems: BucketItem[]
+  completedPassedItems: BucketItem[]
+  pendingItems: BucketItem[]
+  otherItems: BucketItem[]
 }
 
 /** Union of all products' required specs, deduped by lab_test_type_id (first wins). */
@@ -1210,35 +1639,71 @@ function computeSummary(
     if (result.lab_test_type_id != null) resultByLabType.set(result.lab_test_type_id, result)
   }
 
+  const parsingRows = reviewRows.filter(
+    (vm) =>
+      vm.resultValue.trim() &&
+      vm.resolvedLabTypeId != null &&
+      vm.actionExistingResult?.status !== "approved"
+  )
+
   const parsingNowPanelIds = new Set(
-    reviewRows
-      .filter((vm) => vm.onPanel && vm.resolvedLabTypeId != null)
+    parsingRows
+      .filter((vm) => vm.onPanel)
       .map((vm) => vm.resolvedLabTypeId as number)
   )
 
-  let completedPassed = 0
-  let pending = 0
-  let otherFailed = 0
+  const completedPassedItems: BucketItem[] = []
+  const pendingItems: BucketItem[] = []
+  const otherItems: BucketItem[] = []
 
   for (const spec of mergedPanel) {
     const existing = resultByLabType.get(spec.lab_test_type_id)
     const hasValue = !!existing?.result_value && existing.result_value.trim() !== ""
     if (hasValue) {
       const pf = calculatePassFail(existing!.result_value, spec.specification, spec.test_unit)
-      if (pf === "fail") otherFailed += 1
-      else completedPassed += 1
+      if (pf === "fail") {
+        otherItems.push({ name: spec.test_name, value: existing!.result_value, reason: "Failed" })
+      } else {
+        completedPassedItems.push({
+          name: spec.test_name,
+          value: existing!.result_value,
+          reason: "Passed",
+        })
+      }
     } else if (!parsingNowPanelIds.has(spec.lab_test_type_id)) {
-      pending += 1
+      pendingItems.push({ name: spec.test_name, reason: "Awaiting results" })
     }
   }
 
-  const offPanelExtras = reviewRows.filter((vm) => !vm.onPanel).length
+  const parsingNowItems: BucketItem[] = parsingRows.map((vm) => ({
+    name: vm.testName,
+    value: vm.resultValue,
+    reason: vm.onPanel
+      ? "On panel"
+      : vm.resolvedLabTypeId != null
+        ? "Off-panel · ad-hoc draft"
+        : "Off-panel · needs mapping",
+  }))
+
+  for (const vm of parsingRows) {
+    if (!vm.onPanel) {
+      otherItems.push({
+        name: vm.testName,
+        value: vm.resultValue,
+        reason: vm.resolvedLabTypeId != null ? "Off-panel · ad-hoc draft" : "Off-panel · needs mapping",
+      })
+    }
+  }
 
   return {
-    parsingNow: reviewRows.length,
+    parsingNow: parsingRows.length,
     parsingNowOnPanel: parsingNowPanelIds.size,
-    completedPassed,
-    pending,
-    other: otherFailed + offPanelExtras,
+    completedPassed: completedPassedItems.length,
+    pending: pendingItems.length,
+    other: otherItems.length,
+    parsingNowItems,
+    completedPassedItems,
+    pendingItems,
+    otherItems,
   }
 }

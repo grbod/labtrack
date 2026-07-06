@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical, ChevronDown, ChevronUp } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, Loader2, FlaskConical, ChevronDown, ChevronUp, CircleCheck, Ban, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -39,8 +39,16 @@ import {
   useUpdateLabTestType,
   useDeleteLabTestType,
 } from "@/hooks/useLabTestTypes"
-import type { LabTestType } from "@/types"
+import {
+  useApproveLabTestAlias,
+  useDisableLabTestAlias,
+  useLabTestBuiltinAliases,
+  useLabTestAliases,
+  useUpdateLabTestAlias,
+} from "@/hooks/useLabTestAliases"
+import type { LabTestAlias, LabTestType } from "@/types"
 import type { CreateLabTestTypeData } from "@/api/labTestTypes"
+import { useAuthStore } from "@/store/auth"
 
 const CATEGORIES = [
   "Microbiological",
@@ -65,6 +73,7 @@ const labTestTypeSchema = z.object({
 type LabTestTypeForm = z.infer<typeof labTestTypeSchema>
 type SortField = "test_name" | "test_category"
 type SortDirection = "asc" | "desc"
+type AliasStatusFilter = "pending" | "approved" | "disabled" | "built_in"
 
 export function LabTestTypesPage() {
   const [page, setPage] = useState(1)
@@ -73,6 +82,13 @@ export function LabTestTypesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingType, setEditingType] = useState<LabTestType | null>(null)
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false)
+  const [aliasStatus, setAliasStatus] = useState<AliasStatusFilter>("pending")
+  const [editingAliasId, setEditingAliasId] = useState<number | null>(null)
+  const [aliasDraft, setAliasDraft] = useState<{
+    raw_phrase: string
+    lab_name: string
+    lab_test_type_id: number
+  } | null>(null)
 
   // Sorting state
   const [sortField, setSortField] = useState<SortField | null>(null)
@@ -84,10 +100,28 @@ export function LabTestTypesPage() {
     search: search || undefined,
     category: categoryFilter || undefined,
   })
+  const { data: activeTypes } = useLabTestTypes({ page_size: 500, is_active: true })
+  const { user } = useAuthStore()
+  // Alias review (approve/edit/disable) is QC/Admin only, matching the backend
+  // endpoint guards; other roles don't see the section or fire the request.
+  const canManageAliases = user?.role === "admin" || user?.role === "qc_manager"
+  const { data: aliases, isLoading: aliasesLoading } = useLabTestAliases(
+    {
+      page_size: 25,
+      status: aliasStatus === "built_in" ? "pending" : aliasStatus,
+    },
+    { enabled: canManageAliases && aliasStatus !== "built_in" }
+  )
+  const { data: builtinAliases, isLoading: builtinAliasesLoading } = useLabTestBuiltinAliases(
+    { enabled: canManageAliases && aliasStatus === "built_in" }
+  )
   const { data: categories } = useLabTestTypeCategories()
   const createMutation = useCreateLabTestType()
   const updateMutation = useUpdateLabTestType()
   const deleteMutation = useDeleteLabTestType()
+  const updateAliasMutation = useUpdateLabTestAlias()
+  const approveAliasMutation = useApproveLabTestAlias()
+  const disableAliasMutation = useDisableLabTestAlias()
 
   const form = useForm<LabTestTypeForm>({
     resolver: zodResolver(labTestTypeSchema),
@@ -190,6 +224,29 @@ export function LabTestTypesPage() {
         // Error might indicate test type is in use
       }
     }
+  }
+
+  const startAliasEdit = (alias: LabTestAlias) => {
+    setEditingAliasId(alias.id)
+    setAliasDraft({
+      raw_phrase: alias.raw_phrase,
+      lab_name: alias.lab_name || "",
+      lab_test_type_id: alias.lab_test_type_id,
+    })
+  }
+
+  const saveAliasEdit = async () => {
+    if (!editingAliasId || !aliasDraft) return
+    await updateAliasMutation.mutateAsync({
+      id: editingAliasId,
+      data: {
+        raw_phrase: aliasDraft.raw_phrase,
+        lab_name: aliasDraft.lab_name.trim() || null,
+        lab_test_type_id: aliasDraft.lab_test_type_id,
+      },
+    })
+    setEditingAliasId(null)
+    setAliasDraft(null)
   }
 
   const isMutating = createMutation.isPending || updateMutation.isPending
@@ -422,6 +479,228 @@ export function LabTestTypesPage() {
             )}
           </div>
 
+          {canManageAliases && (
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-[18px] font-bold text-slate-900">Test aliases</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500">
+                  Review importer alias suggestions before they affect future imports.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {(["pending", "approved", "disabled", "built_in"] as const).map((status) => (
+                  <Button
+                    key={status}
+                    variant={aliasStatus === status ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setAliasStatus(status)
+                      setEditingAliasId(null)
+                      setAliasDraft(null)
+                    }}
+                    className={aliasStatus === status ? "bg-slate-900" : "border-slate-200"}
+                  >
+                    {status === "built_in" ? "built-in" : status}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
+              {aliasStatus === "built_in" ? (
+                builtinAliasesLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+                  </div>
+                ) : !builtinAliases?.items.length ? (
+                  <div className="px-5 py-10 text-center text-sm text-slate-500">
+                    No built-in aliases.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead>Raw phrase</TableHead>
+                        <TableHead>Lab scope</TableHead>
+                        <TableHead>Target test</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead>Count</TableHead>
+                        <TableHead>Last seen</TableHead>
+                        <TableHead>Last file / lot</TableHead>
+                        <TableHead className="w-[130px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {builtinAliases.items.map((alias) => (
+                        <TableRow key={alias.raw_phrase}>
+                          <TableCell>
+                            <span className="font-medium text-slate-900">
+                              {formatAliasPhrase(alias.raw_phrase)}
+                            </span>
+                          </TableCell>
+                          <TableCell>Global</TableCell>
+                          <TableCell>{alias.target_test_name}</TableCell>
+                          <TableCell>Built-in</TableCell>
+                          <TableCell>Normalization</TableCell>
+                          <TableCell>-</TableCell>
+                          <TableCell className="text-slate-500">Shipped</TableCell>
+                          <TableCell className="text-slate-500">Importer Dictionary</TableCell>
+                          <TableCell className="text-slate-500">Read-only</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              ) : aliasesLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+                </div>
+              ) : !aliases?.items.length ? (
+                <div className="px-5 py-10 text-center text-sm text-slate-500">
+                  No {aliasStatus} aliases.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                      <TableHead>Raw phrase</TableHead>
+                      <TableHead>Lab scope</TableHead>
+                      <TableHead>Target test</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Count</TableHead>
+                      <TableHead>Last seen</TableHead>
+                      <TableHead>Last file / lot</TableHead>
+                      <TableHead className="w-[130px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aliases.items.map((alias) => {
+                      const editing = editingAliasId === alias.id && aliasDraft
+                      return (
+                        <TableRow key={alias.id}>
+                          <TableCell>
+                            {editing ? (
+                              <Input
+                                value={aliasDraft.raw_phrase}
+                                onChange={(event) =>
+                                  setAliasDraft({ ...aliasDraft, raw_phrase: event.target.value })
+                                }
+                                className="h-8"
+                              />
+                            ) : (
+                              <span className="font-medium text-slate-900">
+                                {formatAliasPhrase(alias.raw_phrase)}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {editing ? (
+                              <Input
+                                value={aliasDraft.lab_name}
+                                onChange={(event) =>
+                                  setAliasDraft({ ...aliasDraft, lab_name: event.target.value })
+                                }
+                                placeholder="Global"
+                                className="h-8"
+                              />
+                            ) : (
+                              alias.lab_name || "Global"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {editing ? (
+                              <select
+                                value={aliasDraft.lab_test_type_id}
+                                onChange={(event) =>
+                                  setAliasDraft({
+                                    ...aliasDraft,
+                                    lab_test_type_id: Number(event.target.value),
+                                  })
+                                }
+                                className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
+                              >
+                                {(activeTypes?.items || []).map((type) => (
+                                  <option key={type.id} value={type.id}>
+                                    {type.test_name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              alias.target_test_name || `#${alias.lab_test_type_id}`
+                            )}
+                          </TableCell>
+                          <TableCell>{formatAliasLabel(alias.status)}</TableCell>
+                          <TableCell>{formatAliasLabel(alias.source)}</TableCell>
+                          <TableCell>{alias.suggestion_count}</TableCell>
+                          <TableCell className="text-slate-500">
+                            {alias.last_seen_at ? new Date(alias.last_seen_at).toLocaleDateString() : "-"}
+                          </TableCell>
+                          <TableCell className="max-w-[180px] truncate text-slate-500">
+                            {alias.last_filename || "-"}
+                            {alias.last_lot_id ? ` · lot #${alias.last_lot_id}` : ""}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              {editing ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={saveAliasEdit}
+                                  disabled={updateAliasMutation.isPending}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Save className="h-4 w-4" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startAliasEdit(alias)}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => approveAliasMutation.mutate(alias.id)}
+                                disabled={alias.status === "approved" || approveAliasMutation.isPending}
+                                className="h-8 w-8 p-0 text-emerald-600"
+                              >
+                                <CircleCheck className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  const reason =
+                                    window.prompt("Reason for disabling (optional):") ||
+                                    undefined
+                                  disableAliasMutation.mutate({
+                                    id: alias.id,
+                                    reason,
+                                  })
+                                }}
+                                disabled={alias.status === "disabled" || disableAliasMutation.isPending}
+                                className="h-8 w-8 p-0 text-red-600"
+                              >
+                                <Ban className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </section>
+          )}
+
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -522,5 +801,44 @@ export function LabTestTypesPage() {
       </Dialog>
       </motion.div>
     </div>
+  )
+}
+
+function formatAliasLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(" ")
+}
+
+function formatAliasPhrase(value: string) {
+  return value
+    .split(" ")
+    .map(formatAliasPhraseToken)
+    .join(" ")
+}
+
+function formatAliasPhraseToken(token: string): string {
+  if (token.includes("/")) {
+    return token.split("/").map(formatAliasPhraseToken).join("/")
+  }
+  if (token === "&") return token
+
+  const normalized = token.toLowerCase()
+  const specialCases: Record<string, string> = {
+    "e.": "E.",
+    e: "E",
+    coli: "coli",
+    spp: "spp.",
+    pb: "Pb",
+    as: "As",
+    cd: "Cd",
+    hg: "Hg",
+    and: "and",
+  }
+
+  return (
+    specialCases[normalized] ||
+    normalized.charAt(0).toUpperCase() + normalized.slice(1)
   )
 }

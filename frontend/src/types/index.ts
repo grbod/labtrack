@@ -324,6 +324,9 @@ export interface ConfirmResultImportResponse {
   updated_result_ids: number[]
   skipped_row_ids: string[]
   status: ResultImportStatus
+  /** Pending test-name alias suggestions recorded during confirm (optional;
+   *  older backends omit it, treat as 0). */
+  alias_suggestions_created?: number
 }
 
 // Lab test type

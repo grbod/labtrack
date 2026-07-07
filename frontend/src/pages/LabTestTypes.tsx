@@ -31,6 +31,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { LabTestTypeBulkImport } from "@/components/bulk-import/LabTestTypeBulkImport"
+import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
+import { ReasonDialog } from "@/components/domain/ReasonDialog"
 
 import {
   useLabTestTypes,
@@ -89,6 +91,8 @@ export function LabTestTypesPage() {
     lab_name: string
     lab_test_type_id: number
   } | null>(null)
+  const [pendingApproveAlias, setPendingApproveAlias] = useState<LabTestAlias | null>(null)
+  const [pendingDisableAlias, setPendingDisableAlias] = useState<LabTestAlias | null>(null)
 
   // Sorting state
   const [sortField, setSortField] = useState<SortField | null>(null)
@@ -666,7 +670,7 @@ export function LabTestTypesPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => approveAliasMutation.mutate(alias.id)}
+                                onClick={() => setPendingApproveAlias(alias)}
                                 disabled={alias.status === "approved" || approveAliasMutation.isPending}
                                 className="h-8 w-8 p-0 text-emerald-600"
                               >
@@ -675,15 +679,7 @@ export function LabTestTypesPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => {
-                                  const reason =
-                                    window.prompt("Reason for disabling (optional):") ||
-                                    undefined
-                                  disableAliasMutation.mutate({
-                                    id: alias.id,
-                                    reason,
-                                  })
-                                }}
+                                onClick={() => setPendingDisableAlias(alias)}
                                 disabled={alias.status === "disabled" || disableAliasMutation.isPending}
                                 className="h-8 w-8 p-0 text-red-600"
                               >
@@ -700,6 +696,54 @@ export function LabTestTypesPage() {
             </div>
           </section>
           )}
+
+      {/* Approve alias confirmation */}
+      <ConfirmActionDialog
+        open={pendingApproveAlias !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingApproveAlias(null)
+        }}
+        title="Approve this alias?"
+        description={
+          pendingApproveAlias
+            ? `Approving remaps "${formatAliasPhrase(pendingApproveAlias.raw_phrase)}" to ${
+                pendingApproveAlias.target_test_name || `test #${pendingApproveAlias.lab_test_type_id}`
+              } for ALL future imports.`
+            : ""
+        }
+        confirmLabel="Approve alias"
+        destructive={false}
+        onConfirm={() => {
+          if (pendingApproveAlias) approveAliasMutation.mutate(pendingApproveAlias.id)
+        }}
+      />
+
+      {/* Disable alias with optional reason */}
+      <ReasonDialog
+        open={pendingDisableAlias !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDisableAlias(null)
+        }}
+        title="Disable this alias?"
+        description={
+          pendingDisableAlias
+            ? `"${formatAliasPhrase(pendingDisableAlias.raw_phrase)}" will no longer map to ${
+                pendingDisableAlias.target_test_name ||
+                `test #${pendingDisableAlias.lab_test_type_id}`
+              } on future imports.`
+            : undefined
+        }
+        placeholder="Why is this alias being disabled?"
+        confirmLabel="Disable alias"
+        onConfirm={(reason) => {
+          if (pendingDisableAlias) {
+            disableAliasMutation.mutate({
+              id: pendingDisableAlias.id,
+              reason: reason || undefined,
+            })
+          }
+        }}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

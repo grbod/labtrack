@@ -85,7 +85,24 @@ export function useConfirmResultImport(id: number) {
       queryClient.invalidateQueries({ queryKey: lotKeys.detail(result.lot_id) })
       queryClient.invalidateQueries({ queryKey: lotKeys.detailWithSpecs(result.lot_id) })
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
-      toast.success("Results applied as drafts")
+
+      const applied = result.created_result_ids?.length ?? 0
+      const replaced = result.updated_result_ids?.length ?? 0
+      const skipped = result.skipped_row_ids?.length ?? 0
+      const segments: string[] = []
+      if (applied) segments.push(`${applied} applied`)
+      if (replaced) segments.push(`${replaced} replaced`)
+      if (skipped) segments.push(`${skipped} skipped`)
+      const message = segments.length ? segments.join(", ") : "No changes applied"
+      if (skipped > 0) toast.warning(message)
+      else toast.success(message)
+
+      const aliasSuggestions = result.alias_suggestions_created ?? 0
+      if (aliasSuggestions > 0) {
+        toast.info(
+          `${aliasSuggestions} test-name alias suggestion${aliasSuggestions === 1 ? "" : "s"} recorded for QC review under Lab Test Types.`
+        )
+      }
     },
     onError: (error) => toast.error(extractApiErrorMessage(error, "Failed to confirm import")),
   })

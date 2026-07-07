@@ -18,6 +18,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/auth"
+import { hasRole } from "@/lib/roles"
+import type { UserRole } from "@/types"
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed"
 
@@ -31,6 +33,8 @@ interface NavSection {
   title: string
   items: NavItem[]
   adminOnly?: boolean
+  /** When set, only users holding one of these roles see the section. */
+  roles?: UserRole[]
 }
 
 const navSections: NavSection[] = [
@@ -50,6 +54,7 @@ const navSections: NavSection[] = [
   },
   {
     title: "Data Import",
+    roles: ["admin", "qc_manager", "lab_tech"],
     items: [
       { label: "Lab Test Import", href: "/results-importer", icon: <FileUp className="h-[18px] w-[18px]" /> },
     ],
@@ -90,10 +95,13 @@ export function Sidebar() {
   }, [isCollapsed])
 
   // Filter sections based on user role
-  const isAdmin = user?.role === "admin" || user?.role === "qc_manager"
   const filteredSections = useMemo(() => {
-    return navSections.filter((section) => !section.adminOnly || isAdmin)
-  }, [isAdmin])
+    return navSections.filter((section) => {
+      if (section.adminOnly && !hasRole(user, "admin", "qc_manager")) return false
+      if (section.roles && !hasRole(user, ...section.roles)) return false
+      return true
+    })
+  }, [user])
 
   return (
     <aside

@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from PyPDF2 import PdfReader
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -47,6 +48,11 @@ ACTIVE_MATCH_STATUSES = [
     LotStatus.NEEDS_ATTENTION,
     LotStatus.UNDER_REVIEW,
     LotStatus.AWAITING_RELEASE,
+]
+ACTIVE_IMPORT_DEDUP_STATUSES = [
+    ResultImportStatus.PROCESSING,
+    ResultImportStatus.NEEDS_CONFIRMATION,
+    ResultImportStatus.CONFIRMED,
 ]
 
 TEST_NAME_NORMALIZATION = {
@@ -110,6 +116,10 @@ class ResultImportService(BaseService[ResultImport]):
             raise ValueError(
                 "OPENROUTER_API_KEY is required for results importer extraction"
             )
+        if settings.ai_provider.lower() == "mock":
+            logger.warning(
+                "mock extraction provider active — results are fabricated for dev"
+            )
 
         max_size = settings.max_upload_size_mb * 1024 * 1024
         validated: list[dict[str, Any]] = []
@@ -149,7 +159,7 @@ class ResultImportService(BaseService[ResultImport]):
                     db.query(ResultImport)
                     .filter(
                         ResultImport.file_hash == payload["file_hash"],
-                        ResultImport.status == ResultImportStatus.CONFIRMED,
+                        ResultImport.status.in_(ACTIVE_IMPORT_DEDUP_STATUSES),
                     )
                     .order_by(ResultImport.confirmed_at.desc().nullslast())
                     .first()
@@ -174,19 +184,32 @@ class ResultImportService(BaseService[ResultImport]):
                     openrouter_model=settings.openrouter_model,
                     warnings=[],
                 )
-                db.add(item)
-                db.flush()
-                self._log_audit(
-                    db,
-                    action=AuditAction.INSERT,
-                    record_id=item.id,
-                    new_values={
-                        "original_filename": filename,
-                        "storage_key": storage_key,
-                    },
-                    user_id=user_id,
-                    reason="Result import uploaded",
-                )
+                try:
+                    with db.begin_nested():
+                        db.add(item)
+                        db.flush()
+                        self._log_audit(
+                            db,
+                            action=AuditAction.INSERT,
+                            record_id=item.id,
+                            new_values={
+                                "original_filename": filename,
+                                "storage_key": storage_key,
+                            },
+                            user_id=user_id,
+                            reason="Result import uploaded",
+                        )
+                except IntegrityError:
+                    if storage_key in uploaded_keys:
+                        uploaded_keys.remove(storage_key)
+                    storage.delete(storage_key)
+                    duplicate = self._active_duplicate_for_hash(
+                        db, payload["file_hash"]
+                    )
+                    if not duplicate:
+                        raise
+                    duplicates.append(duplicate)
+                    continue
                 created.append(item)
 
             db.commit()
@@ -198,6 +221,19 @@ class ResultImportService(BaseService[ResultImport]):
         for item in created + duplicates:
             db.refresh(item)
         return created, duplicates
+
+    def _active_duplicate_for_hash(
+        self, db: Session, file_hash: str
+    ) -> Optional[ResultImport]:
+        return (
+            db.query(ResultImport)
+            .filter(
+                ResultImport.file_hash == file_hash,
+                ResultImport.status.in_(ACTIVE_IMPORT_DEDUP_STATUSES),
+            )
+            .order_by(ResultImport.confirmed_at.desc().nullslast())
+            .first()
+        )
 
     def duplicate_summary(self, item: ResultImport) -> dict[str, Any]:
         lot = item.selected_lot
@@ -473,6 +509,7 @@ class ResultImportService(BaseService[ResultImport]):
         updated: list[dict[str, Any]] = []
         applied_rows: list[dict[str, Any]] = []
         skipped_row_ids: list[str] = []
+        alias_suggestions_created = 0
 
         for action in row_actions:
             if action.action == "skip":
@@ -589,9 +626,10 @@ class ResultImportService(BaseService[ResultImport]):
                         "action": "replace",
                     }
                 )
-                self._record_alias_suggestion_for_action(
+                if self._record_alias_suggestion_for_action(
                     db, item, lot, row, action, lab_test_type_id, user_id
-                )
+                ):
+                    alias_suggestions_created += 1
                 retest_service.check_and_complete_retest(
                     db, existing.id, user_id=user_id
                 )
@@ -643,9 +681,10 @@ class ResultImportService(BaseService[ResultImport]):
                         "result_snapshot": result_snapshot,
                     }
                 )
-                self._record_alias_suggestion_for_action(
+                if self._record_alias_suggestion_for_action(
                     db, item, lot, row, action, lab_test_type_id, user_id
-                )
+                ):
+                    alias_suggestions_created += 1
 
         if not created_ids and not updated:
             raise ValueError("Confirm requires at least one applied result row")
@@ -721,6 +760,7 @@ class ResultImportService(BaseService[ResultImport]):
             "created_result_ids": created_ids,
             "updated_result_ids": [entry["id"] for entry in updated],
             "skipped_row_ids": skipped_row_ids,
+            "alias_suggestions_created": alias_suggestions_created,
             "status": item.status.value,
         }
 
@@ -859,7 +899,13 @@ class ResultImportService(BaseService[ResultImport]):
         db.refresh(item)
         return item
 
-    def preview_rows(self, db: Session, import_id: int, lot_id: int) -> dict[str, Any]:
+    def preview_rows(
+        self,
+        db: Session,
+        import_id: int,
+        lot_id: int,
+        overrides: Optional[Iterable[Any]] = None,
+    ) -> dict[str, Any]:
         item = self.get(db, import_id)
         if not item:
             raise ValueError("Import not found")
@@ -867,14 +913,19 @@ class ResultImportService(BaseService[ResultImport]):
         if not lot or lot.status not in ACTIVE_MATCH_STATUSES:
             raise ValueError("Select an active lot")
 
+        override_by_row_id = self._preview_override_map(overrides)
         previews = []
         for row in (item.extracted_data or {}).get("rows", []):
+            row_id = row.get("row_id")
+            lab_test_type_override = override_by_row_id.get(row_id)
             test_name, unit, specification, method, lab_test_type_id = (
                 self._resolve_test_fields(
                     db,
                     lot,
                     row,
-                    row.get("matched_lab_test_type_id"),
+                    lab_test_type_override
+                    if row_id in override_by_row_id
+                    else row.get("matched_lab_test_type_id"),
                     row.get("test_name_normalized") or row.get("test_name_raw"),
                 )
             )
@@ -919,6 +970,26 @@ class ResultImportService(BaseService[ResultImport]):
                 }
             )
         return {"import_id": item.id, "lot_id": lot.id, "rows": previews}
+
+    def _preview_override_map(
+        self, overrides: Optional[Iterable[Any]]
+    ) -> dict[str, Optional[int]]:
+        mapped: dict[str, Optional[int]] = {}
+        for override in overrides or []:
+            row_id = (
+                override.get("row_id")
+                if isinstance(override, dict)
+                else getattr(override, "row_id", None)
+            )
+            if not row_id:
+                continue
+            lab_test_type_id = (
+                override.get("lab_test_type_id")
+                if isinstance(override, dict)
+                else getattr(override, "lab_test_type_id", None)
+            )
+            mapped[str(row_id)] = lab_test_type_id
+        return mapped
 
     def link_candidates(
         self, db: Session, search: str, limit: int = 20
@@ -1134,12 +1205,12 @@ class ResultImportService(BaseService[ResultImport]):
         action: Any,
         final_lab_test_type_id: Optional[int],
         user_id: int,
-    ) -> None:
+    ) -> bool:
         if not final_lab_test_type_id:
-            return
+            return False
         match_source = row.get("match_source")
         if match_source in {"exact", "builtin_alias", "approved_alias"}:
-            return
+            return False
         original_fuzzy_id = row.get("matched_lab_test_type_id")
         should_suggest = match_source == "fuzzy" or (
             match_source == "unmatched" and getattr(action, "lab_test_type_id", None)
@@ -1147,12 +1218,12 @@ class ResultImportService(BaseService[ResultImport]):
         if match_source == "fuzzy" and original_fuzzy_id != final_lab_test_type_id:
             should_suggest = True
         if not should_suggest:
-            return
+            return False
         raw_phrase = (row.get("metadata") or {}).get("fuzzy_source") or row.get(
             "test_name_raw"
         )
         if not raw_phrase:
-            return
+            return False
         source = (
             "manual_override"
             if match_source == "unmatched"
@@ -1172,6 +1243,7 @@ class ResultImportService(BaseService[ResultImport]):
             },
             user_id=user_id,
         )
+        return True
 
     def _normalize_extraction(self, db: Session, raw: dict[str, Any]) -> dict[str, Any]:
         rows = []

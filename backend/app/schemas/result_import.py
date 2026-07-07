@@ -112,6 +112,15 @@ class LinkCandidateRead(BaseModel):
     products: List[str] = Field(default_factory=list)
 
 
+class ResultImportPreviewOverride(BaseModel):
+    row_id: str
+    lab_test_type_id: Optional[int] = None
+
+
+class ResultImportPreviewRequest(BaseModel):
+    overrides: List[ResultImportPreviewOverride] = Field(default_factory=list)
+
+
 class ExistingResultPreview(BaseModel):
     id: int
     test_type: str
@@ -147,4 +156,5 @@ class ConfirmResultImportResponse(BaseModel):
     created_result_ids: List[int]
     updated_result_ids: List[int]
     skipped_row_ids: List[str]
+    alias_suggestions_created: int = 0
     status: str

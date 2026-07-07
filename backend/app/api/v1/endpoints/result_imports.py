@@ -10,6 +10,7 @@ from app.schemas.result_import import (
     LinkCandidateRead,
     ResultImportList,
     ResultImportPreview,
+    ResultImportPreviewRequest,
     ResultImportRead,
     ResultImportUploadResponse,
 )
@@ -109,6 +110,24 @@ async def preview_result_import(
 ) -> ResultImportPreview:
     try:
         return ResultImportPreview(**service.preview_rows(db, import_id, lot_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{import_id}/preview", response_model=ResultImportPreview)
+async def preview_result_import_with_overrides(
+    import_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+    request: ResultImportPreviewRequest | None = None,
+    lot_id: int = Query(..., ge=1),
+) -> ResultImportPreview:
+    try:
+        return ResultImportPreview(
+            **service.preview_rows(
+                db, import_id, lot_id, request.overrides if request else None
+            )
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

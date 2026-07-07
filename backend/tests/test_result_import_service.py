@@ -1,5 +1,6 @@
 """Tests for the results importer service."""
 
+import hashlib
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -249,6 +250,51 @@ def test_upload_fails_without_openrouter_key_when_live_provider(
         raise AssertionError("upload should fail without OpenRouter configuration")
 
 
+def test_upload_duplicate_confirmed_import_returns_duplicate_summary(
+    test_db, sample_lot, sample_user, monkeypatch
+):
+    class DummyStorage:
+        def upload(self, content, key, content_type="application/octet-stream"):
+            raise AssertionError("duplicate upload should not write storage")
+
+        def delete(self, key):
+            raise AssertionError("duplicate upload should not delete storage")
+
+    content = b"not really a pdf"
+    existing = ResultImport(
+        original_filename="coa-existing.pdf",
+        storage_key="pdfs/result-imports/coa-existing.pdf",
+        file_hash=hashlib.sha256(content).hexdigest(),
+        status=ResultImportStatus.CONFIRMED,
+        selected_lot_id=sample_lot.id,
+        uploaded_by_id=sample_user.id,
+        confirmed_by_id=sample_user.id,
+        confirmed_at=datetime.utcnow(),
+    )
+    test_db.add(existing)
+    test_db.commit()
+
+    service = ResultImportService()
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service",
+        lambda: DummyStorage(),
+    )
+    monkeypatch.setattr(service, "_page_count", lambda content: 1)
+
+    created, duplicates = service.create_uploads(
+        test_db,
+        [("coa-duplicate.pdf", content, "application/pdf")],
+        sample_user.id,
+    )
+
+    assert created == []
+    assert [item.id for item in duplicates] == [existing.id]
+    summary = service.duplicate_summary(duplicates[0])
+    assert summary["import_id"] == existing.id
+    assert summary["lot_id"] == sample_lot.id
+    assert summary["confirmed_by"] == sample_user.username
+
+
 def test_confirm_creates_draft_results_and_attachment(
     test_db,
     sample_lot,
@@ -353,6 +399,42 @@ def test_confirm_persists_corrected_result_value(
     assert created.result_value == "8,000"
 
 
+def test_second_confirm_on_confirmed_import_raises_not_ready(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/double-confirm.pdf",
+        file_hash="double-confirm-hash",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={"rows": [_audit_row()]},
+    )
+    test_db.add(import_row)
+    test_db.commit()
+
+    service = ResultImportService()
+    service.confirm(
+        test_db,
+        import_row.id,
+        sample_lot.id,
+        [RowAction(row_id="row-1", action="apply")],
+        sample_user.id,
+    )
+
+    with pytest.raises(ValueError, match="not ready for confirmation"):
+        service.confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [RowAction(row_id="row-1", action="apply")],
+            sample_user.id,
+        )
+
+
 def test_confirm_rejects_mismatched_test_result_id(
     test_db,
     sample_lot,
@@ -411,6 +493,62 @@ def test_confirm_rejects_mismatched_test_result_id(
     test_db.refresh(existing)
     assert existing.test_type == "Lead"
     assert existing.result_value == "0.1"
+
+
+def test_confirm_rejects_action_targeting_existing_approved_result(
+    test_db,
+    sample_lot,
+    sample_user,
+    sample_product_with_specs,
+):
+    lead = test_db.query(LabTestType).filter_by(test_name="Lead").one()
+    approved = TestResult(
+        lot_id=sample_lot.id,
+        test_type="Lead",
+        result_value="0.1",
+        unit="ppm",
+        status=TestResultStatus.APPROVED,
+        lab_test_type_id=lead.id,
+    )
+    import_row = ResultImport(
+        original_filename="coa.pdf",
+        storage_key="pdfs/result-imports/approved-target.pdf",
+        file_hash="approved-target-hash",
+        status=ResultImportStatus.NEEDS_CONFIRMATION,
+        uploaded_by_id=sample_user.id,
+        extracted_data={
+            "rows": [
+                {
+                    "row_id": "row-1",
+                    "test_name_raw": "Lead",
+                    "test_name_normalized": "Lead",
+                    "result_value_raw": "0.2",
+                    "unit_raw": "ppm",
+                    "target_unit": "ppm",
+                    "limit_raw": "< 0.5",
+                    "confidence": 0.9,
+                    "warnings": [],
+                    "metadata": {},
+                    "matched_lab_test_type_id": lead.id,
+                    "match_source": "exact",
+                }
+            ],
+        },
+    )
+    test_db.add_all([approved, import_row])
+    test_db.commit()
+
+    with pytest.raises(ValueError, match="already approved"):
+        ResultImportService().confirm(
+            test_db,
+            import_row.id,
+            sample_lot.id,
+            [RowAction(row_id="row-1", action="replace")],
+            sample_user.id,
+        )
+
+    test_db.refresh(approved)
+    assert approved.result_value == "0.1"
 
 
 def test_confirm_audits_created_result(

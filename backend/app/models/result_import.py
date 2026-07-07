@@ -57,6 +57,14 @@ class ResultImport(BaseModel):
 
     __table_args__ = (
         Index("idx_result_import_hash_status", "file_hash", "status"),
+        Index(
+            "uq_result_import_active_file_hash",
+            "file_hash",
+            unique=True,
+            sqlite_where=status.in_(
+                ["PROCESSING", "NEEDS_CONFIRMATION", "CONFIRMED"]
+            ),
+        ),
         Index("idx_result_import_created", "created_at"),
     )
 

@@ -3,7 +3,7 @@
 from typing import Optional
 from pathlib import Path
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="google/gemini-2.5-flash", env="OPENROUTER_MODEL")
+
+    @model_validator(mode="after")
+    def validate_production_ai_provider(self) -> "Settings":
+        if self.app_env.lower() == "production" and self.ai_provider.lower() == "mock":
+            raise ValueError(
+                "AI_PROVIDER=mock is not allowed when APP_ENV=production; configure a live extraction provider"
+            )
+        return self
 
     # File paths
     template_folder: Path = Field(default=Path("./templates"), env="TEMPLATE_FOLDER")

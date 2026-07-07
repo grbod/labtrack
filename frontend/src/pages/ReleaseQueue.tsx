@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ReleasedCOAPreviewModal } from "@/components/domain/ReleasedCOAPreviewModal"
 import { useReleaseQueue, useRecentlyReleased, useDownloadWithTracking, useSendEmail } from "@/hooks/useRelease"
 import { useReturnLotForReview, useRejectLot } from "@/hooks/useLots"
 import { useAuthStore } from "@/store/auth"
@@ -45,6 +46,7 @@ export function ReleaseQueuePage() {
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
   const [selectedItem, setSelectedItem] = useState<ArchiveItem | null>(null)
+  const [previewItem, setPreviewItem] = useState<ArchiveItem | null>(null)
   const [actionDialog, setActionDialog] = useState<{ mode: "return" | "reject"; item: ReleaseQueueItem } | null>(null)
   const [actionReason, setActionReason] = useState("")
   const { data: queue = [], isLoading } = useReleaseQueue()
@@ -67,7 +69,7 @@ export function ReleaseQueuePage() {
     )
   })
 
-  const handleRowClick = (item: ReleaseQueueItem | ArchiveItem) => {
+  const handleAwaitingReleaseRowClick = (item: ReleaseQueueItem) => {
     navigate(`/release/${item.lot_id}/${item.product_id}`)
   }
 
@@ -76,11 +78,15 @@ export function ReleaseQueuePage() {
     downloadCoa(lotId, productId)
   }
 
-  const handleEmailClick = (e: React.MouseEvent, item: ArchiveItem) => {
-    e.stopPropagation() // Prevent row click navigation
+  const openEmailDialog = (item: ArchiveItem) => {
     setSelectedItem(item)
     setEmailRecipient("")
     setShowEmailDialog(true)
+  }
+
+  const handleEmailClick = (e: React.MouseEvent, item: ArchiveItem) => {
+    e.stopPropagation() // Prevent row click navigation
+    openEmailDialog(item)
   }
 
   const handleSendEmail = async () => {
@@ -208,7 +214,7 @@ export function ReleaseQueuePage() {
                 <TableRow
                   key={`${item.lot_id}-${item.product_id}`}
                   className="cursor-pointer hover:bg-slate-50/80 transition-colors"
-                  onClick={() => handleRowClick(item)}
+                  onClick={() => handleAwaitingReleaseRowClick(item)}
                 >
                   <TableCell className="font-mono text-[13px] font-medium text-slate-900">
                     {item.reference_number}
@@ -349,7 +355,7 @@ export function ReleaseQueuePage() {
                   <TableRow
                     key={`${item.lot_id}-${item.product_id}`}
                     className="cursor-pointer hover:bg-slate-50/80 transition-colors"
-                    onClick={() => handleRowClick(item)}
+                    onClick={() => setPreviewItem(item)}
                   >
                     <TableCell className="font-mono text-[13px] font-medium text-slate-900">
                       {item.reference_number}
@@ -554,6 +560,14 @@ export function ReleaseQueuePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ReleasedCOAPreviewModal
+        items={filteredReleased}
+        currentItem={previewItem}
+        onCurrentItemChange={setPreviewItem}
+        onEmail={openEmailDialog}
+        onDownload={downloadCoa}
+        isDownloading={isDownloading}
+      />
     </div>
   )
 }

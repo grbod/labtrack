@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { useState, useRef, useEffect, useImperativeHandle, useMemo } from "react"
 import { toast } from "sonner"
 import { Loader2, FileText, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,26 +16,33 @@ interface COAPreviewProps {
   productId: number
   isGenerating?: boolean
   hasError?: boolean
-  scrollRef?: React.RefObject<HTMLDivElement | null>
+  scrollRef?: React.Ref<HTMLDivElement | null>
+  readOnly?: boolean
+  showRetestOriginals?: boolean
 }
 
-export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef }: COAPreviewProps) {
+export function COAPreview({
+  lotId,
+  productId,
+  isGenerating,
+  hasError,
+  scrollRef,
+  readOnly = false,
+  showRetestOriginals = true,
+}: COAPreviewProps) {
   const [zoom, setZoom] = useState(100)
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
-  // Combine internal ref with external scrollRef
-  const setRefs = useCallback((node: HTMLDivElement | null) => {
-    containerRef.current = node
-    if (scrollRef && 'current' in scrollRef) {
-      (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = node
-    }
-  }, [scrollRef])
+  useImperativeHandle<HTMLDivElement | null, HTMLDivElement | null>(
+    scrollRef,
+    () => containerRef.current
+  )
 
   const { data: previewData, isLoading, error } = usePreviewData(lotId, productId)
   const saveDraft = useSaveDraft()
-  const { data: retestData } = useRetestRequests(lotId)
+  const { data: retestData } = useRetestRequests(showRetestOriginals ? lotId : 0)
 
   // Build map of test_result_id -> original_value from retest items
   const originalValuesMap = useMemo(() => {
@@ -78,6 +85,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
   const handleResetZoom = () => setZoom(100)
 
   const handleNotesChange = (notes: string) => {
+    if (readOnly) return
     saveDraft.mutate(
       { lotId, productId, data: { notes } },
       {
@@ -93,6 +101,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
   }
 
   const handleMfgDateChange = (date: Date | null) => {
+    if (readOnly) return
     saveDraft.mutate(
       { lotId, productId, data: { mfg_date: date ? date.toISOString() : null } },
       {
@@ -109,6 +118,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
   }
 
   const handleExpDateChange = (date: Date | null) => {
+    if (readOnly) return
     saveDraft.mutate(
       { lotId, productId, data: { exp_date: date ? date.toISOString() : null } },
       {
@@ -190,7 +200,7 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
       </div>
 
       {/* WYSIWYG Preview */}
-      <div ref={setRefs} className="flex-1 overflow-auto bg-slate-100 p-1">
+      <div ref={containerRef} className="flex-1 overflow-auto bg-slate-100 p-1">
         <div
           style={{
             // Set width to scaled document width so it centers properly
@@ -201,11 +211,18 @@ export function COAPreview({ lotId, productId, isGenerating, hasError, scrollRef
           }}
         >
           <COAPreviewDocument
+            key={[
+              previewData.reference_number,
+              previewData.notes ?? "",
+              previewData.mfg_date ?? "",
+              previewData.exp_date ?? "",
+            ].join("|")}
             data={previewData}
             scale={finalScale}
-            onNotesChange={handleNotesChange}
-            onMfgDateChange={handleMfgDateChange}
-            onExpDateChange={handleExpDateChange}
+            readOnly={readOnly}
+            onNotesChange={readOnly ? undefined : handleNotesChange}
+            onMfgDateChange={readOnly ? undefined : handleMfgDateChange}
+            onExpDateChange={readOnly ? undefined : handleExpDateChange}
             originalValuesMap={originalValuesMap}
           />
         </div>

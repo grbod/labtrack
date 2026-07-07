@@ -16,6 +16,7 @@ Usage:
     cd backend
     .venv/bin/python scripts/load_coa_register.py --dry-run     # report only (default)
     .venv/bin/python scripts/load_coa_register.py --commit      # backup + wipe + load
+    .venv/bin/python scripts/load_coa_register.py --append-from-row 1896 --commit
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import shutil
 import sys
 from collections import Counter, OrderedDict, defaultdict
 from datetime import date, datetime
+import re
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -114,10 +116,15 @@ def sku_key(row):
     return (n(C_BRAND), n(C_PRODUCT), n(C_FLAVOR), n(C_SIZE))
 
 
-def load_rows(xlsx_path):
+def load_rows(xlsx_path, append_from_row=None):
     ws = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)["Sheet1"]
-    return [list(r) for r in ws.iter_rows(min_row=2, values_only=True)
-            if any(not is_blank(v) for v in r)]
+    rows = []
+    for excel_row, r in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if append_from_row is not None and excel_row < append_from_row:
+            continue
+        if any(not is_blank(v) for v in r):
+            rows.append(list(r))
+    return rows
 
 
 def group_rows(rows):
@@ -175,8 +182,13 @@ def classify(group, ltt_by_name):
     return LotStatus.AWAITING_RESULTS, False
 
 
-def make_ref_generator():
+def make_ref_generator(existing_refs=None):
     seq = defaultdict(int)
+    ref_re = re.compile(r"^(\d{6})-(\d{3})$")
+    for ref in existing_refs or ():
+        match = ref_re.match(str(ref).strip())
+        if match:
+            seq[match.group(1)] = max(seq[match.group(1)], int(match.group(2)))
     today = datetime.now().date()
 
     def gen(mfg):
@@ -186,22 +198,90 @@ def make_ref_generator():
     return gen
 
 
+def future_date_flags(rows, first_future_year=2029):
+    flags = []
+    for r in rows:
+        mfg = to_date(r[C_MFG])
+        if mfg and mfg.year >= first_future_year:
+            flags.append(
+                "future Mfg Date "
+                f"{mfg.isoformat()} for RefID {cell_str(r[C_REFID])}, "
+                f"Lot {cell_str(r[C_LOT])}, "
+                f"{display_name(r[C_BRAND], r[C_PRODUCT], r[C_FLAVOR], r[C_SIZE])}"
+            )
+    return flags
+
+
+def append_conflicts(db, groups):
+    existing_lot_numbers = {
+        lot_number for (lot_number,) in db.query(Lot.lot_number).all()
+    }
+    existing_refs = {
+        reference_number for (reference_number,) in db.query(Lot.reference_number).all()
+    }
+    existing_sublots = {
+        sublot_number for (sublot_number,) in db.query(Sublot.sublot_number).all()
+    }
+    conflicts = []
+    for g in groups:
+        rows_g = g["rows"]
+        first = rows_g[0]
+        if g["kind"] == "standard":
+            lotnum = cell_str(first[C_LOT])
+            if lotnum.upper() == "NEEDS LOT":
+                lotnum = cell_str(first[C_REFID])
+            ref = cell_str(first[C_REFID])
+            if lotnum.upper() in existing_lot_numbers:
+                conflicts.append(("lot_number", lotnum, g["key"]))
+            if ref.upper() in existing_refs:
+                conflicts.append(("reference_number", ref, g["key"]))
+        elif g["kind"] == "parent":
+            lotnum = g.get("lotnum_override") or cell_str(first[C_LOT])
+            if lotnum.upper() in existing_lot_numbers:
+                conflicts.append(("lot_number", lotnum, g["key"]))
+            if "ref_override" in g and str(g["ref_override"]).strip().upper() in existing_refs:
+                conflicts.append(("reference_number", g["ref_override"], g["key"]))
+            same_sku_cref = "ref_override" in g
+            for r in rows_g:
+                sublot = cell_str(r[C_LOT]) if same_sku_cref else cell_str(r[C_REFID])
+                if sublot.upper() in existing_sublots:
+                    conflicts.append(("sublot_number", sublot, g["key"]))
+        else:
+            cref = str(g["key"]).strip()
+            if cref.upper() in existing_lot_numbers:
+                conflicts.append(("lot_number", cref, g["key"]))
+            if cref.upper() in existing_refs:
+                conflicts.append(("reference_number", cref, g["key"]))
+    return conflicts
+
+
 # --------------------------------------------------------------------------- #
 def main():
     ap = argparse.ArgumentParser(description="Wipe and load the COA register")
     ap.add_argument("--file", default=DEFAULT_XLSX)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--append-from-row",
+        type=int,
+        help="Append only nonblank workbook rows at or after this Excel row number; never wipes existing lots.",
+    )
     args = ap.parse_args()
     commit = args.commit and not args.dry_run
+    append_mode = args.append_from_row is not None
 
     print(f"Source : {args.file}")
     print(f"DB     : {DB_PATH}")
-    print(f"Mode   : {'COMMIT (wipe + load)' if commit else 'DRY RUN (no writes)'}\n")
+    if append_mode:
+        mode = "APPEND COMMIT" if commit else "APPEND DRY RUN"
+        print(f"Mode   : {mode} (from Excel row {args.append_from_row}; no wipe)\n")
+    else:
+        print(f"Mode   : {'COMMIT (wipe + load)' if commit else 'DRY RUN (no writes)'}\n")
 
-    rows = load_rows(args.file)
+    rows = load_rows(args.file, args.append_from_row)
     print(f"Rows read: {len(rows)}")
     groups, flags = group_rows(rows)
+    flags.extend(future_date_flags(rows))
 
     # per-product test panel (union across the product's rows) + needs-metals marker
     product_tests, product_needs_metals = defaultdict(set), defaultdict(bool)
@@ -239,6 +319,13 @@ def main():
         print("Status breakdown: " + ", ".join(f"{k}={v}" for k, v in sorted(statuses.items())))
         print(f"Products: {len(needed)} SKUs referenced, {len(needed) - len(to_create)} existing, {len(to_create)} to create")
 
+        conflicts = append_conflicts(db, groups) if append_mode else []
+        if conflicts:
+            print("\nFATAL: append import would collide with existing identifiers:")
+            for field, value, group_key in conflicts:
+                print(f"  ! {field} {value!r} in group {group_key!r}")
+            sys.exit(1)
+
         if not commit:
             if flags:
                 print("\nFlags:")
@@ -253,15 +340,24 @@ def main():
         if not os.path.exists(backup):
             print("FATAL: backup not created"); sys.exit(1)
         print(f"\nBacked up DB -> {backup}")
-        for t in WIPE_ORDER:
-            try:
-                db.execute(text(f"DELETE FROM {t}"))
-            except Exception as e:
-                print(f"  (skip wipe {t}: {e})")
-        print("Wiped per-lot lab data.")
+        if append_mode:
+            print("Append mode: existing per-lot lab data left intact.")
+        else:
+            for t in WIPE_ORDER:
+                try:
+                    db.execute(text(f"DELETE FROM {t}"))
+                except Exception as e:
+                    print(f"  (skip wipe {t}: {e})")
+            print("Wiped per-lot lab data.")
 
-        gen_ref = make_ref_generator()
-        used_refs, used_sublots = set(), set()
+        existing_refs = {
+            reference_number for (reference_number,) in db.query(Lot.reference_number).all()
+        } if append_mode else set()
+        existing_sublots = {
+            sublot_number for (sublot_number,) in db.query(Sublot.sublot_number).all()
+        } if append_mode else set()
+        gen_ref = make_ref_generator(existing_refs)
+        used_refs, used_sublots = set(existing_refs), set(existing_sublots)
         pid_cache = dict(existing)
         counts = Counter()
 

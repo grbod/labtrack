@@ -32,8 +32,43 @@ import {
 import { useArchive, useCustomers, useSendEmail, useDownloadWithTracking } from "@/hooks/useRelease"
 import { useProducts } from "@/hooks/useProducts"
 import { Badge } from "@/components/ui/badge"
+import { ReleasedCOAPreviewModal } from "@/components/domain/ReleasedCOAPreviewModal"
 import { formatDate } from "@/lib/date-utils"
 import type { ArchiveFilters, ArchiveItem } from "@/types/release"
+
+type ArchiveSortColumn = NonNullable<ArchiveFilters["sort_by"]>
+
+interface SortableHeaderProps {
+  column: ArchiveSortColumn
+  label: string
+  sortBy: ArchiveSortColumn
+  sortOrder: "asc" | "desc"
+  onSort: (column: ArchiveSortColumn) => void
+}
+
+function SortableHeader({
+  column,
+  label,
+  sortBy,
+  sortOrder,
+  onSort,
+}: SortableHeaderProps) {
+  return (
+    <TableHead
+      className="text-[12px] font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 select-none"
+      onClick={() => onSort(column)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {sortBy === column && (
+          sortOrder === "asc"
+            ? <ChevronUp className="h-3.5 w-3.5" />
+            : <ChevronDown className="h-3.5 w-3.5" />
+        )}
+      </div>
+    </TableHead>
+  )
+}
 
 export function ArchivePage() {
   const [search, setSearch] = useState("")
@@ -45,13 +80,14 @@ export function ArchivePage() {
   const [showFilters, setShowFilters] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [sortBy, setSortBy] = useState<ArchiveFilters['sort_by']>('released_at')
+  const [sortBy, setSortBy] = useState<ArchiveSortColumn>('released_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   // Email dialog state
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailTarget, setEmailTarget] = useState<{ lotId: number; productId: number } | null>(null)
   const [emailRecipient, setEmailRecipient] = useState("")
+  const [previewItem, setPreviewItem] = useState<ArchiveItem | null>(null)
 
 
   // Build filters object
@@ -88,7 +124,7 @@ export function ArchivePage() {
     setPage(1)
   }
 
-  const handleSort = (column: ArchiveFilters['sort_by']) => {
+  const handleSort = (column: ArchiveSortColumn) => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
     } else {
@@ -98,32 +134,22 @@ export function ArchivePage() {
     setPage(1)
   }
 
-  const SortableHeader = ({
-    column,
-    label
-  }: {
-    column: ArchiveFilters['sort_by']
-    label: string
-  }) => (
-    <TableHead
-      className="text-[12px] font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 select-none"
-      onClick={() => handleSort(column)}
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        {sortBy === column && (
-          sortOrder === 'asc'
-            ? <ChevronUp className="h-3.5 w-3.5" />
-            : <ChevronDown className="h-3.5 w-3.5" />
-        )}
-      </div>
-    </TableHead>
-  )
+  const visibleItems = archiveData?.items ?? []
+
+  const handleDownloadClick = (e: React.MouseEvent, lotId: number, productId: number) => {
+    e.stopPropagation()
+    handleDownload(lotId, productId)
+  }
 
   const handleResendEmail = (item: ArchiveItem) => {
     setEmailTarget({ lotId: item.lot_id, productId: item.product_id })
     setEmailRecipient("")
     setEmailDialogOpen(true)
+  }
+
+  const handleResendEmailClick = (e: React.MouseEvent, item: ArchiveItem) => {
+    e.stopPropagation()
+    handleResendEmail(item)
   }
 
   const handleSendEmail = async () => {
@@ -302,11 +328,41 @@ export function ArchivePage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50/80">
-                  <SortableHeader column="reference_number" label="Ref" />
-                  <SortableHeader column="lot_number" label="Lot" />
-                  <SortableHeader column="brand" label="Brand" />
-                  <SortableHeader column="product_name" label="Product" />
-                  <SortableHeader column="released_at" label="Released Date" />
+                  <SortableHeader
+                    column="reference_number"
+                    label="Ref"
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    column="lot_number"
+                    label="Lot"
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    column="brand"
+                    label="Brand"
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    column="product_name"
+                    label="Product"
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    column="released_at"
+                    label="Released Date"
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
+                  />
                   <TableHead className="text-[12px] font-semibold text-slate-600">Customer</TableHead>
                   <TableHead className="text-[12px] font-semibold text-slate-600">Status</TableHead>
                   <TableHead className="text-[12px] font-semibold text-slate-600 text-right">
@@ -316,7 +372,11 @@ export function ArchivePage() {
               </TableHeader>
               <TableBody>
                 {archiveData.items.map((item) => (
-                  <TableRow key={`${item.lot_id}-${item.product_id}`} className="hover:bg-slate-50/80">
+                  <TableRow
+                    key={`${item.lot_id}-${item.product_id}`}
+                    className="cursor-pointer hover:bg-slate-50/80"
+                    onClick={() => setPreviewItem(item)}
+                  >
                     <TableCell className="font-mono text-[13px] font-medium text-slate-900">
                       {item.reference_number}
                     </TableCell>
@@ -346,7 +406,7 @@ export function ArchivePage() {
                           variant="ghost"
                           size="icon-sm"
                           title="Download COA"
-                          onClick={() => handleDownload(item.lot_id, item.product_id)}
+                          onClick={(e) => handleDownloadClick(e, item.lot_id, item.product_id)}
                           disabled={isDownloading(item.lot_id, item.product_id)}
                           className={`h-8 w-8 rounded-md border border-slate-200 bg-white shadow-sm hover:bg-slate-50 hover:shadow active:shadow-none active:bg-slate-100 transition-all ${isDownloading(item.lot_id, item.product_id) ? "cursor-wait" : ""}`}
                         >
@@ -359,7 +419,7 @@ export function ArchivePage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => handleResendEmail(item)}
+                          onClick={(e) => handleResendEmailClick(e, item)}
                           title="Re-send email"
                           className="h-8 w-8 rounded-md border border-slate-200 bg-white shadow-sm hover:bg-slate-50 hover:shadow active:shadow-none active:bg-slate-100 transition-all"
                         >
@@ -456,6 +516,14 @@ export function ArchivePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ReleasedCOAPreviewModal
+        items={visibleItems}
+        currentItem={previewItem}
+        onCurrentItemChange={setPreviewItem}
+        onEmail={handleResendEmail}
+        onDownload={handleDownload}
+        isDownloading={isDownloading}
+      />
       </motion.div>
     </div>
   )

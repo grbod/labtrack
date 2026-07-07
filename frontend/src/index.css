@@ -472,12 +472,17 @@ body {
   background: #737c73 !important;
 }
 
-/* Printable-document previews: keep paper light but dim it in dark mode */
+/* Printable-document previews: white paper, dimmed slightly in light mode and
+   a bit more in dark mode so the page is easier on the eyes. */
 .document-preview {
   background-color: #ffffff; /* paper is always white, not themed */
+  /* Dim toward warm sepia (not neutral black) so the paper sits on the
+     Solarized cream theme. Order matters: dim first, then tint the result. */
+  filter: brightness(0.96) sepia(0.2) saturate(1.16);
 }
 .dark .document-preview {
-  filter: brightness(0.75) sepia(0.06);
+  /* Dim toward a warm parchment/brown to match the Kanagawa Dragon dark theme. */
+  filter: brightness(0.9) sepia(0.28) saturate(1.23);
 }
 
 /* Enterprise-grade compact styles */

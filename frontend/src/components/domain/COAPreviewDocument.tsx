@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef } from "react"
 import { parse, format } from "date-fns"
 import { Calendar, Pencil } from "lucide-react"
 import {
@@ -14,6 +14,7 @@ interface COAPreviewDocumentProps {
   onNotesChange?: (notes: string) => void
   onMfgDateChange?: (date: Date | null) => void
   onExpDateChange?: (date: Date | null) => void
+  readOnly?: boolean
   scale?: number
   /** Map of test_result_id -> original_value for retested tests */
   originalValuesMap?: Map<number, string | null>
@@ -24,6 +25,7 @@ export function COAPreviewDocument({
   onNotesChange,
   onMfgDateChange,
   onExpDateChange,
+  readOnly = false,
   scale = 1,
   originalValuesMap,
 }: COAPreviewDocumentProps) {
@@ -51,14 +53,9 @@ export function COAPreviewDocument({
     return format(date, "yyyy-MM-dd")
   }
 
-  // Update notes when data changes
-  useEffect(() => {
-    setNotes(data.notes || "")
-  }, [data.notes])
-
   const handleNotesBlur = () => {
     setIsEditingNotes(false)
-    if (notes !== data.notes && onNotesChange) {
+    if (!readOnly && notes !== data.notes && onNotesChange) {
       onNotesChange(notes)
     }
   }
@@ -66,7 +63,7 @@ export function COAPreviewDocument({
   const handleMfgDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setMfgDateOpen(false)
-    if (onMfgDateChange) {
+    if (!readOnly && onMfgDateChange) {
       onMfgDateChange(value ? new Date(value) : null)
     }
   }
@@ -74,7 +71,7 @@ export function COAPreviewDocument({
   const handleExpDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setExpDateOpen(false)
-    if (onExpDateChange) {
+    if (!readOnly && onExpDateChange) {
       onExpDateChange(value ? new Date(value) : null)
     }
   }
@@ -211,32 +208,38 @@ export function COAPreviewDocument({
             >
               Manufacturing Date
             </span>
-            <Popover open={mfgDateOpen} onOpenChange={setMfgDateOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
-                  style={{ fontSize: "10pt" }}
-                >
-                  <span
-                    className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
+            {readOnly ? (
+              <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
+                {data.mfg_date || "Not set"}
+              </span>
+            ) : (
+              <Popover open={mfgDateOpen} onOpenChange={setMfgDateOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
+                    style={{ fontSize: "10pt" }}
                   >
-                    {data.mfg_date || "Not set"}
-                  </span>
-                  <Calendar
-                    className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
-                    style={{ width: "12px", height: "12px" }}
+                    <span
+                      className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
+                    >
+                      {data.mfg_date || "Not set"}
+                    </span>
+                    <Calendar
+                      className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
+                      style={{ width: "12px", height: "12px" }}
+                    />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-3" align="start">
+                  <Input
+                    type="date"
+                    defaultValue={formatDateForInput(data.mfg_date)}
+                    onChange={handleMfgDateChange}
+                    className="w-[180px]"
                   />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-3" align="start">
-                <Input
-                  type="date"
-                  defaultValue={formatDateForInput(data.mfg_date)}
-                  onChange={handleMfgDateChange}
-                  className="w-[180px]"
-                />
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+            )}
           </div>
 
           {/* Editable Expiration Date */}
@@ -247,32 +250,38 @@ export function COAPreviewDocument({
             >
               Expiration Date
             </span>
-            <Popover open={expDateOpen} onOpenChange={setExpDateOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
-                  style={{ fontSize: "10pt" }}
-                >
-                  <span
-                    className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
+            {readOnly ? (
+              <span className="font-medium text-[#0f172a]" style={{ fontSize: "10pt" }}>
+                {data.exp_date || "Not set"}
+              </span>
+            ) : (
+              <Popover open={expDateOpen} onOpenChange={setExpDateOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="group flex items-center gap-1 font-medium text-[#0f172a] hover:text-blue-600 transition-colors"
+                    style={{ fontSize: "10pt" }}
                   >
-                    {data.exp_date || "Not set"}
-                  </span>
-                  <Calendar
-                    className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
-                    style={{ width: "12px", height: "12px" }}
+                    <span
+                      className="border-b border-dashed border-[#cbd5e1] group-hover:border-blue-400"
+                    >
+                      {data.exp_date || "Not set"}
+                    </span>
+                    <Calendar
+                      className="h-3 w-3 text-[#94a3b8] group-hover:text-blue-500"
+                      style={{ width: "12px", height: "12px" }}
+                    />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-3" align="start">
+                  <Input
+                    type="date"
+                    defaultValue={formatDateForInput(data.exp_date)}
+                    onChange={handleExpDateChange}
+                    className="w-[180px]"
                   />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-3" align="start">
-                <Input
-                  type="date"
-                  defaultValue={formatDateForInput(data.exp_date)}
-                  onChange={handleExpDateChange}
-                  className="w-[180px]"
-                />
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+            )}
           </div>
         </div>
       </div>
@@ -439,7 +448,7 @@ export function COAPreviewDocument({
             padding: "12px",
           }}
         >
-          {isEditingNotes ? (
+          {!readOnly && isEditingNotes ? (
             <textarea
               ref={notesRef}
               value={notes}
@@ -456,19 +465,24 @@ export function COAPreviewDocument({
           ) : (
             <div
               onClick={() => {
+                if (readOnly) return
                 setIsEditingNotes(true)
                 setTimeout(() => notesRef.current?.focus(), 0)
               }}
-              className="cursor-text min-h-[40px] text-[#78350f] whitespace-pre-wrap"
+              className={`${readOnly ? "" : "cursor-text"} min-h-[40px] text-[#78350f] whitespace-pre-wrap`}
               style={{ fontSize: "9pt" }}
             >
               {notes || (
-                <span className="text-[#d97706]/60 italic">Click to add notes...</span>
+                <span className="text-[#d97706]/60 italic">
+                  {readOnly ? "No notes" : "Click to add notes..."}
+                </span>
               )}
-              <Pencil
-                className="absolute top-2 right-2 h-4 w-4 text-[#fbbf24] opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ width: "14px", height: "14px" }}
-              />
+              {!readOnly && (
+                <Pencil
+                  className="absolute top-2 right-2 h-4 w-4 text-[#fbbf24] opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ width: "14px", height: "14px" }}
+                />
+              )}
             </div>
           )}
         </div>

@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import { FileUp, Loader2, RotateCcw, Search, TriangleAlert, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
+import { ResultsImporterReviewModal } from "@/components/domain/ResultsImporterReviewModal"
 import {
   useCancelResultImport,
   useResultImports,
@@ -18,6 +18,8 @@ import {
   resultImportStatusLabels,
 } from "@/lib/resultImportStatus"
 import { formatDate } from "@/lib/date-utils"
+import { useAuthStore } from "@/store/auth"
+import { hasRole } from "@/lib/roles"
 import type { ResultImport } from "@/types"
 import { cn } from "@/lib/utils"
 
@@ -32,10 +34,11 @@ const FILTER_CHIPS: { key: StatusFilter; label: string }[] = [
 ]
 
 export function ResultsImporterListPage() {
-  const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
   const importsQuery = useResultImports()
+  const [activeImportId, setActiveImportId] = useState<number | null>(null)
   const uploadMutation = useUploadResultImports((duplicateId) =>
-    navigate(`/results-importer/${duplicateId}`)
+    setActiveImportId(duplicateId)
   )
   const retryMutation = useRetryResultImport()
   const cancelMutation = useCancelResultImport()
@@ -104,7 +107,7 @@ export function ResultsImporterListPage() {
             <Button
               onClick={() => {
                 const next = items.find((item) => item.status === "needs_confirmation")
-                if (next) navigate(`/results-importer/${next.id}`)
+                if (next) setActiveImportId(next.id)
               }}
             >
               Review {reviewCount} pending
@@ -200,7 +203,11 @@ export function ResultsImporterListPage() {
                   <ImportRow
                     key={item.id}
                     item={item}
-                    onOpen={() => navigate(`/results-importer/${item.id}`)}
+                    canRevert={
+                      hasRole(user, "qc_manager", "admin") ||
+                      (!!user && user.id === item.confirmed_by_id)
+                    }
+                    onOpen={() => setActiveImportId(item.id)}
                     onRetry={() => retryMutation.mutate(item.id)}
                     onCancel={() =>
                       item.status === "needs_confirmation"
@@ -234,18 +241,25 @@ export function ResultsImporterListPage() {
           else cancelMutation.mutate(pendingAction.item.id)
         }}
       />
+
+      <ResultsImporterReviewModal
+        importId={activeImportId}
+        onImportIdChange={setActiveImportId}
+      />
     </div>
   )
 }
 
 function ImportRow({
   item,
+  canRevert,
   onOpen,
   onRetry,
   onCancel,
   onRevert,
 }: {
   item: ResultImport
+  canRevert: boolean
   onOpen: () => void
   onRetry: () => void
   onCancel: () => void
@@ -330,7 +344,7 @@ function ImportRow({
               <X className="mr-1.5 h-3.5 w-3.5" /> Cancel
             </Button>
           )}
-          {item.status === "confirmed" && (
+          {item.status === "confirmed" && canRevert && (
             <Button size="sm" variant="outline" onClick={onRevert}>
               <Undo2 className="mr-1.5 h-3.5 w-3.5" /> Revert
             </Button>

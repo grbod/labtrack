@@ -18,8 +18,10 @@ import { ReleasePage } from "@/pages/Release"
 import { ArchivePage } from "@/pages/Archive"
 import { ArchivedItemsPage } from "@/pages/ArchivedItems"
 import { ArchiveLotPage } from "@/pages/ArchiveLot"
-import { ResultsImporterReviewPage } from "@/pages/ResultsImporter"
 import { ResultsImporterListPage } from "@/pages/ResultsImporterList"
+import { RequireRole } from "@/components/domain/RequireRole"
+
+const IMPORTER_ROLES = ["lab_tech", "qc_manager", "admin"] as const
 
 // Create a client
 const queryClient = new QueryClient({
@@ -55,8 +57,14 @@ function AppRoutes() {
         <Route path="/lab-tests" element={<LabTestTypesPage />} />
         <Route path="/samples" element={<CreateSamplePage />} />
         <Route path="/tracker" element={<SampleTrackerPage />} />
-        <Route path="/results-importer" element={<ResultsImporterListPage />} />
-        <Route path="/results-importer/:importId" element={<ResultsImporterReviewPage />} />
+        <Route
+          path="/results-importer"
+          element={
+            <RequireRole roles={[...IMPORTER_ROLES]}>
+              <ResultsImporterListPage />
+            </RequireRole>
+          }
+        />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/release" element={<ReleaseQueuePage />} />

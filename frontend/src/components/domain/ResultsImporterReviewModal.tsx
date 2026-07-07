@@ -1,9 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
 import { Document, Page, pdfjs } from "react-pdf"
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -17,6 +15,7 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
 import { resultImportsApi } from "@/api/resultImports"
 import {
@@ -28,7 +27,6 @@ import {
   useResultImports,
   useRetryResultImport,
   useRevertResultImport,
-  useUploadResultImports,
 } from "@/hooks/useResultImports"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import { useLotWithSpecs } from "@/hooks/useLots"
@@ -41,6 +39,8 @@ import {
   type SpecReviewRowState,
 } from "@/lib/buildRowActions"
 import { RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE } from "@/lib/resultsImporterConfig"
+import { useAuthStore } from "@/store/auth"
+import { hasRole } from "@/lib/roles"
 import {
   resultImportStatusDotClass as statusDotClass,
   resultImportStatusLabels as statusLabels,
@@ -76,6 +76,10 @@ const PDF_CROP_SCALE = 1 / (1 - 2 * PAGE_MARGIN_FRACTION * PDF_MARGIN_CROP)
 const SPLIT_RATIO_KEY = "lab-test-import-split"
 const DEFAULT_SPLIT_RATIO = 0.4
 
+/** A processing import older than this is treated as stuck (mirrors the backend
+ *  reaper window that retries/fails stalled extractions). */
+const STUCK_IMPORT_MS = 20 * 60 * 1000
+
 const LOT_TYPE_TAG: Record<LotType, { label: string; tag: string }> = {
   standard: { label: "Single SKU", tag: "bg-blue-100 text-blue-700" },
   parent_lot: { label: "Parent Lot", tag: "bg-green-100 text-green-700" },
@@ -88,18 +92,19 @@ const LOT_COLOR = "text-green-700"
 
 // ---------------------------------------------------------------------------
 
-export function ResultsImporterReviewPage() {
-  const navigate = useNavigate()
-  const { importId } = useParams()
-  const id = Number(importId)
+export function ResultsImporterReviewModal({
+  importId,
+  onImportIdChange,
+}: {
+  importId: number | null
+  onImportIdChange: (id: number | null) => void
+}) {
+  const id = importId ?? 0
   const validId = Number.isInteger(id) && id > 0
 
   const importsQuery = useResultImports()
   const detailQuery = useResultImport(validId ? id : null)
   const item = detailQuery.data
-  const uploadMutation = useUploadResultImports((duplicateId) =>
-    navigate(`/results-importer/${duplicateId}`)
-  )
   const retryMutation = useRetryResultImport()
   const cancelMutation = useCancelResultImport()
   const revertMutation = useRevertResultImport()
@@ -112,168 +117,178 @@ export function ResultsImporterReviewPage() {
   )
   const queueIndex = reviewQueue.findIndex((entry) => entry.id === id)
 
-  const handleFiles = useCallback(
-    (files: FileList | null) => {
-      const selectedFiles = Array.from(files || []).slice(0, 5)
-      if (selectedFiles.length) uploadMutation.mutate(selectedFiles)
-    },
-    [uploadMutation]
-  )
-
-  /** After Apply, advance to the next import awaiting review, else back to the list. */
+  /** After Apply, advance to the next import awaiting review, else close the modal. */
   const advanceToNext = useCallback(
     (doneId: number) => {
       const next = reviewQueue.find((entry) => entry.id !== doneId)
-      if (next) navigate(`/results-importer/${next.id}`)
-      else navigate("/results-importer")
+      onImportIdChange(next ? next.id : null)
     },
-    [reviewQueue, navigate]
+    [reviewQueue, onImportIdChange]
   )
-
-  // Esc returns to the list (ignored while typing or when a dialog is open).
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || pendingAction !== null) return
-      const target = event.target instanceof HTMLElement ? event.target : null
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return
-      if (target?.closest('[role="dialog"]')) return
-      navigate("/results-importer")
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [navigate, pendingAction])
 
   const { ratio, splitRef, startDrag } = useResizableRatio()
 
   return (
-    <div
-      className="flex h-[calc(100vh-3.5rem)] flex-col bg-slate-50"
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault()
-        handleFiles(event.dataTransfer.files)
+    <Dialog
+      open={importId !== null}
+      onOpenChange={(open) => {
+        if (!open) onImportIdChange(null)
       }}
     >
-      <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => navigate("/results-importer")}
-            aria-label="Back to imports"
-          >
-            <ArrowLeft className="mr-1.5 h-4 w-4" /> Imports
-          </Button>
-          {item && (
-            <div className="min-w-0 border-l border-slate-200 pl-3">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {item.original_filename}
-              </p>
-              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-                <span className={cn("h-2 w-2 rounded-full", statusDotClass[item.status])} />
-                {statusLabels[item.status]}
-              </p>
-            </div>
-          )}
-        </div>
-        {reviewQueue.length > 0 && (
-          <div className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
-            {queueIndex >= 0 ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={queueIndex <= 0}
-                  onClick={() => navigate(`/results-importer/${reviewQueue[queueIndex - 1].id}`)}
-                  aria-label="Previous import to review"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="whitespace-nowrap">
-                  {queueIndex + 1} of {reviewQueue.length} to review
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={queueIndex >= reviewQueue.length - 1}
-                  onClick={() => navigate(`/results-importer/${reviewQueue[queueIndex + 1].id}`)}
-                  aria-label="Next import to review"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => navigate(`/results-importer/${reviewQueue[0].id}`)}
-              >
-                {reviewQueue.length} to review <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[92vh] w-[95vw] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1600px]"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogTitle className="sr-only">
+          {item?.original_filename ?? "Review imported results"}
+        </DialogTitle>
+
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {item && (
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {item.original_filename}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
+                  <span className={cn("h-2 w-2 rounded-full", statusDotClass[item.status])} />
+                  {statusLabels[item.status]}
+                </p>
+              </div>
             )}
           </div>
+          <div className="flex shrink-0 items-center gap-3">
+            {reviewQueue.length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-slate-500">
+                {queueIndex >= 0 ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={queueIndex <= 0}
+                      onClick={() => onImportIdChange(reviewQueue[queueIndex - 1].id)}
+                      aria-label="Previous import to review"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="whitespace-nowrap">
+                      {queueIndex + 1} of {reviewQueue.length} to review
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={queueIndex >= reviewQueue.length - 1}
+                      onClick={() => onImportIdChange(reviewQueue[queueIndex + 1].id)}
+                      aria-label="Next import to review"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onImportIdChange(reviewQueue[0].id)}
+                  >
+                    {reviewQueue.length} to review <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onImportIdChange(null)}
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {!validId || detailQuery.isError ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-slate-500">
+            <p>This import could not be found.</p>
+            <Button variant="outline" onClick={() => onImportIdChange(null)}>
+              <X className="mr-1.5 h-4 w-4" /> Close
+            </Button>
+          </div>
+        ) : !item ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading import
+          </div>
+        ) : (
+          <div ref={splitRef} className="flex min-h-0 flex-1">
+            <div style={{ width: `${ratio * 100}%` }} className="min-w-0">
+              <PdfPreview item={item} />
+            </div>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onPointerDown={startDrag}
+              className="group relative w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400"
+              title="Drag to resize"
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <ReviewPane
+                item={item}
+                onRetry={(retryId) => retryMutation.mutate(retryId)}
+                onCancel={() => setPendingAction("cancel")}
+                onRevert={() => setPendingAction("revert")}
+                onApplied={advanceToNext}
+              />
+            </div>
+          </div>
         )}
-      </div>
 
-      {!validId || detailQuery.isError ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-slate-500">
-          <p>This import could not be found.</p>
-          <Button variant="outline" onClick={() => navigate("/results-importer")}>
-            <ArrowLeft className="mr-1.5 h-4 w-4" /> Back to imports
-          </Button>
-        </div>
-      ) : !item ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading import
-        </div>
-      ) : (
-        <div ref={splitRef} className="flex min-h-0 flex-1">
-          <div style={{ width: `${ratio * 100}%` }} className="min-w-0">
-            <PdfPreview item={item} />
-          </div>
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            onPointerDown={startDrag}
-            className="group relative w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400"
-            title="Drag to resize"
-          >
-            <div className="absolute inset-y-0 -left-1 -right-1" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <ReviewPane
-              item={item}
-              onRetry={(retryId) => retryMutation.mutate(retryId)}
-              onCancel={() => setPendingAction("cancel")}
-              onRevert={() => setPendingAction("revert")}
-              onApplied={advanceToNext}
-            />
-          </div>
-        </div>
-      )}
-
-      <ConfirmActionDialog
-        open={pendingAction !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingAction(null)
-        }}
-        title={pendingAction === "revert" ? "Revert this import?" : "Cancel this import?"}
-        description={
-          pendingAction === "revert"
-            ? `Draft results applied from "${item?.original_filename ?? "this PDF"}" will be removed from the lot. Results that were edited or approved since are kept.`
-            : item?.status === "needs_confirmation"
-              ? "Cancelling discards the extracted results; you would need to re-upload the PDF to import it again."
-              : "This stops the import. You can re-upload the PDF later if needed."
-        }
-        confirmLabel={pendingAction === "revert" ? "Revert import" : "Cancel import"}
-        onConfirm={() => {
-          if (!item) return
-          if (pendingAction === "revert") revertMutation.mutate(item.id)
-          else cancelMutation.mutate(item.id)
-        }}
-      />
-    </div>
+        <ConfirmActionDialog
+          open={pendingAction !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingAction(null)
+          }}
+          title={pendingAction === "revert" ? "Revert this import?" : "Cancel this import?"}
+          description={
+            pendingAction === "revert"
+              ? `Draft results applied from "${item?.original_filename ?? "this PDF"}" will be removed from the lot. Results that were edited or approved since are kept.`
+              : item?.status === "needs_confirmation"
+                ? "Cancelling discards the extracted results; you would need to re-upload the PDF to import it again."
+                : "This stops the import. You can re-upload the PDF later if needed."
+          }
+          confirmLabel={pendingAction === "revert" ? "Revert import" : "Cancel import"}
+          onConfirm={() => {
+            if (!item) return
+            if (pendingAction === "revert")
+              revertMutation.mutate(item.id, { onSuccess: () => onImportIdChange(null) })
+            else cancelMutation.mutate(item.id, { onSuccess: () => onImportIdChange(null) })
+          }}
+        />
+      </DialogContent>
+    </Dialog>
   )
+}
+
+/** True once a processing import has stalled past STUCK_IMPORT_MS. Time is read
+ *  in an effect (not during render) and re-checked periodically so the warning
+ *  can appear without a status change. */
+function useIsStuck(item: ResultImport): boolean {
+  const [stuck, setStuck] = useState(false)
+  const processing = item.status === "processing"
+  const startedAt = item.updated_at || item.created_at
+  useEffect(() => {
+    if (!processing) {
+      setStuck(false)
+      return
+    }
+    const check = () =>
+      setStuck(Date.now() - new Date(startedAt).getTime() > STUCK_IMPORT_MS)
+    check()
+    const timer = window.setInterval(check, 30_000)
+    return () => window.clearInterval(timer)
+  }, [processing, startedAt])
+  return stuck
 }
 
 /** Persisted, draggable 2-pane ratio (left fraction). */
@@ -443,6 +458,11 @@ function ReviewPane({
   onRevert: (id: number) => void
   onApplied: (doneId: number) => void
 }) {
+  const user = useAuthStore((state) => state.user)
+  const canRevert =
+    hasRole(user, "qc_manager", "admin") || (!!user && user.id === item.confirmed_by_id)
+  const isStuck = useIsStuck(item)
+
   const [selectedLotId, setSelectedLotId] = useState<number | null>(null)
   const [manualSearch, setManualSearch] = useState("")
   // Per-row Result-cell state. Corrections are posted in row_actions.result_value;
@@ -712,7 +732,7 @@ function ReviewPane({
                 <X className="mr-2 h-4 w-4" /> Cancel
               </Button>
             )}
-            {item.status === "confirmed" && (
+            {item.status === "confirmed" && canRevert && (
               <Button size="sm" variant="outline" onClick={() => onRevert(item.id)}>
                 <Undo2 className="mr-2 h-4 w-4" /> Revert
               </Button>
@@ -806,6 +826,28 @@ function ReviewPane({
               )}
             </>
           )
+        ) : isStuck ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+            <div className="flex items-start gap-2">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <div className="space-y-1">
+                <p className="font-medium">Extraction appears stuck</p>
+                <p className="text-amber-700">
+                  This import has been processing for over 20 minutes. The server automatically
+                  retries or fails imports that stall this long, so it may recover on its own. You
+                  can also cancel it and re-upload the PDF.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-1"
+                  onClick={() => onCancel(item.id)}
+                >
+                  <X className="mr-2 h-4 w-4" /> Cancel import
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
             {item.status === "processing"

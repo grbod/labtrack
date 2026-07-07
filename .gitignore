@@ -176,6 +176,14 @@ token.json
 /*.docx
 COA Reports/
 COAs/
+/newcoaregister.csv
+/product_test_mapping.csv
+/recentsamples.csv
+files_to_import/
+
+# Database backups
+*.db.bak-*
+backend/backups/
 
 # Node
 node_modules/

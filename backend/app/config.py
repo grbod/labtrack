@@ -3,7 +3,11 @@
 from typing import Optional
 from pathlib import Path
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
+
+# Shipped defaults for secrets — must be overridden in production.
+_DEFAULT_SECRET_KEY = "your-secret-key-here-change-in-production"
+_DEFAULT_JWT_SECRET_KEY = "your-jwt-secret-key-here"
 
 
 class Settings(BaseSettings):
@@ -25,10 +29,10 @@ class Settings(BaseSettings):
 
     # Security
     secret_key: str = Field(
-        default="your-secret-key-here-change-in-production", env="SECRET_KEY"
+        default=_DEFAULT_SECRET_KEY, env="SECRET_KEY"
     )
     jwt_secret_key: str = Field(
-        default="your-jwt-secret-key-here", env="JWT_SECRET_KEY"
+        default=_DEFAULT_JWT_SECRET_KEY, env="JWT_SECRET_KEY"
     )
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
@@ -38,6 +42,8 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
+    openrouter_model: str = Field(default="google/gemini-2.5-flash", env="OPENROUTER_MODEL")
 
     # File paths
     watch_folder_path: Path = Field(default=Path("./pdf_watch"), env="WATCH_FOLDER")
@@ -95,6 +101,23 @@ class Settings(BaseSettings):
     )
     company_phone: str = Field(default="(555) 123-4567", env="COMPANY_PHONE")
     company_email: str = Field(default="lab@company.com", env="COMPANY_EMAIL")
+
+    @model_validator(mode="after")
+    def _guard_production_secrets(self) -> "Settings":
+        """Refuse to start in production with shipped default secrets."""
+        if self.environment.lower() == "production":
+            offenders = []
+            if self.secret_key == _DEFAULT_SECRET_KEY:
+                offenders.append("SECRET_KEY")
+            if self.jwt_secret_key == _DEFAULT_JWT_SECRET_KEY:
+                offenders.append("JWT_SECRET_KEY")
+            if offenders:
+                raise ValueError(
+                    "Refusing to start in production with default secret(s): "
+                    f"{', '.join(offenders)}. Set a strong, unique value for each "
+                    "via environment variables before deploying."
+                )
+        return self
 
     class Config:
         env_file = ".env"

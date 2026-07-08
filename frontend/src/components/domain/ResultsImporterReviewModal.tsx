@@ -30,15 +30,9 @@ import {
 } from "@/hooks/useResultImports"
 import { useLabTestTypes } from "@/hooks/useLabTestTypes"
 import { useLotWithSpecs } from "@/hooks/useLots"
-import { useTestResults } from "@/hooks/useTestResults"
 import { PassFailBadge } from "@/components/domain/SampleModal/PassFailBadge"
 import { calculatePassFail } from "@/lib/spec-validation"
-import {
-  buildRowActions,
-  type ExistingResultForAction,
-  type SpecReviewRowState,
-} from "@/lib/buildRowActions"
-import { RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE } from "@/lib/resultsImporterConfig"
+import { buildRowActions, type SpecReviewRowState } from "@/lib/buildRowActions"
 import { useAuthStore } from "@/store/auth"
 import { hasRole } from "@/lib/roles"
 import {
@@ -46,15 +40,16 @@ import {
   resultImportStatusLabels as statusLabels,
 } from "@/lib/resultImportStatus"
 import type {
+  ExistingResultPreview,
   ExtractedResultRow,
   LabTestType,
   LotType,
   ProductInLotWithSpecs,
   ResultImport,
   ResultImportCandidate,
+  ResultImportPreviewOverride,
   ResultImportRowPreview,
   TestSpecInProduct,
-  TestResult,
 } from "@/types"
 import { cn } from "@/lib/utils"
 
@@ -476,17 +471,25 @@ function ReviewPane({
 
   const candidatesQuery = useLinkCandidates(manualSearch)
   const confirmMutation = useConfirmResultImport(item.id)
+  // The operator's lab-type remaps drive a server-side re-resolve of the
+  // preview: overridden rows come back with existing_result/suggested_action
+  // recomputed against the mapped lab type, so the preview is the single source
+  // of truth for existing-result info (no client-side lot-results shadow map).
+  const previewOverrides = useMemo<ResultImportPreviewOverride[]>(
+    () =>
+      Object.entries(labTypeOverrides).map(([row_id, lab_test_type_id]) => ({
+        row_id,
+        lab_test_type_id,
+      })),
+    [labTypeOverrides]
+  )
   const previewQuery = useResultImportPreview(
     item.status === "needs_confirmation" ? item.id : null,
-    selectedLotId
+    selectedLotId,
+    previewOverrides
   )
   const labTypesQuery = useLabTestTypes({ page_size: 500, is_active: true })
   const lotSpecsQuery = useLotWithSpecs(selectedLotId || 0)
-  const lotResultsQuery = useTestResults(
-    selectedLotId
-      ? { lot_id: selectedLotId, page_size: RESULT_IMPORTER_EXISTING_RESULTS_PAGE_SIZE }
-      : {}
-  )
 
   const rows = useMemo(() => item.extracted_data?.rows || [], [item.extracted_data?.rows])
   const candidates = item.match_candidates || []
@@ -507,18 +510,6 @@ function ReviewPane({
     () => new Set(mergedPanel.map((spec) => spec.lab_test_type_id)),
     [mergedPanel]
   )
-  const existingByLabType = useMemo(() => {
-    const mapped = new Map<number, ExistingResultForAction>()
-    for (const result of lotResultsQuery.data?.items || []) {
-      if (result.lab_test_type_id == null || mapped.has(result.lab_test_type_id)) continue
-      mapped.set(result.lab_test_type_id, {
-        id: result.id,
-        result_value: result.result_value,
-        status: result.status,
-      })
-    }
-    return mapped
-  }, [lotResultsQuery.data?.items])
   const selectedCandidate = candidates.find((c) => c.lot_id === selectedLotId) ?? null
   const matchScore = selectedCandidate?.score ?? null
   const matchReasons = selectedCandidate?.reasons ?? []
@@ -559,8 +550,6 @@ function ReviewPane({
             ? overrideId
             : preview?.lab_test_type_id ?? null
         const onPanel = resolvedLabTypeId != null && panelIds.has(resolvedLabTypeId)
-        const mappedExisting =
-          resolvedLabTypeId != null ? existingByLabType.get(resolvedLabTypeId) : null
         const selectedLabType =
           resolvedLabTypeId != null ? labTypes.find((type) => type.id === resolvedLabTypeId) : null
         const parsedValue = row.result_value_raw ?? ""
@@ -600,8 +589,9 @@ function ReviewPane({
         return {
           row,
           preview: preview ?? null,
-          actionExistingResult:
-            mappedExisting ?? (overrideId === undefined ? preview?.existing_result : null) ?? null,
+          // Existing-result info comes solely from the preview, which the backend
+          // has already re-resolved against this row's override (if any).
+          actionExistingResult: preview?.existing_result ?? null,
           onPanel,
           originalOnPanel,
           isFuzzy,
@@ -628,7 +618,6 @@ function ReviewPane({
       previews,
       panelIds,
       labTypeOverrides,
-      existingByLabType,
       resultOverrides,
       clearedRows,
       labTypes,
@@ -647,12 +636,12 @@ function ReviewPane({
       specification: vm.specification,
       method: vm.method,
     }))
-    return buildRowActions(states, previews, existingByLabType)
-  }, [reviewRows, previews, existingByLabType])
+    return buildRowActions(states, previews)
+  }, [reviewRows, previews])
 
   const summary = useMemo(
-    () => computeSummary(reviewRows, mergedPanel, lotResultsQuery.data?.items || []),
-    [reviewRows, mergedPanel, lotResultsQuery.data?.items]
+    () => computeSummary(reviewRows, mergedPanel, previews),
+    [reviewRows, mergedPanel, previews]
   )
   const missingAdhocMetadata = reviewRows.find(
     (vm) =>
@@ -669,15 +658,18 @@ function ReviewPane({
       vm.actionExistingResult?.status === "approved"
   )
 
+  // The preview query key encodes both the selected lot AND a stable
+  // serialization of the current lab-type overrides. A settled preview
+  // (isSuccess && not re-fetching) whose lot_id matches the selection is
+  // therefore guaranteed to correspond to BOTH the lot and the latest overrides
+  // — so row_actions built from it can never be posted from a stale preview
+  // (e.g. one fetched before the operator's most recent remap).
   const previewReady =
     item.status === "needs_confirmation" &&
     !!selectedLotId &&
     previewQuery.isSuccess &&
-    previewQuery.data?.lot_id === selectedLotId &&
-    // The off-panel action-builder relies on existingByLabType (from the lot's
-    // results) to choose replace vs create; wait for it so we never post an
-    // action that the backend rejects as "already has a draft value".
-    lotResultsQuery.isSuccess
+    !previewQuery.isFetching &&
+    previewQuery.data?.lot_id === selectedLotId
   const appliedCount = rowActions.filter((action) => action.action !== "skip").length
   const canConfirm =
     item.status === "needs_confirmation" &&
@@ -689,12 +681,8 @@ function ReviewPane({
     applyDisabledReason = "Select a matched lot to apply."
   } else if (previewQuery.isError) {
     applyDisabledReason = "Could not load parsed row preview for this lot."
-  } else if (!previewQuery.isSuccess || previewQuery.data?.lot_id !== selectedLotId) {
+  } else if (!previewReady) {
     applyDisabledReason = "Loading parsed row preview..."
-  } else if (lotResultsQuery.isError) {
-    applyDisabledReason = "Could not load existing draft results for this lot."
-  } else if (!lotResultsQuery.isSuccess) {
-    applyDisabledReason = "Loading existing draft results..."
   } else if (missingAdhocMetadata) {
     applyDisabledReason = `${missingAdhocMetadata.testName} needs Unit, Spec, and Method before it can be added as an ad-hoc draft.`
   } else if (appliedCount === 0 && fuzzyApprovedRow) {
@@ -1512,7 +1500,7 @@ function LabTypeCombobox({
 interface ReviewRowVM {
   row: ExtractedResultRow
   preview: ResultImportRowPreview | null
-  actionExistingResult: ExistingResultForAction | null
+  actionExistingResult: ExistingResultPreview | null
   onPanel: boolean
   originalOnPanel: boolean
   isFuzzy: boolean
@@ -1599,15 +1587,23 @@ function mergePanel(products?: ProductInLotWithSpecs[]): TestSpecInProduct[] {
  * Reconcile the parsed rows against the lot's required panel + existing results
  * into the four summary buckets. Each panel test lands in exactly one of
  * Completed/Passed, Pending, or Other(failed); off-panel parsed rows add to Other.
+ *
+ * Existing-result info is drawn from the preview rows (the backend re-resolves
+ * each row's existing_result against its resolved lab type), so the summary
+ * reflects the same existing results the action-builder acts on.
  */
 function computeSummary(
   reviewRows: ReviewRowVM[],
   mergedPanel: TestSpecInProduct[],
-  existingResults: TestResult[]
+  previews: Map<string, ResultImportRowPreview>
 ): ImportSummary {
-  const resultByLabType = new Map<number, TestResult>()
-  for (const result of existingResults) {
-    if (result.lab_test_type_id != null) resultByLabType.set(result.lab_test_type_id, result)
+  const resultByLabType = new Map<number, ExistingResultPreview>()
+  for (const preview of previews.values()) {
+    if (preview.lab_test_type_id != null && preview.existing_result != null) {
+      if (!resultByLabType.has(preview.lab_test_type_id)) {
+        resultByLabType.set(preview.lab_test_type_id, preview.existing_result)
+      }
+    }
   }
 
   const parsingRows = reviewRows.filter(

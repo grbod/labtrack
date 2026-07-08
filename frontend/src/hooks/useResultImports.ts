@@ -3,15 +3,34 @@ import { toast } from "sonner"
 import { resultImportsApi } from "@/api/resultImports"
 import { lotKeys } from "@/hooks/useLots"
 import { releaseKeys } from "@/hooks/useRelease"
-import type { ConfirmResultImportRequest, ResultImport } from "@/types"
+import type {
+  ConfirmResultImportRequest,
+  ResultImport,
+  ResultImportPreviewOverride,
+} from "@/types"
 import { extractApiErrorMessage } from "@/lib/api-utils"
+
+/**
+ * Stable serialization of preview lab-type overrides for use in the query key.
+ * Sorted by row_id so key identity depends only on the override *set*, not the
+ * order the operator mapped rows in. `null` (an explicit clear-to-unmapped) is a
+ * meaningful override and is preserved.
+ */
+export function serializePreviewOverrides(overrides: ResultImportPreviewOverride[]): string {
+  return JSON.stringify(
+    [...overrides]
+      .sort((a, b) => a.row_id.localeCompare(b.row_id))
+      .map((o) => [o.row_id, o.lab_test_type_id])
+  )
+}
 
 export const resultImportKeys = {
   all: ["result-imports"] as const,
   list: () => [...resultImportKeys.all, "list"] as const,
   detail: (id: number) => [...resultImportKeys.all, "detail", id] as const,
   candidates: (search: string) => [...resultImportKeys.all, "candidates", search] as const,
-  preview: (id: number, lotId: number) => [...resultImportKeys.all, "preview", id, lotId] as const,
+  preview: (id: number, lotId: number, overridesKey = "[]") =>
+    [...resultImportKeys.all, "preview", id, lotId, overridesKey] as const,
 }
 
 export function useResultImports() {
@@ -42,10 +61,26 @@ export function useLinkCandidates(search: string) {
   })
 }
 
-export function useResultImportPreview(id: number | null, lotId: number | null) {
+export function useResultImportPreview(
+  id: number | null,
+  lotId: number | null,
+  overrides: ResultImportPreviewOverride[] = []
+) {
+  const overridesKey = serializePreviewOverrides(overrides)
+  const hasOverrides = overrides.length > 0
   return useQuery({
-    queryKey: id && lotId ? resultImportKeys.preview(id, lotId) : [...resultImportKeys.all, "preview", "empty"],
-    queryFn: () => resultImportsApi.preview(id as number, lotId as number),
+    queryKey:
+      id && lotId
+        ? resultImportKeys.preview(id, lotId, overridesKey)
+        : [...resultImportKeys.all, "preview", "empty"],
+    // POST the re-resolved preview when the operator has remapped rows, so
+    // existing_result/suggested_action reflect the overridden lab types; plain
+    // GET otherwise. The overrides are baked into the query key, so cached data
+    // is always for the exact (lot, overrides) pair it was fetched with.
+    queryFn: () =>
+      hasOverrides
+        ? resultImportsApi.previewWithOverrides(id as number, lotId as number, overrides)
+        : resultImportsApi.preview(id as number, lotId as number),
     enabled: !!id && !!lotId,
   })
 }

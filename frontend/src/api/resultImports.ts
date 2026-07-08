@@ -6,6 +6,7 @@ import type {
   PaginatedResponse,
   ResultImport,
   ResultImportPreview,
+  ResultImportPreviewOverride,
   ResultImportUploadResponse,
 } from "@/types"
 
@@ -42,6 +43,19 @@ export const resultImportsApi = {
     const response = await api.get<ResultImportPreview>(`/result-imports/${id}/preview`, {
       params: { lot_id: lotId },
     })
+    return response.data
+  },
+
+  previewWithOverrides: async (
+    id: number,
+    lotId: number,
+    overrides: ResultImportPreviewOverride[]
+  ): Promise<ResultImportPreview> => {
+    const response = await api.post<ResultImportPreview>(
+      `/result-imports/${id}/preview`,
+      { overrides },
+      { params: { lot_id: lotId } }
+    )
     return response.data
   },
 

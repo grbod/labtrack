@@ -312,6 +312,11 @@ export interface ResultImportPreview {
   rows: ResultImportRowPreview[]
 }
 
+export interface ResultImportPreviewOverride {
+  row_id: string
+  lab_test_type_id: number | null
+}
+
 export interface ConfirmResultImportRequest {
   lot_id: number
   row_actions: ResultRowAction[]

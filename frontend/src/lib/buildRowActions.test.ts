@@ -103,30 +103,33 @@ describe("buildRowActions", () => {
     expect(action.action).toBe("skip")
   })
 
-  it("maps an off-panel row mapped to an existing draft lab type to replace", () => {
+  it("maps an off-panel row whose re-resolved preview has an existing draft to replace", () => {
+    // After an override, the backend re-resolves existing_result against the
+    // mapped lab type and returns it on the row's preview — that is the sole
+    // source of existing-result info.
     const row = onPanelRow({ row_id: "r2", onPanel: false, labTestTypeId: 88, testName: "Lead" })
-    const existingByLabType = new Map([
-      [88, { id: 123, result_value: "0.11", status: "draft" }],
-    ])
-    const [action] = buildRowActions([row], previewMap({ r2: null }), existingByLabType)
+    const previews = previewMap({
+      r2: { id: 123, test_type: "Lead", result_value: "0.11", unit: null, status: "draft", test_date: null, pdf_source: null },
+    })
+    const [action] = buildRowActions([row], previews)
     expect(action).toMatchObject({ action: "replace", test_result_id: 123, lab_test_type_id: 88 })
   })
 
-  it("skips an off-panel row mapped to an approved lab type result", () => {
+  it("skips an off-panel row whose re-resolved preview points at an approved result", () => {
     const row = onPanelRow({ row_id: "r2", onPanel: false, labTestTypeId: 88, testName: "Lead" })
-    const existingByLabType = new Map([
-      [88, { id: 123, result_value: "0.11", status: "approved" }],
-    ])
-    const [action] = buildRowActions([row], previewMap({ r2: null }), existingByLabType)
+    const previews = previewMap({
+      r2: { id: 123, test_type: "Lead", result_value: "0.11", unit: null, status: "approved", test_date: null, pdf_source: null },
+    })
+    const [action] = buildRowActions([row], previews)
     expect(action.action).toBe("skip")
   })
 
-  it("skips an on-panel override mapped to an approved lab type result", () => {
+  it("skips an on-panel override whose re-resolved preview points at an approved result", () => {
     const row = onPanelRow({ row_id: "r4", onPanel: true, labTestTypeId: 88, testName: "Lead" })
-    const existingByLabType = new Map([
-      [88, { id: 123, result_value: "0.11", status: "approved" }],
-    ])
-    const [action] = buildRowActions([row], previewMap({ r4: null }), existingByLabType)
+    const previews = previewMap({
+      r4: { id: 123, test_type: "Lead", result_value: "0.11", unit: null, status: "approved", test_date: null, pdf_source: null },
+    })
+    const [action] = buildRowActions([row], previews)
     expect(action.action).toBe("skip")
   })
 

@@ -1,11 +1,5 @@
 import type { ResultImportRowPreview, ResultRowAction } from "@/types"
 
-export interface ExistingResultForAction {
-  id: number
-  result_value?: string | null
-  status: string
-}
-
 /**
  * Per-row UI state for the Lab Test Import spec table. One entry per parsed
  * result row. The action posted to the backend is INFERRED from this state
@@ -40,13 +34,16 @@ export interface SpecReviewRowState {
  * - on-panel filled (no existing value)                          -> `apply`
  * - off-panel filled + user-mapped lab type (no existing value)  -> `create_adhoc`
  *
+ * The preview rows are re-resolved server-side against the operator's lab-type
+ * overrides, so `existing_result` is authoritative for each row's resolved lab
+ * type (including name-only matches) — no client-side lab-type map is needed.
+ *
  * @param rows     one SpecReviewRowState per parsed row
  * @param previews backend preview rows keyed by row_id (for existing_result)
  */
 export function buildRowActions(
   rows: SpecReviewRowState[],
-  previews: Map<string, Pick<ResultImportRowPreview, "existing_result">>,
-  existingByLabType: Map<number, ExistingResultForAction> = new Map()
+  previews: Map<string, Pick<ResultImportRowPreview, "existing_result">>
 ): ResultRowAction[] {
   return rows.map((row) => {
     const value = (row.resultValue || "").trim()
@@ -60,9 +57,7 @@ export function buildRowActions(
       return { ...base, action: "skip" as const }
     }
 
-    const existing =
-      (row.labTestTypeId ? existingByLabType.get(row.labTestTypeId) : null) ??
-      previews.get(row.row_id)?.existing_result
+    const existing = previews.get(row.row_id)?.existing_result
     if (existing) {
       if (existing.status === "approved") {
         // Approved results are immutable on the backend; never touch them.

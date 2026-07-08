@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -91,7 +91,7 @@ class LotResponse(BaseModel):
     status: LotStatus
     generate_coa: bool
     rejection_reason: Optional[str] = None
-    attached_pdfs: Optional[List[str]] = None  # List of uploaded PDF filenames
+    attached_pdfs: Optional[List[Any]] = None  # Legacy strings or attachment objects
     has_pending_retest: bool = False  # True when retest is pending
     coc_storage_key: Optional[str] = None  # Archived COC PDF
     return_reason: Optional[str] = None

@@ -1,20 +1,21 @@
 """File upload endpoints for PDFs and other documents."""
 
+import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
-
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
-from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel
 from typing import Optional
 
-from app.dependencies import DbSession, CurrentUser
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+
 from app.config import settings
+from app.dependencies import CurrentUser, DbSession, LabTechOrAbove
 from app.models.lot import Lot
 from app.services.storage_service import get_storage_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class UploadResponse(BaseModel):
@@ -54,15 +55,20 @@ async def upload_pdf(
     max_size = settings.max_upload_size_mb * 1024 * 1024
     content = await file.read()
     if len(content) > max_size:
+        max_mb = settings.max_upload_size_mb
+        detail = f"File size exceeds maximum of {max_mb}MB"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File size exceeds maximum of {settings.max_upload_size_mb}MB",
+            detail=detail,
         )
 
     # Generate unique filename: timestamp_uuid_originalname.pdf
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_id = str(uuid.uuid4())[:8]
-    safe_name = "".join(c if c.isalnum() or c in ".-_" else "_" for c in (file.filename or "document.pdf"))
+    safe_name = "".join(
+        c if c.isalnum() or c in ".-_" else "_"
+        for c in (file.filename or "document.pdf")
+    )
     new_filename = f"{timestamp}_{unique_id}_{safe_name}"
 
     # Storage key with prefix
@@ -79,8 +85,17 @@ async def upload_pdf(
             # Initialize attached_pdfs if None
             if lot.attached_pdfs is None:
                 lot.attached_pdfs = []
-            # Add the storage key
-            lot.attached_pdfs = lot.attached_pdfs + [storage_key]
+            # Add the object-shaped attachment while keeping release reads
+            # compatible with older string entries.
+            lot.attached_pdfs = lot.attached_pdfs + [
+                {
+                    "filename": file.filename or new_filename,
+                    "storage_key": storage_key,
+                    "source": "manual",
+                    "import_id": None,
+                    "added_at": datetime.utcnow().isoformat(),
+                }
+            ]
             db.commit()
 
     return UploadResponse(
@@ -121,7 +136,9 @@ async def get_upload(
     # For R2, redirect to presigned URL
     if settings.storage_backend == "r2":
         presigned_url = storage.get_presigned_url(storage_key)
-        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(
+            url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
 
     # For local storage, serve the file directly
     content = storage.download(storage_key)
@@ -132,10 +149,12 @@ async def get_upload(
     # For local storage, we need to return the file
     # Create a temp response with the content
     from fastapi.responses import Response
+
+    headers = {"Content-Disposition": f'inline; filename="{actual_filename}"'}
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{actual_filename}"'},
+        headers=headers,
     )
 
 
@@ -143,7 +162,7 @@ async def get_upload(
 async def delete_upload(
     filename: str,
     db: DbSession = None,
-    current_user: CurrentUser = None,
+    current_user: LabTechOrAbove = None,
 ) -> dict:
     """Delete an uploaded file."""
     storage = get_storage_service()
@@ -163,5 +182,10 @@ async def delete_upload(
 
     # Delete from storage
     storage.delete(storage_key)
+    logger.warning(
+        "Upload deleted: key=%s by user_id=%s",
+        storage_key,
+        getattr(current_user, "id", None),
+    )
 
     return {"message": "File deleted successfully"}

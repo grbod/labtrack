@@ -111,7 +111,7 @@ export interface Lot {
   status: LotStatus
   generate_coa: boolean
   rejection_reason: string | null
-  attached_pdfs: string[] | null  // List of uploaded PDF filenames
+  attached_pdfs: Array<string | Record<string, unknown>> | null  // Legacy strings or attachment objects
   has_pending_retest: boolean  // True when retest is pending
   coc_storage_key: string | null
   return_reason: string | null
@@ -180,6 +180,160 @@ export interface TestResult {
   lot_reference?: string
 }
 
+export type ResultImportStatus =
+  | "processing"
+  | "needs_confirmation"
+  | "confirmed"
+  | "failed"
+  | "cancelled"
+  | "reverted"
+
+export interface ExtractedResultRow {
+  row_id: string
+  test_name_raw: string
+  test_name_normalized: string
+  result_value_raw: string | null
+  unit_raw: string | null
+  target_unit: string | null
+  limit_raw: string | null
+  test_date: string | null
+  received_date: string | null
+  confidence: number
+  warnings: string[]
+  metadata: Record<string, unknown>
+  matched_lab_test_type_id: number | null
+  match_source?: "exact" | "builtin_alias" | "approved_alias" | "fuzzy" | "unmatched" | null
+  alias_id?: number | null
+}
+
+export interface ResultExtraction {
+  identifiers: Array<{ type: string; value: string; confidence: number }>
+  lab_name: string | null
+  date_tested: string | null
+  report_date: string | null
+  received_date: string | null
+  rows: ExtractedResultRow[]
+  warnings: string[]
+}
+
+export interface ResultImportCandidate {
+  lot_id: number
+  reference_number: string
+  lot_number: string
+  status: LotStatus
+  score: number
+  reasons: string[]
+  products: string[]
+}
+
+export interface ResultImport {
+  id: number
+  original_filename: string
+  storage_key: string | null
+  file_hash: string
+  status: ResultImportStatus
+  extracted_data: ResultExtraction | null
+  match_candidates: ResultImportCandidate[] | null
+  warnings: string[] | null
+  error_message: string | null
+  selected_lot_id: number | null
+  uploaded_by_id: number | null
+  confirmed_by_id: number | null
+  confirmed_at: string | null
+  openrouter_model: string | null
+  usage_metadata: Record<string, unknown> | null
+  duplicate_of_id: number | null
+  duplicate_summary: DuplicateImportSummary | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DuplicateImportSummary {
+  import_id: number
+  original_filename: string
+  confirmed_at: string | null
+  confirmed_by: string | null
+  lot_id: number | null
+  reference_number: string | null
+  lot_number: string | null
+}
+
+export interface ResultImportUploadResponse {
+  items: ResultImport[]
+  duplicates: ResultImport[]
+}
+
+export interface LinkCandidate {
+  lot_id: number
+  reference_number: string
+  lot_number: string
+  status: LotStatus
+  products: string[]
+}
+
+export interface ResultRowAction {
+  row_id: string
+  action: "apply" | "replace" | "skip" | "create_adhoc"
+  test_result_id?: number | null
+  lab_test_type_id?: number | null
+  test_name?: string | null
+  result_value?: string | null
+  unit?: string | null
+  specification?: string | null
+  method?: string | null
+}
+
+export interface ExistingResultPreview {
+  id: number
+  test_type: string
+  result_value: string | null
+  unit: string | null
+  status: TestResultStatus
+  test_date: string | null
+  pdf_source: string | null
+}
+
+export interface ResultImportRowPreview {
+  row_id: string
+  resolved_test_name: string | null
+  unit: string | null
+  specification: string | null
+  method: string | null
+  lab_test_type_id: number | null
+  requires_lab_test_mapping: boolean
+  suggested_action: "apply" | "replace" | "skip" | "create_adhoc"
+  warnings: string[]
+  existing_result: ExistingResultPreview | null
+}
+
+export interface ResultImportPreview {
+  import_id: number
+  lot_id: number
+  rows: ResultImportRowPreview[]
+}
+
+export interface ResultImportPreviewOverride {
+  row_id: string
+  lab_test_type_id: number | null
+}
+
+export interface ConfirmResultImportRequest {
+  lot_id: number
+  row_actions: ResultRowAction[]
+}
+
+export interface ConfirmResultImportResponse {
+  import_id: number
+  lot_id: number
+  created_result_ids: number[]
+  updated_result_ids: number[]
+  skipped_row_ids: string[]
+  status: ResultImportStatus
+  /** Pending test-name alias suggestions recorded during confirm (optional;
+   *  older backends omit it, treat as 0). */
+  alias_suggestions_created?: number
+}
+
 // Lab test type
 export interface LabTestType {
   id: number
@@ -196,6 +350,59 @@ export interface LabTestType {
   archive_reason: string | null
   created_at: string
   updated_at: string | null
+}
+
+export interface LabTestAlias {
+  id: number
+  raw_phrase: string
+  normalized_key: string
+  lab_name: string | null
+  lab_test_type_id: number
+  target_test_name: string | null
+  target_test_category: string | null
+  target_default_unit: string | null
+  target_default_specification: string | null
+  target_test_method: string | null
+  status: "pending" | "approved" | "disabled"
+  source: "fuzzy" | "manual_override" | string
+  suggestion_count: number
+  first_seen_at: string | null
+  last_seen_at: string | null
+  last_result_import_id: number | null
+  last_lot_id: number | null
+  last_filename: string | null
+  last_suggested_by_id: number | null
+  approved_by_id: number | null
+  approved_at: string | null
+  disabled_by_id: number | null
+  disabled_at: string | null
+  disable_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LabTestAliasList {
+  items: LabTestAlias[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface LabTestBuiltinAlias {
+  raw_phrase: string
+  normalized_key: string
+  lab_test_type_id: number | null
+  target_test_name: string
+  target_test_category: string | null
+  target_default_unit: string | null
+  target_default_specification: string | null
+  target_test_method: string | null
+}
+
+export interface LabTestBuiltinAliasList {
+  items: LabTestBuiltinAlias[]
+  total: number
 }
 
 export interface LabTestTypeCategoryCount {

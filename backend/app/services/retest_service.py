@@ -401,7 +401,7 @@ class RetestService(BaseService[RetestRequest]):
                     retest_request.lot.has_pending_retest = True
 
         if updated_request:
-            db.commit()
+            db.flush()
 
         return updated_request
 

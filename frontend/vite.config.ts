@@ -8,6 +8,10 @@ import { execSync } from 'child_process'
 // Get git commit hash
 const gitHash = execSync('git rev-parse --short HEAD').toString().trim()
 
+// Backend origin the dev server proxies to; override to run parallel stacks
+// (e.g. a worktree backend on another port): API_TARGET=http://localhost:8010
+const apiTarget = process.env.API_TARGET || 'http://localhost:8009'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -23,11 +27,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8009',
+        target: apiTarget,
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:8009',
+        target: apiTarget,
         changeOrigin: true,
       },
     },

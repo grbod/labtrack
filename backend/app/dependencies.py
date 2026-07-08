@@ -91,3 +91,7 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
 QCManagerOrAdmin = Annotated[User, Depends(require_role(UserRole.ADMIN, UserRole.QC_MANAGER))]
+LabTechOrAbove = Annotated[
+    User,
+    Depends(require_role(UserRole.ADMIN, UserRole.QC_MANAGER, UserRole.LAB_TECH)),
+]

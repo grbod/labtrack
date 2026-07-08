@@ -7,8 +7,7 @@ from .sample_service import SampleService
 from .user_service import UserService
 from .approval_service import ApprovalService
 from .audit_service import AuditService
-from .pdf_parser_service import PDFParserService, AIProvider, MockAIProvider
-from .pdf_watcher_service import PDFWatcherService
+from .result_import_service import ResultImportService
 from .coa_generator_service import COAGeneratorService
 from .lab_test_type_service import LabTestTypeService
 from .email_template_service import EmailTemplateService
@@ -24,10 +23,7 @@ __all__ = [
     "UserService",
     "ApprovalService",
     "AuditService",
-    "PDFParserService",
-    "AIProvider",
-    "MockAIProvider",
-    "PDFWatcherService",
+    "ResultImportService",
     "COAGeneratorService",
     "LabTestTypeService",
     "EmailTemplateService",

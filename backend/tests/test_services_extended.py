@@ -6,11 +6,11 @@ from decimal import Decimal
 
 from app.models import (
     User, Product, Lot, LotProduct, TestResult,
-    AuditLog, ParsingQueue, LabTestType
+    AuditLog, LabTestType
 )
 from app.models.enums import (
     UserRole, LotType, LotStatus, TestResultStatus,
-    ParsingStatus, AuditAction
+    AuditAction
 )
 from app.services import (
     UserService, AuditService, LotService,

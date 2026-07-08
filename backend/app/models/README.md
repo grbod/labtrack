@@ -13,8 +13,8 @@ Database enum types:
 - `UserRole`: admin, qc_manager, lab_tech, read_only
 - `LotType`: standard, parent_lot, multi_sku_composite  
 - `LotStatus`: pending, tested, approved, released
-- `TestResultStatus`: draft, reviewed, approved
-- `ParsingStatus`: pending, processing, resolved, failed
+- `TestResultStatus`: draft, approved
+- `ResultImportStatus`: processing, needs_confirmation, confirmed, failed, cancelled, reverted
 - `AuditAction`: insert, update, delete, approve, reject
 
 ### product.py
@@ -34,8 +34,9 @@ Database enum types:
 ### audit.py
 - `AuditLog`: Complete audit trail of all system changes
 
-### parsing.py
-- `ParsingQueue`: PDF parsing queue for manual review of failed extractions
+### result_import.py
+- `ResultImport`: Results-importer PDF extraction and confirmation state
+- `ResultImportLedger`: Revert ledger for applied imports
 
 ### coa.py
 - `COAHistory`: History of all generated COAs with metadata

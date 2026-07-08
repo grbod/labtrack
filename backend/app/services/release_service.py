@@ -79,7 +79,7 @@ class ReleaseService(BaseService[COARelease]):
 
     def get_source_pdfs(self, db: Session, lot_id: int) -> List[str]:
         """
-        Get unique source PDF filenames for a lot.
+        Get unique source PDF storage keys for a lot, newest first.
 
         Combines:
         1. PDFs attached directly to the lot (Lot.attached_pdfs)
@@ -90,29 +90,83 @@ class ReleaseService(BaseService[COARelease]):
             lot_id: Lot ID
 
         Returns:
-            List of unique PDF source filenames
+            Ordered list of unique PDF source storage keys
         """
-        pdf_set = set()
+        pdfs: Dict[str, Dict[str, Any]] = {}
 
         # Get PDFs attached directly to the lot
         lot = db.query(Lot).filter(Lot.id == lot_id).first()
         if lot and lot.attached_pdfs:
-            pdf_set.update(lot.attached_pdfs)
+            for entry in lot.attached_pdfs:
+                normalized = self._normalize_attached_pdf_entry(entry, lot.created_at)
+                if not normalized:
+                    continue
+                pdfs[normalized["storage_key"]] = normalized
 
         # Get PDFs from test results
         results = (
-            db.query(TestResult.pdf_source)
+            db.query(TestResult.pdf_source, TestResult.created_at)
             .filter(
                 TestResult.lot_id == lot_id,
                 TestResult.pdf_source.isnot(None),
                 TestResult.pdf_source != "",
             )
-            .distinct()
+            .order_by(TestResult.created_at.desc())
             .all()
         )
-        pdf_set.update(r[0] for r in results if r[0])
+        for pdf_source, created_at in results:
+            storage_key = self._normalize_pdf_storage_key(pdf_source)
+            if not storage_key or storage_key in pdfs:
+                continue
+            pdfs[storage_key] = {
+                "filename": storage_key.rsplit("/", 1)[-1],
+                "storage_key": storage_key,
+                "source": "result",
+                "added_at": created_at,
+            }
 
-        return list(pdf_set)
+        ordered = sorted(
+            pdfs.values(),
+            key=lambda item: item.get("added_at") or datetime.min,
+            reverse=True,
+        )
+        return [item["storage_key"] for item in ordered]
+
+    def _normalize_attached_pdf_entry(
+        self, entry: Any, fallback_added_at: Optional[datetime]
+    ) -> Optional[Dict[str, Any]]:
+        if isinstance(entry, str):
+            storage_key = self._normalize_pdf_storage_key(entry)
+            return {
+                "filename": storage_key.rsplit("/", 1)[-1],
+                "storage_key": storage_key,
+                "source": "legacy",
+                "added_at": fallback_added_at,
+            }
+        if not isinstance(entry, dict):
+            return None
+        storage_key = self._normalize_pdf_storage_key(
+            entry.get("storage_key") or entry.get("filename")
+        )
+        if not storage_key:
+            return None
+        added_at = entry.get("added_at") or fallback_added_at
+        if isinstance(added_at, str):
+            try:
+                added_at = datetime.fromisoformat(added_at.replace("Z", "+00:00"))
+            except ValueError:
+                added_at = fallback_added_at
+        return {
+            "filename": entry.get("filename") or storage_key.rsplit("/", 1)[-1],
+            "storage_key": storage_key,
+            "source": entry.get("source") or "manual",
+            "added_at": added_at,
+        }
+
+    def _normalize_pdf_storage_key(self, value: Optional[str]) -> str:
+        if not value:
+            return ""
+        return value if value.startswith("pdfs/") else f"pdfs/{value}"
 
     def save_draft(
         self,

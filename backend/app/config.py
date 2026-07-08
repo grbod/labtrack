@@ -45,8 +45,15 @@ class Settings(BaseSettings):
     openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="google/gemini-2.5-flash", env="OPENROUTER_MODEL")
 
+    @model_validator(mode="after")
+    def validate_production_ai_provider(self) -> "Settings":
+        if self.app_env.lower() == "production" and self.ai_provider.lower() == "mock":
+            raise ValueError(
+                "AI_PROVIDER=mock is not allowed when APP_ENV=production; configure a live extraction provider"
+            )
+        return self
+
     # File paths
-    watch_folder_path: Path = Field(default=Path("./pdf_watch"), env="WATCH_FOLDER")
     template_folder: Path = Field(default=Path("./templates"), env="TEMPLATE_FOLDER")
     templates_path: Path = Field(default=Path("./templates"), env="TEMPLATES_PATH")
     coa_output_folder: Path = Field(
@@ -68,11 +75,6 @@ class Settings(BaseSettings):
     @property
     def COA_OUTPUT_FOLDER(self):
         return str(self.coa_output_folder)
-
-    # PDF Monitoring
-    enable_folder_monitoring: bool = Field(default=True, env="ENABLE_MONITORING")
-    watch_interval: int = Field(default=5, env="WATCH_INTERVAL")
-    pdf_watch_folder: str = Field(default="./pdf_watch", env="PDF_WATCH_FOLDER")
 
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")

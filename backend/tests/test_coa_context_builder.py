@@ -232,9 +232,9 @@ def test_product_spec_used_as_fallback(test_db, standard_lot, product, product_s
 def test_indeterminate_row_dash_when_not_released(
     test_db, standard_lot, product, product_specs
 ):
-    # With the parallel spec engine absent, a spec'd row is PENDING_ENGINE
-    # (INDETERMINATE-equivalent) -> "—" when not released.
-    _add_result(test_db, standard_lot.id, "Lead", "0.05", "ppm")
+    # Censored result coarser than the spec threshold ("<5" vs "< 0.5") is a
+    # genuine INDETERMINATE under the spec engine -> "—" when not released.
+    _add_result(test_db, standard_lot.id, "Lead", "<5", "ppm")
     ctx = build_context(test_db, standard_lot.id, product.id)
     lead = next(r for r in ctx.test_rows if r.name == "Lead")
     assert lead.status_display == "—"
@@ -244,7 +244,8 @@ def test_indeterminate_row_dash_when_not_released(
 def test_indeterminate_row_pass_when_released(
     test_db, standard_lot, product, product_specs, qc_user
 ):
-    _add_result(test_db, standard_lot.id, "Lead", "0.05", "ppm")
+    # Same genuine-INDETERMINATE case as above: released -> human verified -> "Pass".
+    _add_result(test_db, standard_lot.id, "Lead", "<5", "ppm")
     release = COARelease(
         lot_id=standard_lot.id,
         product_id=product.id,

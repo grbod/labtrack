@@ -67,6 +67,12 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Read-only role enforcement (added before CORS so CORS stays the outermost
+# middleware and still decorates the 403 with CORS headers).
+from app.middleware import ReadOnlyEnforcementMiddleware  # noqa: E402
+
+app.add_middleware(ReadOnlyEnforcementMiddleware)
+
 # CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,

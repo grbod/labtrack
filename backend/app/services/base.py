@@ -1,14 +1,31 @@
 """Base service class with common functionality."""
 
-from typing import TypeVar, Generic, Type, Optional, List, Dict, Any
-from sqlalchemy.orm import Session
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
+
 from sqlalchemy.exc import SQLAlchemyError
-from app.models.base import BaseModel
+from sqlalchemy.orm import Session
+
 from app.models.audit import AuditLog
+from app.models.base import BaseModel
 from app.models.enums import AuditAction
 from app.utils.logger import logger
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
+
+# Actions whose audit trail is part of the operation's correctness: a failure to
+# record them must abort the transaction rather than be swallowed. Covers
+# approve / reject / release (audited as APPROVE or OVERRIDE) / self-approval /
+# void / delete.
+CRITICAL_AUDIT_ACTIONS = frozenset(
+    {
+        AuditAction.APPROVE,
+        AuditAction.REJECT,
+        AuditAction.OVERRIDE,
+        AuditAction.SELF_APPROVAL,
+        AuditAction.VOID,
+        AuditAction.DELETE,
+    }
+)
 
 
 class BaseService(Generic[ModelType]):
@@ -247,6 +264,7 @@ class BaseService(Generic[ModelType]):
         user_id: Optional[int] = None,
         reason: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        critical: Optional[bool] = None,
     ) -> None:
         """
         Create audit log entry.
@@ -260,7 +278,15 @@ class BaseService(Generic[ModelType]):
             user_id: ID of user performing the action
             reason: Reason for the action
             metadata: Additional metadata (IP address, user agent, etc.)
+            critical: When True, an audit-write failure re-raises (aborting the
+                caller's transaction) instead of being swallowed. When None
+                (default) criticality is derived from the action: approvals,
+                rejections, overrides, releases-as-approve, voids and deletes are
+                treated as critical so their audit trail cannot silently vanish.
         """
+        is_critical = (
+            critical if critical is not None else action in CRITICAL_AUDIT_ACTIONS
+        )
         try:
             ip_address = metadata.get("ip_address") if metadata else None
             user_agent = metadata.get("user_agent") if metadata else None
@@ -278,8 +304,12 @@ class BaseService(Generic[ModelType]):
                 reason=reason,
             )
         except Exception as e:
-            # Log error but don't fail the main operation
+            # For critical actions the audit trail is part of the operation's
+            # correctness — re-raise so the transaction aborts. For routine
+            # actions, keep the historical log-only behaviour.
             logger.error(f"Failed to create audit log: {e}")
+            if is_critical:
+                raise
 
     def count(self, db: Session, filters: Optional[Dict[str, Any]] = None) -> int:
         """

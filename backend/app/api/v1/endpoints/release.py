@@ -1294,6 +1294,10 @@ def _context_to_preview_data(context, snapshot=None) -> COAPreviewData:
         company_phone=context.lab.phone,
         company_email=context.lab.email,
         company_logo_url=context.lab.logo_url,
+        # Accreditation footer (optional)
+        accreditation_body=getattr(context.lab, "accreditation_body", None),
+        accreditation_number=getattr(context.lab, "accreditation_number", None),
+        accreditation_statement=getattr(context.lab, "accreditation_statement", None),
         # Product info
         product_name=context.product.product_name,
         brand=context.product.brand or "",

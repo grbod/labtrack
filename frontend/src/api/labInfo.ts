@@ -14,6 +14,9 @@ export interface LabInfo {
   signer_name: string | null
   require_pdf_for_submission: boolean
   show_spec_preview_on_sample: boolean
+  accreditation_body: string | null
+  accreditation_number: string | null
+  accreditation_statement: string | null
   created_at: string
   updated_at: string
 }
@@ -28,6 +31,9 @@ export interface LabInfoUpdate {
   zip_code: string
   require_pdf_for_submission?: boolean
   show_spec_preview_on_sample?: boolean
+  accreditation_body?: string | null
+  accreditation_number?: string | null
+  accreditation_statement?: string | null
 }
 
 export const labInfoApi = {

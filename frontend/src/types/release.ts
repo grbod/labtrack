@@ -44,6 +44,7 @@ export interface ArchiveItem {
   size: string | null
   released_at: string
   customer_name: string | null
+  customer_email?: string | null
   // Post-release supersede: the re-sample fork COA that replaced this one.
   superseded_by_release_id?: number | null
   superseded_by_reference?: string | null
@@ -181,6 +182,11 @@ export interface COAPreviewData {
   company_phone: string | null
   company_email: string | null
   company_logo_url: string | null
+
+  // Accreditation footer (optional; printed only when populated)
+  accreditation_body?: string | null
+  accreditation_number?: string | null
+  accreditation_statement?: string | null
 
   // Product info
   product_name: string

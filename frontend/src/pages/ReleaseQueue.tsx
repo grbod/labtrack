@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion } from "framer-motion"
-import { Loader2, Inbox, CheckCircle2, Download, Mail, Search } from "lucide-react"
+import { Loader2, Inbox, CheckCircle2, Download, Mail, Search, ArrowRight } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -50,7 +50,12 @@ export function ReleaseQueuePage() {
   const [actionDialog, setActionDialog] = useState<{ mode: "return" | "reject"; item: ReleaseQueueItem } | null>(null)
   const [actionReason, setActionReason] = useState("")
   const { data: queue = [], isLoading } = useReleaseQueue()
-  const { data: recentlyReleased = [], isLoading: isLoadingRecent } = useRecentlyReleased(recentDays)
+  const { data: recentData, isLoading: isLoadingRecent } = useRecentlyReleased(recentDays)
+  const recentlyReleased = recentData?.items ?? []
+  const recentTotal = recentData?.total ?? 0
+  // The archive query is capped at 100 items; a larger window total means the
+  // list below is truncated and older releases live only in History.
+  const isRecentTruncated = recentTotal > recentlyReleased.length
   const { handleDownload: downloadCoa, isDownloading } = useDownloadWithTracking()
   const sendEmail = useSendEmail()
   const returnMutation = useReturnLotForReview()
@@ -80,7 +85,7 @@ export function ReleaseQueuePage() {
 
   const openEmailDialog = (item: ArchiveItem) => {
     setSelectedItem(item)
-    setEmailRecipient("")
+    setEmailRecipient(item.customer_email ?? "")
     setShowEmailDialog(true)
   }
 
@@ -431,6 +436,37 @@ export function ReleaseQueuePage() {
             </Table>
           )}
         </div>
+
+        {/* Footer: window total + link into full History */}
+        {!isLoadingRecent && recentTotal > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <p className="text-[12px] text-slate-500">
+              {isRecentTruncated ? (
+                <>
+                  Showing {recentlyReleased.length} of {recentTotal} releases in the past{" "}
+                  {recentDays} days. Older or additional releases are in History.
+                </>
+              ) : (
+                <>
+                  {recentTotal} release{recentTotal === 1 ? "" : "s"} in the past {recentDays} days.
+                </>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const dateFrom = new Date()
+                dateFrom.setDate(dateFrom.getDate() - recentDays)
+                const dateFromStr = dateFrom.toISOString().split("T")[0]
+                navigate(`/archive?date_from=${dateFromStr}`)
+              }}
+              className="inline-flex items-center gap-1 text-[13px] font-medium text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              View all in History
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
       </motion.div>
 

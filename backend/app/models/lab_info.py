@@ -37,6 +37,11 @@ class LabInfo(BaseModel):
     require_pdf_for_submission = Column(Boolean, nullable=False, default=True)  # Require PDF before submit
     show_spec_preview_on_sample = Column(Boolean, nullable=False, default=True)  # Show spec preview on sample creation
 
+    # Accreditation (optional) — printed in the COA footer when populated
+    accreditation_body = Column(String(200), nullable=True)  # e.g. "A2LA", "ISO 17025"
+    accreditation_number = Column(String(100), nullable=True)  # certificate / accreditation number
+    accreditation_statement = Column(Text, nullable=True)  # free-text scope/limitation statement
+
     # Default values
     DEFAULT_COMPANY_NAME = "Your Company Name"
     DEFAULT_ADDRESS = "123 Quality Street"

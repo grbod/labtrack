@@ -4,6 +4,7 @@ import { motion } from "framer-motion"
 import { Plus, Pencil, Archive, Search, Loader2, Package, Check, X, Trash2 } from "lucide-react"
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from "@tanstack/react-table"
 import { TestSpecsTooltip } from "@/components/domain/TestSpecsTooltip"
+import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
 import { LabTestTypeAutocomplete } from "@/components/form/LabTestTypeAutocomplete"
 import { generateDisplayName } from "@/lib/product-utils"
 
@@ -64,7 +65,7 @@ interface SizeChipsProps {
   productId: number
   onAddSize: (productId: number, size: string) => void
   onEditSize: (productId: number, sizeId: number, newSize: string) => void
-  onDeleteSize: (productId: number, sizeId: number) => void
+  onDeleteSize: (productId: number, sizeId: number, sizeLabel: string) => void
 }
 
 function SizeChips({ sizes, productId, onAddSize, onEditSize, onDeleteSize }: SizeChipsProps) {
@@ -151,7 +152,7 @@ function SizeChips({ sizes, productId, onAddSize, onEditSize, onDeleteSize }: Si
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    onDeleteSize(productId, size.id)
+                    onDeleteSize(productId, size.id, size.size)
                     setEditingId(null)
                   }}
                   className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
@@ -289,6 +290,14 @@ export function ProductsPage() {
   // Archive dialog state
   const [archiveDialogProduct, setArchiveDialogProduct] = useState<Product | null>(null)
   const [archiveReason, setArchiveReason] = useState("")
+
+  // Confirmations for destructive edits
+  const [pendingDeleteSize, setPendingDeleteSize] = useState<{
+    productId: number
+    sizeId: number
+    sizeLabel: string
+  } | null>(null)
+  const [pendingDeleteSpecId, setPendingDeleteSpecId] = useState<number | null>(null)
 
   // Size mutation hooks
   const createSizeMutation = useCreateSize()
@@ -529,11 +538,16 @@ export function ProductsPage() {
     }
   }
 
-  const handleDeleteSize = async (productId: number, sizeId: number) => {
+  const handleDeleteSize = (productId: number, sizeId: number, sizeLabel: string) => {
+    setPendingDeleteSize({ productId, sizeId, sizeLabel })
+  }
+
+  const confirmDeleteSize = async () => {
+    if (!pendingDeleteSize) return
     try {
       await deleteSizeMutation.mutateAsync({
-        productId,
-        sizeId,
+        productId: pendingDeleteSize.productId,
+        sizeId: pendingDeleteSize.sizeId,
       })
     } catch (error) {
       console.error("Failed to delete size:", error)
@@ -620,14 +634,17 @@ export function ProductsPage() {
     }
   }, [selectedProductForSpecs, addRowTestType, addRowSpecification, addRowRequired, createTestSpecMutation])
 
-  const handleDeleteTestSpec = async (specId: number) => {
+  const handleDeleteTestSpec = (specId: number) => {
     if (!selectedProductForSpecs) return
-    if (confirm("Are you sure you want to remove this test specification?")) {
-      await deleteTestSpecMutation.mutateAsync({
-        productId: selectedProductForSpecs.id,
-        specId,
-      })
-    }
+    setPendingDeleteSpecId(specId)
+  }
+
+  const confirmDeleteTestSpec = async () => {
+    if (!selectedProductForSpecs || pendingDeleteSpecId === null) return
+    await deleteTestSpecMutation.mutateAsync({
+      productId: selectedProductForSpecs.id,
+      specId: pendingDeleteSpecId,
+    })
   }
 
   const handleToggleRequired = async (spec: ProductTestSpecification) => {
@@ -1407,6 +1424,34 @@ export function ProductsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete size confirmation */}
+      <ConfirmActionDialog
+        open={pendingDeleteSize !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteSize(null)
+        }}
+        title="Remove this size?"
+        description={
+          pendingDeleteSize
+            ? `Size "${pendingDeleteSize.sizeLabel}" will be removed from this product. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Remove size"
+        onConfirm={confirmDeleteSize}
+      />
+
+      {/* Delete test specification confirmation */}
+      <ConfirmActionDialog
+        open={pendingDeleteSpecId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteSpecId(null)
+        }}
+        title="Remove this test specification?"
+        description="This test spec will be removed from the product panel. This cannot be undone."
+        confirmLabel="Remove specification"
+        onConfirm={confirmDeleteTestSpec}
+      />
 
       </motion.div>
     </div>

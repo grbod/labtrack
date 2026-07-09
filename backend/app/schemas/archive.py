@@ -81,6 +81,7 @@ class ArchiveItem(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
     released_at: Optional[datetime] = None
     released_by: Optional[str] = None
     coa_file_path: Optional[str] = None
@@ -107,6 +108,7 @@ class ArchiveItem(BaseModel):
             flavor=release.product.flavor if release.product else None,
             size=release.product.size if release.product else None,
             customer_name=release.customer.company_name if release.customer else None,
+            customer_email=release.customer.email if release.customer else None,
             released_at=release.released_at,
             released_by=release.released_by.username if release.released_by else None,
             coa_file_path=release.coa_file_path,

@@ -69,6 +69,9 @@ class LabInfoService(BaseService[LabInfo]):
         zip_code: str,
         require_pdf_for_submission: bool = None,
         show_spec_preview_on_sample: bool = None,
+        accreditation_body: Optional[str] = None,
+        accreditation_number: Optional[str] = None,
+        accreditation_statement: Optional[str] = None,
         user_id: int = None,
     ) -> LabInfo:
         """
@@ -97,6 +100,11 @@ class LabInfoService(BaseService[LabInfo]):
             "city": city,
             "state": state,
             "zip_code": zip_code,
+            # Accreditation fields are always overwritten (empty string clears
+            # them to None) so QC can add or remove them from the COA footer.
+            "accreditation_body": accreditation_body or None,
+            "accreditation_number": accreditation_number or None,
+            "accreditation_statement": accreditation_statement or None,
         }
 
         if phone is not None:

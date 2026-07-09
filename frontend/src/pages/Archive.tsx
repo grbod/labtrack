@@ -78,10 +78,11 @@ export function ArchivePage() {
   const [search, setSearch] = useState(() => searchParams.get("search") ?? "")
   const [productId, setProductId] = useState<number | undefined>()
   const [customerId, setCustomerId] = useState<number | undefined>()
-  const [dateFrom, setDateFrom] = useState("")
+  // Optional preset from a deep link (e.g. Release Queue "View all in History").
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") ?? "")
   const [dateTo, setDateTo] = useState("")
   const [lotNumber, setLotNumber] = useState("")
-  const [showFilters, setShowFilters] = useState(false)
+  const [showFilters, setShowFilters] = useState(!!searchParams.get("date_from"))
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [sortBy, setSortBy] = useState<ArchiveSortColumn>('released_at')
@@ -147,7 +148,7 @@ export function ArchivePage() {
 
   const handleResendEmail = (item: ArchiveItem) => {
     setEmailTarget({ lotId: item.lot_id, productId: item.product_id })
-    setEmailRecipient("")
+    setEmailRecipient(item.customer_email ?? "")
     setEmailDialogOpen(true)
   }
 

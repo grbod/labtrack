@@ -104,6 +104,9 @@ export function SettingsPage() {
   const [zipCode, setZipCode] = useState("")
   const [requirePdfForSubmission, setRequirePdfForSubmission] = useState(true)
   const [showSpecPreviewOnSample, setShowSpecPreviewOnSample] = useState(true)
+  const [accreditationBody, setAccreditationBody] = useState("")
+  const [accreditationNumber, setAccreditationNumber] = useState("")
+  const [accreditationStatement, setAccreditationStatement] = useState("")
   const [labInfoDirty, setLabInfoDirty] = useState(false)
   const [labInfoAutoSaveSuccess, setLabInfoAutoSaveSuccess] = useState(false)
 
@@ -235,6 +238,9 @@ export function SettingsPage() {
       setZipCode(labInfo.zip_code)
       setRequirePdfForSubmission(labInfo.require_pdf_for_submission)
       setShowSpecPreviewOnSample(labInfo.show_spec_preview_on_sample)
+      setAccreditationBody(labInfo.accreditation_body ?? "")
+      setAccreditationNumber(labInfo.accreditation_number ?? "")
+      setAccreditationStatement(labInfo.accreditation_statement ?? "")
       setLabInfoDirty(false) // Reset dirty flag when data syncs from API
     }
   }, [labInfo])
@@ -304,6 +310,9 @@ export function SettingsPage() {
         zip_code: zipCode,
         require_pdf_for_submission: requirePdfForSubmission,
         show_spec_preview_on_sample: showSpecPreviewOnSample,
+        accreditation_body: accreditationBody.trim() || null,
+        accreditation_number: accreditationNumber.trim() || null,
+        accreditation_statement: accreditationStatement.trim() || null,
       })
 
       setLabInfoDirty(false) // Reset dirty flag on successful save
@@ -1146,6 +1155,75 @@ export function SettingsPage() {
                     Recommended: PNG or JPG, max 2MB. Changes save automatically and appear above company name on COAs.
                   </p>
                 </div>
+              </div>
+            </div>
+
+            {/* Accreditation */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <div>
+                <h3 className="text-[14px] font-semibold text-slate-900">Accreditation</h3>
+                <p className="text-[11px] text-slate-500">
+                  Optional. When populated, an accreditation line prints in the COA footer.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="accreditationBody"
+                    className="text-[13px] font-semibold text-slate-700"
+                  >
+                    Accrediting Body
+                  </Label>
+                  <Input
+                    id="accreditationBody"
+                    value={accreditationBody}
+                    onChange={(e) => {
+                      setAccreditationBody(e.target.value)
+                      setLabInfoDirty(true)
+                    }}
+                    placeholder="e.g., A2LA (ISO/IEC 17025)"
+                    maxLength={200}
+                    className="h-10 border-slate-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="accreditationNumber"
+                    className="text-[13px] font-semibold text-slate-700"
+                  >
+                    Certificate Number
+                  </Label>
+                  <Input
+                    id="accreditationNumber"
+                    value={accreditationNumber}
+                    onChange={(e) => {
+                      setAccreditationNumber(e.target.value)
+                      setLabInfoDirty(true)
+                    }}
+                    placeholder="e.g., 1234.01"
+                    maxLength={100}
+                    className="h-10 border-slate-200"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="accreditationStatement"
+                  className="text-[13px] font-semibold text-slate-700"
+                >
+                  Accreditation Statement
+                </Label>
+                <Textarea
+                  id="accreditationStatement"
+                  value={accreditationStatement}
+                  onChange={(e) => {
+                    setAccreditationStatement(e.target.value)
+                    setLabInfoDirty(true)
+                  }}
+                  placeholder="Optional scope/limitation statement printed below the accreditation line."
+                  rows={2}
+                  className="border-slate-200"
+                />
               </div>
             </div>
 

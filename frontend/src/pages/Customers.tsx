@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { ConfirmActionDialog } from "@/components/domain/ConfirmActionDialog"
 
 import {
   useCustomers,
@@ -50,6 +51,7 @@ export function CustomersPage() {
   const [includeInactive, setIncludeInactive] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
+  const [pendingDeactivate, setPendingDeactivate] = useState<Customer | null>(null)
 
   const { data, isLoading } = useCustomers({
     page,
@@ -106,9 +108,7 @@ export function CustomersPage() {
   }
 
   const handleDeactivate = async (id: number) => {
-    if (confirm("Are you sure you want to deactivate this customer?")) {
-      await deactivateMutation.mutateAsync(id)
-    }
+    await deactivateMutation.mutateAsync(id)
   }
 
   const handleActivate = async (id: number) => {
@@ -233,7 +233,7 @@ export function CustomersPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDeactivate(customer.id)}
+                          onClick={() => setPendingDeactivate(customer)}
                           disabled={deactivateMutation.isPending}
                           className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Deactivate customer"
@@ -289,6 +289,24 @@ export function CustomersPage() {
           </div>
         )}
       </div>
+
+      {/* Deactivate customer confirmation */}
+      <ConfirmActionDialog
+        open={pendingDeactivate !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeactivate(null)
+        }}
+        title="Deactivate this customer?"
+        description={
+          pendingDeactivate
+            ? `"${pendingDeactivate.company_name}" will no longer appear in active customer lists. You can reactivate it later.`
+            : ""
+        }
+        confirmLabel="Deactivate customer"
+        onConfirm={() => {
+          if (pendingDeactivate) handleDeactivate(pendingDeactivate.id)
+        }}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

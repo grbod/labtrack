@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { useSearchParams } from "react-router-dom"
 import { motion } from "framer-motion"
 import {
   Search,
@@ -71,7 +72,10 @@ function SortableHeader({
 }
 
 export function ArchivePage() {
-  const [search, setSearch] = useState("")
+  // Seed the search box from a ?search= deep link (e.g. the global header search
+  // navigating to a released COA). Read once on mount.
+  const [searchParams] = useSearchParams()
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "")
   const [productId, setProductId] = useState<number | undefined>()
   const [customerId, setCustomerId] = useState<number | undefined>()
   const [dateFrom, setDateFrom] = useState("")

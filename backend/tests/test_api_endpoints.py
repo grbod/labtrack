@@ -398,6 +398,60 @@ class TestLotEndpoints:
         data = response.json()
         assert len(data["items"]) >= 1
 
+    def test_search_lots_by_reference(self, client, test_lot):
+        """Global search matches on reference number."""
+        response = client.get("/api/v1/lots/search?q=241201")
+        assert response.status_code == 200
+        results = response.json()
+        assert any(r["reference_number"] == "241201-001" for r in results)
+        hit = next(r for r in results if r["reference_number"] == "241201-001")
+        assert hit["lot_number"] == "LOT001"
+        assert hit["status"] == "awaiting_results"
+        assert hit["primary_product_id"] == test_lot.lot_products[0].product_id
+
+    def test_search_lots_by_lot_number(self, client, test_lot):
+        """Global search matches on lot number."""
+        response = client.get("/api/v1/lots/search?q=LOT001")
+        assert response.status_code == 200
+        assert any(r["lot_number"] == "LOT001" for r in response.json())
+
+    def test_search_lots_by_product_name(self, client, test_lot):
+        """Global search matches on product name."""
+        response = client.get("/api/v1/lots/search?q=Test Product")
+        assert response.status_code == 200
+        results = response.json()
+        assert any(r["reference_number"] == "241201-001" for r in results)
+        hit = next(r for r in results if r["reference_number"] == "241201-001")
+        assert "Test Product" in (hit["product_label"] or "")
+
+    def test_search_lots_no_match(self, client, test_lot):
+        """Global search returns an empty list when nothing matches."""
+        response = client.get("/api/v1/lots/search?q=zzz-no-such-lot")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_search_lots_requires_query(self, client, test_lot):
+        """Blank query is rejected (min_length=1)."""
+        assert client.get("/api/v1/lots/search?q=").status_code == 422
+
+    def test_search_lots_respects_limit(self, client, test_db, test_product):
+        """The limit parameter caps the number of hits."""
+        for i in range(5):
+            lot = Lot(
+                lot_number=f"SLOT{i:03d}",
+                reference_number=f"250101-{i:03d}",
+                lot_type=LotType.STANDARD,
+                status=LotStatus.AWAITING_RESULTS,
+            )
+            test_db.add(lot)
+            test_db.flush()
+            test_db.add(LotProduct(lot_id=lot.id, product_id=test_product.id))
+        test_db.commit()
+
+        response = client.get("/api/v1/lots/search?q=SLOT&limit=2")
+        assert response.status_code == 200
+        assert len(response.json()) == 2
+
     def test_create_lot(self, client, test_product):
         """Test creating a lot."""
         lot_data = {

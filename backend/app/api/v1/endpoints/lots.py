@@ -42,6 +42,7 @@ from app.schemas.lot import (
     SublotSummary,
     TestSpecInProduct,
 )
+from app.schemas.release import ForkRequest, ForkResponse
 from app.services.audit_service import AuditService
 from app.services.daane_coc_service import daane_coc_service
 from app.services.lot_service import LotService
@@ -494,6 +495,57 @@ async def recalculate_single_lot_status(
         ) from exc
 
     return LotResponse.model_validate(lot)
+
+
+@router.post(
+    "/{lot_id}/fork",
+    response_model=ForkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def fork_lot_endpoint(
+    lot_id: int,
+    request: ForkRequest,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+) -> ForkResponse:
+    """Fork a product out of a lot into a fresh re-sample lot (QC Manager/Admin).
+
+    Individualizes a composite member (or any lot's product) into a new STANDARD
+    lot, inheriting the source's passing results and leaving the rest to be
+    re-tested. Returns the new lot.
+    """
+    from app.services.lot_fork_service import ForkError, fork_lot
+
+    try:
+        new_lot = fork_lot(db, lot_id, request.product_id, current_user)
+    except ForkError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    inherited = (
+        db.query(func.count(TestResult.id))
+        .filter(
+            TestResult.lot_id == new_lot.id,
+            TestResult.provenance_note.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
+
+    db.commit()
+    db.refresh(new_lot)
+
+    return ForkResponse(
+        lot_id=new_lot.id,
+        lot_number=new_lot.lot_number,
+        reference_number=new_lot.reference_number,
+        product_id=request.product_id,
+        status=new_lot.status,
+        forked_from_lot_id=new_lot.forked_from_lot_id,
+        fork_context=new_lot.fork_context,
+        inherited_result_count=inherited,
+    )
 
 
 @router.get("/{lot_id}/daane-coc")

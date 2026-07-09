@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { ArrowLeft, ArrowRight, Ban, Download, ExternalLink, Loader2, Mail, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, Ban, Download, ExternalLink, GitFork, Loader2, Mail, X } from "lucide-react"
 import {
   Dialog,
   DialogClose,
@@ -12,10 +12,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { COAPreview } from "@/components/domain/COAPreview"
-import { useVoidRelease } from "@/hooks/useRelease"
+import { useVoidRelease, useReleaseSiblings } from "@/hooks/useRelease"
+import { useForkLot } from "@/hooks/useLots"
 import { useAuthStore } from "@/store/auth"
 import type { ArchiveItem } from "@/types/release"
 
@@ -53,9 +55,22 @@ export function ReleasedCOAPreviewModal({
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const isAdmin = user?.role === "admin"
+  const canFork = user?.role === "admin" || user?.role === "qc_manager"
   const voidRelease = useVoidRelease()
+  const forkLot = useForkLot()
   const [showVoidDialog, setShowVoidDialog] = useState(false)
   const [voidReason, setVoidReason] = useState("")
+  const [showForkDialog, setShowForkDialog] = useState(false)
+  // Siblings default to "also void" (checked); we track only the ones the user
+  // un-checks so no effect is needed to seed defaults when siblings load.
+  const [deselectedSiblingIds, setDeselectedSiblingIds] = useState<number[]>([])
+  const { data: siblings = [] } = useReleaseSiblings(
+    currentItem?.id ?? null,
+    showVoidDialog
+  )
+  const siblingVoidIds = siblings
+    .map((s) => s.id)
+    .filter((id) => !deselectedSiblingIds.includes(id))
   const currentIndex = useMemo(() => {
     if (!currentItem) return -1
     const currentKey = itemKey(currentItem)
@@ -110,13 +125,37 @@ export function ReleasedCOAPreviewModal({
       await voidRelease.mutateAsync({
         releaseId: currentItem.id,
         reason: voidReason.trim(),
+        alsoVoidReleaseIds: siblingVoidIds,
       })
-      toast.success("Release voided and returned to the queue")
+      const extra = siblingVoidIds.length
+        ? ` (plus ${siblingVoidIds.length} sibling COA${siblingVoidIds.length > 1 ? "s" : ""})`
+        : ""
+      toast.success(`Release voided and returned to the queue${extra}`)
       setShowVoidDialog(false)
       setVoidReason("")
+      setDeselectedSiblingIds([])
       onCurrentItemChange(null)
     } catch {
       /* useVoidRelease surfaces its own error toast */
+    }
+  }
+
+  const handleForkConfirm = async () => {
+    if (!currentItem) return
+    try {
+      const result = await forkLot.mutateAsync({
+        lotId: currentItem.lot_id,
+        productId: currentItem.product_id,
+      })
+      setShowForkDialog(false)
+      onCurrentItemChange(null)
+      toast.success(
+        `Created sample ${result.lot_number} (${result.reference_number}) — ` +
+          `${result.inherited_result_count} passing result(s) inherited, the rest awaiting testing.`
+      )
+      navigate("/tracker")
+    } catch {
+      /* useForkLot surfaces its own error toast */
     }
   }
 
@@ -150,6 +189,12 @@ export function ReleasedCOAPreviewModal({
               <p className="mt-0.5 truncate text-[12px] text-slate-500">
                 Lot {currentItem.lot_number || "—"} · {formatProduct(currentItem)}
               </p>
+              {currentItem.superseded_by_reference && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-700">
+                  <GitFork className="h-3 w-3" />
+                  Superseded by {currentItem.superseded_by_reference}
+                </span>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <div className="flex items-center gap-1">
@@ -211,6 +256,19 @@ export function ReleasedCOAPreviewModal({
                 <ExternalLink className="h-4 w-4" />
                 Open Full Detail
               </Button>
+              {canFork && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-sky-200 text-sky-700 hover:bg-sky-50"
+                  onClick={() => setShowForkDialog(true)}
+                  disabled={forkLot.isPending}
+                >
+                  <GitFork className="h-4 w-4" />
+                  Fork Sample
+                </Button>
+              )}
               {isAdmin && (
                 <Button
                   type="button"
@@ -252,7 +310,10 @@ export function ReleasedCOAPreviewModal({
       open={showVoidDialog}
       onOpenChange={(nextOpen) => {
         setShowVoidDialog(nextOpen)
-        if (!nextOpen) setVoidReason("")
+        if (!nextOpen) {
+          setVoidReason("")
+          setDeselectedSiblingIds([])
+        }
       }}
     >
       <DialogContent className="sm:max-w-[420px]">
@@ -275,6 +336,37 @@ export function ReleasedCOAPreviewModal({
             rows={3}
             autoFocus
           />
+          {siblings.length > 0 && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[12px] font-medium text-amber-800">
+                Sibling COAs on this lot print the same shared results. Void them too?
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {siblings.map((sibling) => (
+                  <label
+                    key={sibling.id}
+                    className="flex items-start gap-2 text-[12px] text-amber-900 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={!deselectedSiblingIds.includes(sibling.id)}
+                      onCheckedChange={(checked) =>
+                        setDeselectedSiblingIds((prev) =>
+                          checked
+                            ? prev.filter((id) => id !== sibling.id)
+                            : [...new Set([...prev, sibling.id])]
+                        )
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">{sibling.product_name ?? "Product"}</span>
+                      {sibling.brand && <span className="text-amber-700"> — {sibling.brand}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button
@@ -295,6 +387,47 @@ export function ReleasedCOAPreviewModal({
           >
             {voidRelease.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             Void &amp; Return to Queue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={showForkDialog}
+      onOpenChange={setShowForkDialog}
+    >
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Fork Sample for Re-testing</DialogTitle>
+          <DialogDescription>
+            Individualize{" "}
+            <span className="font-medium text-slate-800">{formatProduct(currentItem)}</span>{" "}
+            into its own sample for supplementary testing.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2 text-[13px] text-slate-600 space-y-2">
+          <p>This creates a new standard sample (a “B” / “C” suffix on the lot):</p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>Passing results are inherited and marked with their provenance.</li>
+            <li>Failing or untested analytes are left blank for fresh testing.</li>
+            <li>
+              When the fork is released, this COA is marked{" "}
+              <span className="font-medium">Superseded by</span> the new one.
+            </li>
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setShowForkDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleForkConfirm}
+            disabled={forkLot.isPending}
+            className="bg-sky-600 text-white hover:bg-sky-700"
+          >
+            {forkLot.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Create Forked Sample
           </Button>
         </DialogFooter>
       </DialogContent>

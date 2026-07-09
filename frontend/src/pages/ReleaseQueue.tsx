@@ -238,30 +238,42 @@ export function ReleaseQueuePage() {
                     {formatDate(item.created_at)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="amber" className="text-[11px]">
-                      Awaiting Release
-                    </Badge>
+                    {item.release_status === "forked" ? (
+                      <Badge variant="outline" className="text-[11px] border-sky-300 text-sky-700">
+                        Forked{item.forked_to_reference ? ` → ${item.forked_to_reference}` : ""}
+                      </Badge>
+                    ) : (
+                      <Badge variant="amber" className="text-[11px]">
+                        Awaiting Release
+                      </Badge>
+                    )}
                   </TableCell>
                   {canAct && (
                     <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => handleActionClick(e, "return", item)}
-                          className="h-8 text-[12px] text-amber-700 hover:bg-amber-50 border-amber-200"
-                        >
-                          Return for Review
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => handleActionClick(e, "reject", item)}
-                          className="h-8 text-[12px] text-red-600 hover:bg-red-50 border-red-200"
-                        >
-                          Reject
-                        </Button>
-                      </div>
+                      {item.release_status === "forked" ? (
+                        <span className="text-[12px] text-slate-400">
+                          Individualized — no action
+                        </span>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => handleActionClick(e, "return", item)}
+                            className="h-8 text-[12px] text-amber-700 hover:bg-amber-50 border-amber-200"
+                          >
+                            Return for Review
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => handleActionClick(e, "reject", item)}
+                            className="h-8 text-[12px] text-red-600 hover:bg-red-50 border-red-200"
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   )}
                 </TableRow>

@@ -30,6 +30,7 @@ from app.schemas.release import (
     ReleaseGateStatus,
     ReleaseQueueItem,
     ReleaseQueueResponse,
+    ReleaseSibling,
     SendBackRequest,
     SensoryAttestRequest,
     VoidReleaseRequest,
@@ -42,6 +43,21 @@ from app.services.release_service import ReleaseService
 router = APIRouter()
 release_service = ReleaseService()
 audit_service = AuditService()
+
+
+def _find_fork_target(db, source_lot_id: int, product_id: int):
+    """Return the lot forked out of (source_lot_id, product_id), if any."""
+    from app.models import LotProduct
+
+    return (
+        db.query(Lot)
+        .join(LotProduct, Lot.id == LotProduct.lot_id)
+        .filter(
+            Lot.forked_from_lot_id == source_lot_id,
+            LotProduct.product_id == product_id,
+        )
+        .first()
+    )
 
 
 def _normalize_pdf_storage_key(filename: str) -> str:
@@ -318,8 +334,23 @@ async def get_release_queue(
         .all()
     )
 
+    # Per-member release status so the UI can render FORKED members distinctly.
+    lot_ids = {lot.id for lot, _, _ in results}
+    release_status_by_pair = {}
+    if lot_ids:
+        for rel in db.query(COARelease).filter(COARelease.lot_id.in_(lot_ids)).all():
+            release_status_by_pair[(rel.lot_id, rel.product_id)] = rel.status
+
     items = []
     for lot, lot_product, product in results:
+        rel_status = release_status_by_pair.get((lot.id, product.id))
+        forked_to_lot_id = None
+        forked_to_reference = None
+        if rel_status == COAReleaseStatus.FORKED:
+            fork = _find_fork_target(db, lot.id, product.id)
+            if fork is not None:
+                forked_to_lot_id = fork.id
+                forked_to_reference = fork.reference_number
         items.append(
             ReleaseQueueItem(
                 lot_id=lot.id,
@@ -331,10 +362,53 @@ async def get_release_queue(
                 flavor=product.flavor,
                 size=product.size,
                 created_at=lot.created_at,
+                release_status=(rel_status.value if rel_status else "awaiting_release"),
+                forked_to_lot_id=forked_to_lot_id,
+                forked_to_reference=forked_to_reference,
             )
         )
 
     return ReleaseQueueResponse(items=items, total=len(items))
+
+
+@router.get("/{release_id}/siblings", response_model=List[ReleaseSibling])
+async def get_release_siblings(
+    release_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> List[ReleaseSibling]:
+    """Other RELEASED COAs on the same lot (the void-sibling prompt list).
+
+    These print the same shared lab results, so voiding one usually means the
+    siblings should be voided too. Declared before ``/{lot_id}/{product_id}`` so
+    the ``…/siblings`` literal is not shadowed by that two-segment route.
+    """
+    release = db.query(COARelease).filter(COARelease.id == release_id).first()
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Release not found"
+        )
+
+    siblings = (
+        db.query(COARelease)
+        .options(joinedload(COARelease.product), joinedload(COARelease.lot))
+        .filter(
+            COARelease.lot_id == release.lot_id,
+            COARelease.id != release.id,
+            COARelease.status == COAReleaseStatus.RELEASED,
+        )
+        .all()
+    )
+    return [
+        ReleaseSibling(
+            id=s.id,
+            product_id=s.product_id,
+            product_name=s.product.product_name if s.product else None,
+            brand=s.product.brand if s.product else None,
+            reference_number=s.lot.reference_number if s.lot else None,
+        )
+        for s in siblings
+    ]
 
 
 # ============================================================================
@@ -404,12 +478,16 @@ async def get_release_details_by_lot_product(
     # Determine status
     from app.models.enums import COAReleaseStatus
 
-    if existing_release:
-        status = (
-            "released"
-            if existing_release.status == COAReleaseStatus.RELEASED
-            else "awaiting_release"
-        )
+    forked_to_lot_id = None
+    forked_to_reference = None
+    if existing_release and existing_release.status == COAReleaseStatus.RELEASED:
+        status = "released"
+    elif existing_release and existing_release.status == COAReleaseStatus.FORKED:
+        status = "forked"
+        fork = _find_fork_target(db, lot_id, product_id)
+        if fork is not None:
+            forked_to_lot_id = fork.id
+            forked_to_reference = fork.reference_number
     else:
         status = "awaiting_release"
 
@@ -429,6 +507,8 @@ async def get_release_details_by_lot_product(
             if existing_release and existing_release.customer
             else None
         ),
+        forked_to_lot_id=forked_to_lot_id,
+        forked_to_reference=forked_to_reference,
     )
 
 
@@ -590,19 +670,37 @@ async def approve_release_by_lot_product(
             detail=f"Failed to generate COA PDF: {str(e)}",
         )
 
-    # Check if all products for this lot are released
+    # Post-release supersede: when THIS lot is a re-sample fork of a previously
+    # RELEASED source COA (the supplementary-testing case), link the old release
+    # to this new one so History shows "Superseded by {fork ref}".
+    if lot.forked_from_lot_id is not None:
+        source_release = (
+            db.query(COARelease)
+            .filter(
+                COARelease.lot_id == lot.forked_from_lot_id,
+                COARelease.product_id == product_id,
+                COARelease.status == COAReleaseStatus.RELEASED,
+            )
+            .first()
+        )
+        if source_release is not None:
+            source_release.superseded_by_release_id = coa_release.id
+
+    # Check if all products for this lot are released. A FORKED member has been
+    # individualized out of the composite and counts as satisfied/absent.
     all_lot_products = db.query(LotProduct).filter(LotProduct.lot_id == lot_id).all()
 
     all_product_ids = {lp.product_id for lp in all_lot_products}
 
-    released_releases = (
+    satisfied_releases = (
         db.query(COARelease)
         .filter(
-            COARelease.lot_id == lot_id, COARelease.status == COAReleaseStatus.RELEASED
+            COARelease.lot_id == lot_id,
+            COARelease.status.in_([COAReleaseStatus.RELEASED, COAReleaseStatus.FORKED]),
         )
         .all()
     )
-    released_product_ids = {r.product_id for r in released_releases}
+    released_product_ids = {r.product_id for r in satisfied_releases}
 
     all_products_released = all_product_ids == released_product_ids
 
@@ -751,44 +849,21 @@ async def attest_sensory_rows(
     return compute_gate(db, lot_id, product_id, release=release)
 
 
-@router.post("/{release_id}/void", response_model=ReleaseDetailsByLotProduct)
-async def void_release(
-    release_id: int,
-    request: VoidReleaseRequest,
-    db: DbSession,
-    current_user: AdminUser,
-) -> ReleaseDetailsByLotProduct:
-    """Void a released COA and return the lot to the release queue (Admin only)."""
+def _void_one_release(db, release, reason: str, current_user) -> None:
+    """Void a single released COA and return its lot to the queue (no commit)."""
     from datetime import datetime
 
-    from app.models import Product
     from app.models.enums import LotStatus
     from app.workflow.lot_workflow_service import (
         LotWorkflowService,
         WorkflowTransitionError,
     )
 
-    reason = (request.reason or "").strip()
-    if not reason:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A reason is required to void a release",
-        )
-
-    release = db.query(COARelease).filter(COARelease.id == release_id).first()
-    if not release:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Release not found"
-        )
-    if release.status != COAReleaseStatus.RELEASED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only a released COA can be voided",
-        )
-
     lot = db.query(Lot).filter(Lot.id == release.lot_id).first()
 
     # Return the lot to the queue via the canonical VOID path (admin + reason).
+    # A sibling void may already have moved the lot; only transition from
+    # RELEASED.
     if lot is not None and lot.status == LotStatus.RELEASED:
         try:
             LotWorkflowService().transition(
@@ -805,8 +880,6 @@ async def void_release(
                 detail={"code": exc.code, "reason": exc.reason},
             )
 
-    # Reset the release back to a pending-equivalent state, keeping the void
-    # trail (voided_at drives the re-release "prior email" notice).
     old_coa_status = release.status.value
     release.status = COAReleaseStatus.AWAITING_RELEASE
     release.voided_note = reason
@@ -827,6 +900,70 @@ async def void_release(
         reason=f"Release voided: {reason}",
     )
 
+
+@router.post("/{release_id}/void", response_model=ReleaseDetailsByLotProduct)
+async def void_release(
+    release_id: int,
+    request: VoidReleaseRequest,
+    db: DbSession,
+    current_user: AdminUser,
+) -> ReleaseDetailsByLotProduct:
+    """Void a released COA and return the lot to the release queue (Admin only).
+
+    Decision 24: ``also_void_release_ids`` voids sibling COAs on the same lot in
+    the same action (they print the same shared results).
+    """
+    from app.models import Product
+
+    reason = (request.reason or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to void a release",
+        )
+
+    release = db.query(COARelease).filter(COARelease.id == release_id).first()
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Release not found"
+        )
+    if release.status != COAReleaseStatus.RELEASED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only a released COA can be voided",
+        )
+
+    # Validate and void requested siblings (same lot, RELEASED, not the primary).
+    sibling_ids = [rid for rid in request.also_void_release_ids if rid != release_id]
+    siblings = []
+    if sibling_ids:
+        siblings = db.query(COARelease).filter(COARelease.id.in_(sibling_ids)).all()
+        found_ids = {s.id for s in siblings}
+        missing = set(sibling_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Sibling release(s) not found: {sorted(missing)}",
+            )
+        for s in siblings:
+            if s.lot_id != release.lot_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sibling releases must belong to the same lot",
+                )
+            if s.status != COAReleaseStatus.RELEASED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sibling releases must be released to be voided",
+                )
+
+    # Void siblings first so the lot transition (RELEASED→AWAITING_RELEASE)
+    # happens exactly once, when the primary is processed last if still needed.
+    for s in siblings:
+        _void_one_release(db, s, reason, current_user)
+    _void_one_release(db, release, reason, current_user)
+
+    lot = db.query(Lot).filter(Lot.id == release.lot_id).first()
     db.commit()
     db.refresh(release)
 

@@ -61,6 +61,10 @@ class Lot(BaseModel):
     return_response_note = Column(
         Text, nullable=True
     )  # Required response before re-approval
+    # Re-sample spawn lineage: set when this lot was forked from another lot
+    # (e.g. individualizing a composite member for supplementary testing).
+    forked_from_lot_id = Column(Integer, ForeignKey("lots.id"), nullable=True)
+    fork_context = Column(String(255), nullable=True)  # e.g. "composite C040726"
 
     # Relationships
     sublots = relationship(
@@ -80,6 +84,13 @@ class Lot(BaseModel):
     )
     retest_requests = relationship(
         "RetestRequest", back_populates="lot", cascade="all, delete-orphan"
+    )
+    # Self-referential fork lineage.
+    forked_from = relationship(
+        "Lot",
+        remote_side="Lot.id",
+        foreign_keys=[forked_from_lot_id],
+        backref="forks",
     )
 
     # Indexes for performance

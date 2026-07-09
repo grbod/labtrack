@@ -96,6 +96,9 @@ class LotResponse(BaseModel):
     coc_storage_key: Optional[str] = None  # Archived COC PDF
     return_reason: Optional[str] = None
     return_response_note: Optional[str] = None
+    # Re-sample fork lineage.
+    forked_from_lot_id: Optional[int] = None
+    fork_context: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

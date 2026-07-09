@@ -1,15 +1,16 @@
 """Archive service for searching and managing released COAs."""
 
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy.orm import Session, joinedload
+from typing import List, Optional
+
 from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.coa_release import COARelease
 from app.models.email_history import EmailHistory
+from app.models.enums import COAReleaseStatus
 from app.models.lot import Lot
 from app.models.product import Product
-from app.models.enums import COAReleaseStatus
 from app.services.base import BaseService
 from app.utils.logger import logger
 
@@ -65,6 +66,7 @@ class ArchiveService(BaseService[COARelease]):
                 joinedload(COARelease.product),
                 joinedload(COARelease.customer),
                 joinedload(COARelease.released_by),
+                joinedload(COARelease.superseded_by).joinedload(COARelease.lot),
             )
             .filter(COARelease.status == COAReleaseStatus.RELEASED)
         )

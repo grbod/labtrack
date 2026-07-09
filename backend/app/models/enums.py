@@ -74,6 +74,9 @@ class COAReleaseStatus(str, enum.Enum):
 
     AWAITING_RELEASE = "awaiting_release"
     RELEASED = "released"
+    # A composite member whose un-issued release was superseded by a re-sample
+    # fork. The composite gate treats a FORKED member as satisfied/absent.
+    FORKED = "forked"
 
 
 class RetestStatus(str, enum.Enum):

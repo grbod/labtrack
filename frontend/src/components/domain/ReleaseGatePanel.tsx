@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertTriangle, CheckCircle2, Info, Loader2, ShieldCheck } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Info, Layers, Loader2, ShieldCheck } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { useReleaseGate, useAttestSensory } from "@/hooks/useRelease"
@@ -102,10 +102,12 @@ export function ReleaseGatePanel({ lotId, productId, isReleased }: ReleaseGatePa
 
   if (!gate) return null
 
+  const unionMissing = gate.union_missing_tests ?? []
   const isAllClear =
     gate.missing_tests.length === 0 &&
     gate.failing_tests.length === 0 &&
     gate.indeterminate_tests.length === 0 &&
+    unionMissing.length === 0 &&
     gate.sensory_all_attested
 
   // Remounts the checklist (resetting its local pending-checkbox state) whenever
@@ -132,6 +134,25 @@ export function ReleaseGatePanel({ lotId, productId, isReleased }: ReleaseGatePa
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-[12px] font-medium text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           All release gate checks passed
+        </div>
+      )}
+
+      {gate.is_composite && unionMissing.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-red-700">
+            <Layers className="h-3.5 w-3.5" />
+            Composite Incomplete — Blocks Every Member
+          </div>
+          <p className="mt-1 text-[11px] text-red-600">
+            These shared tests are required by at least one member and are missing
+            from the shared results, so no member can be released until they are in
+            (or the affected member is forked out).
+          </p>
+          <ul className="mt-1.5 space-y-1 text-[12px] text-red-700">
+            {unionMissing.map((name) => (
+              <li key={`union-missing-${name}`}>Missing: {name}</li>
+            ))}
+          </ul>
         </div>
       )}
 

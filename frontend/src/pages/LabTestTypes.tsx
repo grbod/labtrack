@@ -91,6 +91,7 @@ export function LabTestTypesPage() {
     lab_name: string
     lab_test_type_id: number
   } | null>(null)
+  const [pendingDeleteType, setPendingDeleteType] = useState<LabTestType | null>(null)
   const [pendingApproveAlias, setPendingApproveAlias] = useState<LabTestAlias | null>(null)
   const [pendingDisableAlias, setPendingDisableAlias] = useState<LabTestAlias | null>(null)
 
@@ -221,12 +222,10 @@ export function LabTestTypesPage() {
   }
 
   const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this lab test type?")) {
-      try {
-        await deleteMutation.mutateAsync(id)
-      } catch {
-        // Error might indicate test type is in use
-      }
+    try {
+      await deleteMutation.mutateAsync(id)
+    } catch {
+      // Error might indicate test type is in use
     }
   }
 
@@ -439,7 +438,7 @@ export function LabTestTypesPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(testType.id)}
+                            onClick={() => setPendingDeleteType(testType)}
                             disabled={deleteMutation.isPending}
                             className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           >
@@ -696,6 +695,24 @@ export function LabTestTypesPage() {
             </div>
           </section>
           )}
+
+      {/* Delete lab test type confirmation */}
+      <ConfirmActionDialog
+        open={pendingDeleteType !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteType(null)
+        }}
+        title="Delete this lab test type?"
+        description={
+          pendingDeleteType
+            ? `"${pendingDeleteType.test_name}" will be removed. This cannot be undone, and it may fail if the test is in use.`
+            : ""
+        }
+        confirmLabel="Delete test type"
+        onConfirm={() => {
+          if (pendingDeleteType) handleDelete(pendingDeleteType.id)
+        }}
+      />
 
       {/* Approve alias confirmation */}
       <ConfirmActionDialog

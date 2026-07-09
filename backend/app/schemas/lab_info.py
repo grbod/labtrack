@@ -18,6 +18,9 @@ class LabInfoUpdate(BaseModel):
     zip_code: str = Field("", max_length=20)
     require_pdf_for_submission: Optional[bool] = None
     show_spec_preview_on_sample: Optional[bool] = None
+    accreditation_body: Optional[str] = Field(None, max_length=200)
+    accreditation_number: Optional[str] = Field(None, max_length=100)
+    accreditation_statement: Optional[str] = None
 
 
 class LabInfoResponse(BaseModel):
@@ -36,6 +39,9 @@ class LabInfoResponse(BaseModel):
     signer_name: Optional[str] = None
     require_pdf_for_submission: bool = True
     show_spec_preview_on_sample: bool = True
+    accreditation_body: Optional[str] = None
+    accreditation_number: Optional[str] = None
+    accreditation_statement: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

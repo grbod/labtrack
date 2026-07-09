@@ -762,6 +762,29 @@ class COAGenerationService:
         )
         story.append(disclaimer_table)
 
+        # --- Accreditation footer (only when populated) ---
+        acc_body = getattr(context.lab, "accreditation_body", None)
+        acc_number = getattr(context.lab, "accreditation_number", None)
+        acc_statement = getattr(context.lab, "accreditation_statement", None)
+        acc_line_parts = []
+        if acc_body:
+            acc_line_parts.append(f"{acc_body} Accredited")
+        if acc_number:
+            acc_line_parts.append(f"Cert #{acc_number}")
+        if acc_line_parts or (acc_statement and acc_statement.strip()):
+            story.append(Spacer(1, 0.1 * inch))
+            acc_style = ParagraphStyle(
+                "COAAccreditation",
+                parent=styles["COAFooter"],
+                fontSize=7.5,
+            )
+            if acc_line_parts:
+                story.append(
+                    Paragraph(xml_escape("  •  ".join(acc_line_parts)), acc_style)
+                )
+            if acc_statement and acc_statement.strip():
+                story.append(Paragraph(xml_escape(acc_statement.strip()), acc_style))
+
         doc.build(story)
 
 

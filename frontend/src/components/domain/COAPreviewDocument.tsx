@@ -606,6 +606,30 @@ export function COAPreviewDocument({
         This Certificate of Analysis is issued based on the test results of a representative sample.
         Results apply only to the lot specified above.
       </div>
+
+      {/* Accreditation Footer (only when populated) */}
+      {(data.accreditation_body ||
+        data.accreditation_number ||
+        (data.accreditation_statement && data.accreditation_statement.trim())) && (
+        <div
+          className="text-center text-[#64748b]"
+          style={{ marginTop: "6px", fontSize: "7pt", lineHeight: 1.4 }}
+        >
+          {(data.accreditation_body || data.accreditation_number) && (
+            <div>
+              {[
+                data.accreditation_body ? `${data.accreditation_body} Accredited` : null,
+                data.accreditation_number ? `Cert #${data.accreditation_number}` : null,
+              ]
+                .filter(Boolean)
+                .join("  •  ")}
+            </div>
+          )}
+          {data.accreditation_statement && data.accreditation_statement.trim() && (
+            <div>{data.accreditation_statement.trim()}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

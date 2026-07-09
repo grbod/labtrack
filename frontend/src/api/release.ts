@@ -184,8 +184,14 @@ export const releaseApi = {
     return `/api/v1/release/${lotId}/${productId}/download`
   },
 
-  /** Get recently released COAs within a given number of days */
-  getRecentlyReleased: async (days: number): Promise<ArchiveItem[]> => {
+  /**
+   * Get recently released COAs within a given number of days. Returns the
+   * (capped) page of items plus the true `total` in the window so callers can
+   * tell when the 100-item cap truncated the list.
+   */
+  getRecentlyReleased: async (
+    days: number,
+  ): Promise<{ items: ArchiveItem[]; total: number }> => {
     const dateFrom = new Date()
     dateFrom.setDate(dateFrom.getDate() - days)
     const dateFromStr = dateFrom.toISOString().split("T")[0]
@@ -195,7 +201,7 @@ export const releaseApi = {
     params.append("page_size", "100") // Get up to 100 recent items
 
     const response = await api.get<PaginatedResponse<ArchiveItem>>(`/archive?${params}`)
-    return response.data.items
+    return { items: response.data.items, total: response.data.total }
   },
 }
 

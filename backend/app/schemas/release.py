@@ -384,6 +384,11 @@ class COAPreviewData(BaseModel):
     company_email: Optional[str] = None
     company_logo_url: Optional[str] = None
 
+    # Accreditation footer (optional; printed only when populated)
+    accreditation_body: Optional[str] = None
+    accreditation_number: Optional[str] = None
+    accreditation_statement: Optional[str] = None
+
     # Product info
     product_name: str
     brand: str

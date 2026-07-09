@@ -150,6 +150,12 @@ class LabBlock(BaseModel):
     # key the PDF renderer resolves to a filesystem path.
     logo_url: Optional[str] = None
     logo_path: Optional[str] = None
+    # Accreditation footer, printed only when populated. All Optional with
+    # defaults so pre-accreditation snapshots (schema_version 1, whose frozen
+    # JSON lacks these keys) still deserialize into a COAContext unchanged.
+    accreditation_body: Optional[str] = None
+    accreditation_number: Optional[str] = None
+    accreditation_statement: Optional[str] = None
 
 
 class DocumentBlock(BaseModel):
@@ -426,6 +432,9 @@ def build_context(
         email=lab_info.email,
         logo_url=lab_info_service.get_logo_url(lab_info.logo_path),
         logo_path=lab_info.logo_path,
+        accreditation_body=getattr(lab_info, "accreditation_body", None),
+        accreditation_number=getattr(lab_info, "accreditation_number", None),
+        accreditation_statement=getattr(lab_info, "accreditation_statement", None),
     )
 
     # --- approver block: strictly from the release record ---

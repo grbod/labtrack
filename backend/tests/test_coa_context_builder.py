@@ -8,6 +8,7 @@ Covers:
   * composite lot: per-product context with component batch numbers.
 """
 
+import json
 from datetime import date, datetime
 
 import pytest
@@ -26,7 +27,9 @@ from app.models.enums import COAReleaseStatus
 from app.models.lab_test_type import LabTestType
 from app.models.product_test_spec import ProductTestSpecification
 from app.services.coa_context_builder import (
+    CONTEXT_SCHEMA_VERSION,
     VERDICT_NO_SPEC,
+    COAContext,
     build_context,
 )
 
@@ -416,3 +419,34 @@ def test_context_is_json_serialisable(test_db, standard_lot, product, product_sp
     # Round-trips through JSON without error.
     dumped = ctx.model_dump_json()
     assert '"schema_version":1' in dumped.replace(" ", "")
+
+
+def test_pre_accreditation_snapshot_json_still_deserialises(
+    test_db, standard_lot, product, product_specs
+):
+    """A schema_version-1 snapshot frozen BEFORE the accreditation fields were
+    added has no accreditation keys in its lab block. It must still deserialize
+    into the current COAContext (fields default to None), so released COAs keep
+    rendering from their immutable snapshots without a schema bump."""
+    _add_result(test_db, standard_lot.id, "Lead", "0.05", "ppm")
+    ctx = build_context(test_db, standard_lot.id, product.id)
+
+    # Simulate an old frozen context_json: strip the accreditation keys that
+    # did not exist when the snapshot was written.
+    payload = json.loads(ctx.model_dump_json())
+    assert payload["schema_version"] == CONTEXT_SCHEMA_VERSION
+    for key in (
+        "accreditation_body",
+        "accreditation_number",
+        "accreditation_statement",
+    ):
+        payload["lab"].pop(key, None)
+    assert "accreditation_body" not in payload["lab"]
+    old_json = json.dumps(payload)
+
+    # Deserializing the older JSON must succeed and default the new fields.
+    restored = COAContext.model_validate_json(old_json)
+    assert restored.schema_version == CONTEXT_SCHEMA_VERSION
+    assert restored.lab.accreditation_body is None
+    assert restored.lab.accreditation_number is None
+    assert restored.lab.accreditation_statement is None

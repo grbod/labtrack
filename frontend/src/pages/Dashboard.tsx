@@ -12,6 +12,7 @@ import {
 
 import { useProducts } from "@/hooks/useProducts"
 import { useLots, useLotStatusCounts } from "@/hooks/useLots"
+import { getStatusBgClasses, getStatusLabel } from "@/lib/status-config"
 
 interface StatCardProps {
   title: string
@@ -181,19 +182,11 @@ export function DashboardPage() {
                       </div>
                     </div>
                     <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
-                        lot.status === "awaiting_results"
-                          ? "bg-amber-100 text-amber-700"
-                          : lot.status === "approved"
-                          ? "bg-emerald-100 text-emerald-700"
-                          : lot.status === "released"
-                          ? "bg-blue-100 text-blue-700"
-                          : lot.status === "rejected"
-                          ? "bg-red-100 text-red-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${getStatusBgClasses(
+                        lot.status,
+                      )}`}
                     >
-                      {lot.status.charAt(0) + lot.status.slice(1).toLowerCase()}
+                      {getStatusLabel(lot.status)}
                     </span>
                   </div>
                 ))}

@@ -175,6 +175,9 @@ def _build_lab_info_response(lab_info) -> LabInfoResponse:
         signer_name=lab_info.signer_name,
         require_pdf_for_submission=lab_info.require_pdf_for_submission,
         show_spec_preview_on_sample=lab_info.show_spec_preview_on_sample,
+        accreditation_body=lab_info.accreditation_body,
+        accreditation_number=lab_info.accreditation_number,
+        accreditation_statement=lab_info.accreditation_statement,
         created_at=lab_info.created_at,
         updated_at=lab_info.updated_at,
     )
@@ -253,6 +256,9 @@ async def update_lab_info(
         zip_code=lab_info_in.zip_code,
         require_pdf_for_submission=lab_info_in.require_pdf_for_submission,
         show_spec_preview_on_sample=lab_info_in.show_spec_preview_on_sample,
+        accreditation_body=lab_info_in.accreditation_body,
+        accreditation_number=lab_info_in.accreditation_number,
+        accreditation_statement=lab_info_in.accreditation_statement,
         user_id=current_user.id,
     )
     return _build_lab_info_response(lab_info)

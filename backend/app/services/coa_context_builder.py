@@ -267,6 +267,7 @@ def build_context(
     product_id: int,
     *,
     release: Optional[COARelease] = None,
+    document_serial: Optional[str] = None,
 ) -> COAContext:
     """Build the canonical COA render context for a (lot, product) pair.
 
@@ -484,8 +485,28 @@ def build_context(
     if lot_product is not None:
         component_batch_number = getattr(lot_product, "batch_number", None)
 
+    # Document identity: the issued COA serial when this release has one (passed
+    # explicitly during snapshot creation, or looked up from a non-voided
+    # snapshot for an already-released COA); legacy/reconstructed keep
+    # COA-{reference}.
+    serial = document_serial
+    if serial is None and release is not None and getattr(release, "id", None):
+        from app.models.coa_snapshot import COASnapshot
+
+        snap = (
+            db.query(COASnapshot)
+            .filter(
+                COASnapshot.coa_release_id == release.id,
+                COASnapshot.voided.is_(False),
+                COASnapshot.coa_serial.isnot(None),
+            )
+            .first()
+        )
+        if snap is not None:
+            serial = snap.coa_serial
+
     document_block = DocumentBlock(
-        document_id=f"COA-{lot.reference_number}",
+        document_id=serial or f"COA-{lot.reference_number}",
         generated_date=generated_date,
         release_date=release_date,
         deviation_note=deviation_note,

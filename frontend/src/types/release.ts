@@ -199,6 +199,12 @@ export interface COAPreviewData {
   released_by_email: string | null
   signature_url: string | null  // URL to signature image for COA
   released_at: string | null  // Release date (if different from generated_date)
+
+  // Snapshot provenance (present when served from an immutable snapshot)
+  source?: string  // "live" | "snapshot"
+  reconstructed?: boolean  // backfilled from the register (no serial)
+  voided?: boolean  // viewing a voided/superseded snapshot from history
+  revision?: number | null
 }
 
 // --- Release gate ---------------------------------------------------------

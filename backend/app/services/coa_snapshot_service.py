@@ -110,10 +110,9 @@ class COASnapshotService:
             release.lot_id,
             release.product_id,
             release=release,
+            document_serial=serial,
         )
         context.source = "snapshot"
-        if serial:
-            context.document.document_id = serial
 
         storage_prefix = self._snapshot_prefix(release, serial)
         signature_storage_key = self._freeze_signature(context, storage_prefix)

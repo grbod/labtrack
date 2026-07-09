@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from app.config import settings
 from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
 from app.models.coa_release import COARelease
+from app.models.coa_snapshot import COASnapshot
 from app.models.enums import AuditAction, COAReleaseStatus
 from app.models.lot import Lot
 from app.schemas.release import (
@@ -122,11 +123,38 @@ def _get_coa_pdf_response(
             detail="COA Release not found",
         )
 
+    filename = f"COA_{coa_release.lot.lot_number}.pdf"
+
+    # Released COAs are served exclusively from their immutable snapshot; no
+    # lazy (re)generation happens for a released release.
+    if coa_release.status == COAReleaseStatus.RELEASED:
+        snapshot = (
+            db.query(COASnapshot)
+            .filter(
+                COASnapshot.coa_release_id == coa_release.id,
+                COASnapshot.voided.is_(False),
+            )
+            .first()
+        )
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "No COA snapshot exists for this released COA (legacy record "
+                    "predating snapshots). Run scripts/backfill_coa_snapshots.py "
+                    "to reconstruct it."
+                ),
+            )
+        return _get_pdf_from_storage(
+            snapshot.pdf_storage_key,
+            response_filename=filename,
+            inline=inline,
+        )
+
     try:
-        # Get or generate the PDF (returns storage key, not full path)
+        # Pre-release: get or generate the PDF (returns storage key).
         storage_key = coa_generation_service.get_or_generate_pdf(db, release_id)
 
-        filename = f"COA_{coa_release.lot.lot_number}.pdf"
         return _get_pdf_from_storage(
             storage_key,
             response_filename=filename,
@@ -579,16 +607,33 @@ async def approve_release_by_lot_product(
     coa_release.released_by_id = current_user.id
     if override:
         coa_release.deviation_note = override_reason
+    db.flush()
 
-    # Generate COA PDF
+    # Create the immutable snapshot (renders + freezes the PDF into storage).
+    # Part of THIS transaction: any failure raises before commit so the whole
+    # release rolls back. Released COAs are served from the snapshot, so no lazy
+    # PDF generation happens for released releases anymore.
+    from app.services.coa_snapshot_service import coa_snapshot_service
+
+    # A prior release cycle for this pair (voided) makes this a re-release.
+    prior_snapshot = (
+        db.query(COASnapshot)
+        .filter(COASnapshot.coa_release_id == coa_release.id)
+        .order_by(COASnapshot.revision.desc())
+        .first()
+    )
     try:
-        pdf_path = coa_generation_service.generate(db, coa_release.id)
-        coa_release.coa_file_path = pdf_path
+        snapshot = coa_snapshot_service.create_snapshot(db, coa_release)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate COA PDF: {str(e)}",
+            detail=f"Failed to create COA snapshot: {str(e)}",
         )
+    if prior_snapshot is not None and prior_snapshot.voided:
+        snapshot.revision = prior_snapshot.revision + 1
+        snapshot.supersedes_id = prior_snapshot.id
+        db.flush()
+    coa_release.coa_file_path = snapshot.pdf_storage_key
 
     # Check if all products for this lot are released
     all_lot_products = db.query(LotProduct).filter(LotProduct.lot_id == lot_id).all()
@@ -805,6 +850,20 @@ async def void_release(
                 detail={"code": exc.code, "reason": exc.reason},
             )
 
+    # Void the immutable snapshot (kept for history; display watermarks it).
+    from app.services.coa_snapshot_service import coa_snapshot_service
+
+    snapshot = (
+        db.query(COASnapshot)
+        .filter(
+            COASnapshot.coa_release_id == release.id,
+            COASnapshot.voided.is_(False),
+        )
+        .first()
+    )
+    if snapshot is not None:
+        coa_snapshot_service.void_snapshot(db, snapshot, reason)
+
     # Reset the release back to a pending-equivalent state, keeping the void
     # trail (voided_at drives the re-release "prior email" notice).
     old_coa_status = release.status.value
@@ -892,32 +951,45 @@ async def preview_coa_by_lot_product(
             detail="Product not associated with this lot",
         )
 
-    try:
-        # Check if COARelease exists with a valid file
-        existing_release = (
-            db.query(COARelease)
-            .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
+    existing_release = (
+        db.query(COARelease)
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
+        .first()
+    )
+
+    # A released COA is served from its frozen snapshot PDF (never regenerated).
+    if existing_release and existing_release.status == COAReleaseStatus.RELEASED:
+        snapshot = (
+            db.query(COASnapshot)
+            .filter(
+                COASnapshot.coa_release_id == existing_release.id,
+                COASnapshot.voided.is_(False),
+            )
             .first()
         )
-
-        if existing_release and existing_release.coa_file_path:
-            return _get_pdf_from_storage(
-                existing_release.coa_file_path,
-                response_filename=f"COA_{lot.lot_number}.pdf",
-                inline=True,
-                missing_detail=(
-                    f"COA preview file for lot '{lot.lot_number}' and product '{product_id}' "
-                    "not found in storage"
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "No COA snapshot exists for this released COA (legacy record "
+                    "predating snapshots). Run scripts/backfill_coa_snapshots.py "
+                    "to reconstruct it."
                 ),
             )
-        # Generate preview PDF on-the-fly (returns storage key)
+        return _get_pdf_from_storage(
+            snapshot.pdf_storage_key,
+            response_filename=f"COA_{lot.lot_number}.pdf",
+            inline=True,
+        )
+
+    # Pre-release: generate a live preview PDF on the fly.
+    try:
         storage_key = coa_generation_service.generate_preview(db, lot_id, product_id)
         return _get_pdf_from_storage(
             storage_key,
             response_filename=f"COA_{lot.lot_number}_preview.pdf",
             inline=True,
         )
-
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -956,14 +1028,27 @@ async def download_coa_by_lot_product(
             detail="Released COA not found for this lot+product",
         )
 
-    if not coa_release.coa_file_path:
+    # Released COAs are served exclusively from their immutable snapshot.
+    snapshot = (
+        db.query(COASnapshot)
+        .filter(
+            COASnapshot.coa_release_id == coa_release.id,
+            COASnapshot.voided.is_(False),
+        )
+        .first()
+    )
+    if snapshot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="COA PDF file path not set",
+            detail=(
+                "No COA snapshot exists for this released COA (legacy record "
+                "predating snapshots). Run scripts/backfill_coa_snapshots.py to "
+                "reconstruct it."
+            ),
         )
 
     return _get_pdf_from_storage(
-        coa_release.coa_file_path,
+        snapshot.pdf_storage_key,
         response_filename=f"COA_{coa_release.lot.lot_number}.pdf",
         inline=False,
     )
@@ -1022,8 +1107,12 @@ async def regenerate_coa_by_lot_product(
         )
 
 
-def _context_to_preview_data(context) -> COAPreviewData:
-    """Serialise a canonical ``COAContext`` into the frontend preview shape."""
+def _context_to_preview_data(context, snapshot=None) -> COAPreviewData:
+    """Serialise a canonical ``COAContext`` into the frontend preview shape.
+
+    When ``snapshot`` is provided the payload is flagged with its provenance so
+    the frontend can render "Reconstructed" / "Voided" badges.
+    """
     tests = [
         COATestResult(
             id=row.id,
@@ -1077,6 +1166,11 @@ def _context_to_preview_data(context) -> COAPreviewData:
         released_by_email=context.approver.email or "(Preview)",
         signature_url=context.approver.signature_url,
         released_at=context.document.release_date,
+        # Snapshot provenance
+        source=context.source,
+        reconstructed=bool(snapshot.reconstructed) if snapshot else False,
+        voided=bool(snapshot.voided) if snapshot else False,
+        revision=snapshot.revision if snapshot else None,
     )
 
 
@@ -1136,6 +1230,23 @@ async def get_preview_data_by_lot_product(
         .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
+
+    # A released COA is served from its immutable snapshot — frozen at release
+    # time, unaffected by later edits to the lot/product/results.
+    if coa_release and coa_release.status == COAReleaseStatus.RELEASED:
+        from app.services.coa_snapshot_service import coa_snapshot_service
+
+        snapshot = (
+            db.query(COASnapshot)
+            .filter(
+                COASnapshot.coa_release_id == coa_release.id,
+                COASnapshot.voided.is_(False),
+            )
+            .first()
+        )
+        if snapshot is not None:
+            frozen = coa_snapshot_service.get_snapshot_context(db, coa_release.id)
+            return _context_to_preview_data(frozen, snapshot=snapshot)
 
     context = build_context(db, lot_id, product_id, release=coa_release)
     return _context_to_preview_data(context)

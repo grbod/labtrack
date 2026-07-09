@@ -255,6 +255,14 @@ class ReleaseService(BaseService[COARelease]):
 
         # Perform release
         release.release(user_id)
+        db.flush()
+
+        # Create the immutable snapshot in the same transaction (any failure
+        # rolls the release back). Released COAs are served from the snapshot.
+        from app.services.coa_snapshot_service import coa_snapshot_service
+
+        snapshot = coa_snapshot_service.create_snapshot(db, release)
+        release.coa_file_path = snapshot.pdf_storage_key
 
         # Log audit
         self._log_audit(

@@ -146,13 +146,11 @@ export function useSubmitForReview() {
   return useMutation({
     mutationFn: ({
       id,
-      overrideUserId,
       returnResponseNote,
     }: {
       id: number
-      overrideUserId?: number
       returnResponseNote?: string
-    }) => lotsApi.submitForReview(id, { overrideUserId, returnResponseNote }),
+    }) => lotsApi.submitForReview(id, { returnResponseNote }),
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to submit lot for review"))
     },

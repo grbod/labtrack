@@ -5,7 +5,12 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.dependencies import CurrentUser, DbSession, QCManagerOrAdmin
+from app.dependencies import (
+    CurrentUser,
+    DbSession,
+    LabTechOrAbove,
+    QCManagerOrAdmin,
+)
 from app.models import Lot, TestResult, User
 from app.models.enums import AuditAction, RetestStatus, TestResultStatus
 from app.models.retest_request import RetestItem, RetestRequest
@@ -118,7 +123,7 @@ async def get_test_result(
 async def create_test_result(
     result_in: TestResultCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> TestResultResponse:
     """Create a new test result."""
     # Verify lot exists
@@ -185,7 +190,7 @@ async def create_test_result(
 async def bulk_create_test_results(
     bulk_in: TestResultBulkCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> list[TestResultResponse]:
     """Create multiple test results for a lot."""
     # Verify lot exists
@@ -254,7 +259,7 @@ async def update_test_result(
     result_id: int,
     result_in: TestResultUpdate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> TestResultResponse:
     """Update a test result."""
     result = db.query(TestResult).filter(TestResult.id == result_id).first()
@@ -474,5 +479,33 @@ async def delete_test_result(
             detail="Can only delete draft test results",
         )
 
+    # Snapshot the result for the audit trail before the raw delete. Routed
+    # through the audit service so the deletion is attributable (previously
+    # untracked) inside the same transaction as the delete.
+    old_values = {
+        "lot_id": result.lot_id,
+        "test_type": result.test_type,
+        "result_value": result.result_value,
+        "unit": result.unit,
+        "specification": result.specification,
+        "method": result.method,
+        "status": result.status.value if result.status else None,
+    }
+    lot_id = result.lot_id
+    AuditService().log_action(
+        db=db,
+        table_name="test_results",
+        record_id=result.id,
+        action=AuditAction.DELETE,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=None,
+        reason=f"Draft test result deleted: {result.test_type}",
+    )
+
     db.delete(result)
     db.commit()
+
+    # Keep the lot status consistent with the remaining results.
+    if lot_id:
+        LotService().recalculate_lot_status(db, lot_id, user_id=current_user.id)

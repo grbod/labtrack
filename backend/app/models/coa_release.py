@@ -96,6 +96,18 @@ class COARelease(BaseModel):
         Index("idx_coa_release_customer", "customer_id"),
         Index("idx_coa_release_status", "status"),
         Index("idx_coa_release_lot_status", "lot_id", "status"),
+        # At most one RELEASED COA per (lot, product). Enforces the double-release
+        # invariant at the DB layer so a TOCTOU race in the approve path cannot
+        # produce two released COAs for the same pair. Enum is NAME-stored, so
+        # the predicate matches on the uppercase 'RELEASED'.
+        Index(
+            "uq_release_released",
+            "lot_id",
+            "product_id",
+            unique=True,
+            sqlite_where=status == "RELEASED",
+            postgresql_where=status == "RELEASED",
+        ),
     )
 
     @property

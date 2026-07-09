@@ -8,7 +8,13 @@ from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload, selectinload
 
-from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
+from app.dependencies import (
+    AdminUser,
+    CurrentUser,
+    DbSession,
+    LabTechOrAbove,
+    QCManagerOrAdmin,
+)
 from app.models import (
     AuditLog,
     Lot,
@@ -479,7 +485,7 @@ async def get_lot_with_specs(
 async def recalculate_single_lot_status(
     lot_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> LotResponse:
     """Recalculate one lot status from current test results."""
     try:
@@ -706,7 +712,7 @@ async def download_coc_archive(
 async def create_lot(
     lot_in: LotCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> LotResponse:
     """Create a new lot."""
     # Check for duplicate lot number
@@ -775,7 +781,7 @@ async def update_lot(
     lot_id: int,
     lot_in: LotUpdate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> LotResponse:
     """Update a lot."""
     from app.models.enums import AuditAction
@@ -861,11 +867,7 @@ async def update_lot(
 async def submit_for_review(
     lot_id: int,
     db: DbSession,
-    current_user: CurrentUser,
-    override_user_id: Optional[int] = Query(
-        None,
-        description="User ID who authorized the override (when submitting without PDF)",
-    ),
+    current_user: LabTechOrAbove,
     payload: Optional[LotSubmitRequest] = Body(None),
 ) -> LotResponse:
     """Submit a lot for QC review (moves from under_review to awaiting_release)."""
@@ -929,7 +931,6 @@ async def submit_for_review(
             detail=f"Cannot submit for review from status '{lot.status.value}'. Must be 'under_review'.",
         )
 
-    old_status = lot.status.value
     # Submit UNDER_REVIEW -> AWAITING_RELEASE. The endpoint already gates on
     # status==UNDER_REVIEW (reached only when required tests are present and
     # passing); the enforceable release gate (completeness / verdicts / sensory
@@ -944,19 +945,6 @@ async def submit_for_review(
         actor_id=current_user.id,
         reason="Submitted for QC release",
     )
-
-    # Supplemental audit for the missing-PDF override context.
-    if override_user_id:
-        AuditService().log_action(
-            db=db,
-            table_name="lots",
-            record_id=lot.id,
-            action=AuditAction.OVERRIDE,
-            user_id=override_user_id,
-            old_values={"status": old_status},
-            new_values={"status": lot.status.value},
-            reason="Submitted for review without required PDF attachment (admin/QC override)",
-        )
 
     db.commit()
     db.refresh(lot)
@@ -1106,7 +1094,7 @@ async def get_review_thread(
 async def resubmit_lot(
     lot_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> LotResponse:
     """Resubmit a rejected lot for review."""
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
@@ -1261,6 +1249,46 @@ async def delete_lot(
             detail="Can only delete lots in awaiting_results status",
         )
 
+    # A lot with a RELEASED COA is a permanent record and must never be deleted,
+    # even if its status were somehow AWAITING_RESULTS (belt-and-suspenders).
+    from app.models.coa_release import COARelease
+    from app.models.enums import COAReleaseStatus
+
+    released = (
+        db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot_id,
+            COARelease.status == COAReleaseStatus.RELEASED,
+        )
+        .first()
+    )
+    if released is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a lot with a released COA (permanent record)",
+        )
+
+    # Snapshot the lot for the audit trail before the raw delete. Routed through
+    # the audit service so the deletion is attributable (previously untracked).
+    from app.models.enums import AuditAction
+
+    old_values = {
+        "lot_number": lot.lot_number,
+        "reference_number": lot.reference_number,
+        "lot_type": lot.lot_type.value if lot.lot_type else None,
+        "status": lot.status.value if lot.status else None,
+    }
+    AuditService().log_action(
+        db=db,
+        table_name="lots",
+        record_id=lot.id,
+        action=AuditAction.DELETE,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=None,
+        reason=f"Lot {lot.reference_number} deleted by {current_user.username}",
+    )
+
     db.delete(lot)
     db.commit()
 
@@ -1298,7 +1326,7 @@ async def create_sublot(
     lot_id: int,
     sublot_in: SublotCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> SublotResponse:
     """Create a sublot for a parent lot."""
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
@@ -1348,7 +1376,7 @@ async def create_sublots_bulk(
     lot_id: int,
     sublots_in: SublotBulkCreate,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> list[SublotResponse]:
     """Create multiple sublots for a parent lot in bulk."""
     lot = db.query(Lot).filter(Lot.id == lot_id).first()

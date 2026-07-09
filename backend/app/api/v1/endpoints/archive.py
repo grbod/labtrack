@@ -1,21 +1,21 @@
 """Archive management endpoints for released COAs."""
 
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import RedirectResponse, Response
 
-from app.dependencies import DbSession, CurrentUser
 from app.config import settings
-from app.services.archive_service import ArchiveService
+from app.dependencies import CurrentUser, DbSession, QCManagerOrAdmin
 from app.schemas.archive import (
-    ArchiveItem,
     ArchiveDetailResponse,
+    ArchiveItem,
     ArchiveListResponse,
-    ResendEmailRequest,
     EmailHistoryInArchive,
+    ResendEmailRequest,
 )
+from app.services.archive_service import ArchiveService
 
 router = APIRouter()
 archive_service = ArchiveService()
@@ -32,7 +32,9 @@ async def search_archive(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     lot_number: Optional[str] = None,
-    sort_by: Literal["released_at", "reference_number", "lot_number", "brand", "product_name"] = "released_at",
+    sort_by: Literal[
+        "released_at", "reference_number", "lot_number", "brand", "product_name"
+    ] = "released_at",
     sort_order: Literal["asc", "desc"] = "desc",
 ) -> ArchiveListResponse:
     """
@@ -124,17 +126,21 @@ async def download_archived_coa(
         )
 
     # Generate filename from lot number
-    filename = f"COA_{release.lot.lot_number}.pdf" if release.lot else f"COA_{release.id}.pdf"
+    filename = (
+        f"COA_{release.lot.lot_number}.pdf" if release.lot else f"COA_{release.id}.pdf"
+    )
 
     if settings.storage_backend == "r2":
         presigned_url = storage.get_presigned_url(release.coa_file_path)
-        return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(
+            url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
 
     content = storage.download(release.coa_file_path)
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -143,7 +149,7 @@ async def resend_email(
     id: int,
     request: ResendEmailRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> EmailHistoryInArchive:
     """
     Re-send email for an archived COA to a different recipient.

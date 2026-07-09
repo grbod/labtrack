@@ -6,6 +6,7 @@ from app.models.base import BaseModel
 from app.models.coa import COAHistory
 from app.models.coa_category_order import COACategoryOrder
 from app.models.coa_release import COARelease
+from app.models.coa_snapshot import COASerialCounter, COASnapshot
 from app.models.customer import Customer
 from app.models.daane_coc_daily_counter import DaaneCOCDailyCounter
 from app.models.daane_test_mapping import DaaneTestMapping
@@ -66,6 +67,8 @@ __all__ = [
     "Customer",
     "COARelease",
     "ReleaseSensoryAttest",
+    "COASnapshot",
+    "COASerialCounter",
     "EmailHistory",
     "EmailTemplate",
     "COACategoryOrder",

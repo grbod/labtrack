@@ -364,3 +364,9 @@ class COAPreviewData(BaseModel):
     released_by_email: Optional[str] = None
     signature_url: Optional[str] = None  # URL to signature image for COA
     released_at: Optional[str] = None  # Release date (if different from generated_date)
+
+    # Snapshot provenance (populated when served from an immutable snapshot)
+    source: str = "live"  # "live" or "snapshot"
+    reconstructed: bool = False  # snapshot backfilled from the register (no serial)
+    voided: bool = False  # viewing a voided/superseded snapshot from history
+    revision: Optional[int] = None

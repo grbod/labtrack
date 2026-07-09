@@ -104,8 +104,55 @@ export function COAPreviewDocument({
         color: "#1e293b",
         transform: `scale(${scale})`,
         transformOrigin: "top left",
+        position: "relative",
       }}
     >
+      {/* Voided / superseded watermark */}
+      {data.voided && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          <span
+            style={{
+              transform: "rotate(-30deg)",
+              color: "rgba(185, 28, 28, 0.18)",
+              fontSize: "72pt",
+              fontWeight: 800,
+              letterSpacing: "4px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            VOIDED — SUPERSEDED
+          </span>
+        </div>
+      )}
+
+      {/* Reconstructed-from-register badge */}
+      {data.reconstructed && (
+        <div
+          className="mb-4 rounded-md"
+          style={{
+            backgroundColor: "#fffbeb",
+            border: "1px solid #f59e0b",
+            padding: "8px 12px",
+          }}
+        >
+          <p className="text-[#92400e]" style={{ fontSize: "9pt", fontWeight: 600 }}>
+            Reconstructed from register — this certificate was rebuilt from the
+            historical COA register and has no issued serial number.
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div
         className="flex justify-between items-start pb-4 mb-6"

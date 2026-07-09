@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -23,11 +24,13 @@ class COASnapshot(Base):
     __tablename__ = "coa_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Not plain-unique: a release keeps its old voided snapshot(s) when it is
+    # re-released, so uniqueness applies only to the single ACTIVE (non-voided)
+    # snapshot per release — enforced by the partial unique index below.
     coa_release_id = Column(
         Integer,
         ForeignKey("coa_releases.id", ondelete="RESTRICT"),
         nullable=False,
-        unique=True,
     )
     coa_serial = Column(String(32), unique=True, nullable=True)
     revision = Column(Integer, nullable=False, default=1)
@@ -52,6 +55,14 @@ class COASnapshot(Base):
     __table_args__ = (
         Index("idx_coa_snapshot_release_voided", "coa_release_id", "voided"),
         Index("idx_coa_snapshot_created_at", "created_at"),
+        # At most one active (non-voided) snapshot per release.
+        Index(
+            "uq_coa_snapshot_active_release",
+            "coa_release_id",
+            unique=True,
+            sqlite_where=text("voided = 0"),
+            postgresql_where=text("voided = false"),
+        ),
     )
 
 

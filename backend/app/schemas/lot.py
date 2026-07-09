@@ -131,6 +131,20 @@ class LotListResponse(BaseModel):
     total_pages: int
 
 
+class LotSearchResult(BaseModel):
+    """Lightweight lot hit for the global header search."""
+
+    id: int
+    reference_number: str
+    lot_number: str
+    lot_type: LotType
+    status: LotStatus
+    product_label: Optional[str] = None
+    primary_product_id: Optional[int] = None
+    # The sublot number that matched the query (when the hit was via a sublot).
+    matched_sublot: Optional[str] = None
+
+
 class SublotBase(BaseModel):
     """Base sublot schema."""
 

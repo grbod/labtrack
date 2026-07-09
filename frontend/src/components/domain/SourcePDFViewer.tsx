@@ -13,6 +13,12 @@ interface SourcePDFViewerProps {
   productId: number
   sourcePdfs: string[]
   scrollRef?: React.RefObject<HTMLDivElement | null>
+  /**
+   * Optional override for how a filename is resolved to a PDF blob. Defaults to
+   * the release source-pdfs endpoint. The Sample Modal passes a lot-level
+   * uploads fetcher so the same viewer works outside the release flow.
+   */
+  fetchBlob?: (filename: string) => Promise<Blob>
 }
 
 interface PdfData {
@@ -128,7 +134,7 @@ function PdfPage({
   )
 }
 
-export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: SourcePDFViewerProps) {
+export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef, fetchBlob }: SourcePDFViewerProps) {
   const [pdfDataList, setPdfDataList] = useState<PdfData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -209,7 +215,9 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
 
       try {
         const promises = sourcePdfs.map(async (filename) => {
-          const blob = await releaseApi.getSourcePdfBlob(lotId, productId, filename)
+          const blob = fetchBlob
+            ? await fetchBlob(filename)
+            : await releaseApi.getSourcePdfBlob(lotId, productId, filename)
           const url = URL.createObjectURL(blob)
           return { filename, url, numPages: 0 } as PdfData
         })
@@ -263,7 +271,7 @@ export function SourcePDFViewer({ lotId, productId, sourcePdfs, scrollRef }: Sou
     return () => {
       cancelled = true
     }
-  }, [lotId, productId, sourcePdfs, revokeTrackedUrls])
+  }, [lotId, productId, sourcePdfs, revokeTrackedUrls, fetchBlob])
 
   useEffect(() => {
     return () => {

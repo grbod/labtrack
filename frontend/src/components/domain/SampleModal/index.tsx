@@ -5,7 +5,7 @@ import { useDropzone } from "react-dropzone"
 import { useNavigate } from "react-router-dom"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown, ChevronDown, ChevronUp } from "lucide-react"
+import { Loader2, Lock, AlertTriangle, FileText, Upload, X, ExternalLink, ShieldAlert, CheckCircle2, RefreshCw, FileDown, ChevronDown, ChevronUp, PanelLeftOpen, PanelLeftClose } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import SimpleBar from "simplebar-react"
 import "simplebar-react/dist/simplebar.min.css"
 
+import { SourcePDFViewer } from "@/components/domain/SourcePDFViewer"
 import { SampleModalHeader } from "./SampleModalHeader"
 import { TestResultsTable, type TestResultsTableHandle } from "./TestResultsTable"
 import { FilterPills } from "./FilterPills"
@@ -38,6 +39,44 @@ import type {
   TestFilterStatus,
   TestSpecInProduct,
 } from "@/types"
+
+const PDF_SPLIT_RATIO_KEY = "sample-modal-pdf-split"
+const PDF_OPEN_KEY = "sample-modal-pdf-open"
+const DEFAULT_PDF_SPLIT = 0.45
+
+/** Persisted, draggable 2-pane ratio (left/PDF fraction). Mirrors the pattern
+ *  in ResultsImporterReviewModal. */
+function useResizableRatio() {
+  const splitRef = useRef<HTMLDivElement>(null)
+  const [ratio, setRatio] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(PDF_SPLIT_RATIO_KEY))
+    return saved >= 0.25 && saved <= 0.75 ? saved : DEFAULT_PDF_SPLIT
+  })
+
+  const startDrag = useCallback((event: React.PointerEvent) => {
+    event.preventDefault()
+    const container = splitRef.current
+    if (!container) return
+
+    const onMove = (move: PointerEvent) => {
+      const rect = container.getBoundingClientRect()
+      const next = (move.clientX - rect.left) / rect.width
+      setRatio(Math.min(0.75, Math.max(0.25, next)))
+    }
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      setRatio((current) => {
+        localStorage.setItem(PDF_SPLIT_RATIO_KEY, String(current))
+        return current
+      })
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }, [])
+
+  return { ratio, splitRef, startDrag }
+}
 
 interface SampleModalProps {
   /** The lot to display, or null if closed */
@@ -122,6 +161,22 @@ export function SampleModal({
 
   // Review thread collapsible state — auto-expands when lot is currently returned-unresolved
   const [threadExpanded, setThreadExpanded] = useState(false)
+
+  // Inline PDF viewer (split layout beside the results table). Preference is
+  // persisted; the viewer only renders when the lot actually has attached PDFs.
+  const [pdfOpen, setPdfOpen] = useState<boolean>(() => {
+    return localStorage.getItem(PDF_OPEN_KEY) !== "false"
+  })
+  const { ratio: pdfRatio, splitRef: pdfSplitRef, startDrag: startPdfDrag } = useResizableRatio()
+  const togglePdf = useCallback(() => {
+    setPdfOpen((open) => {
+      const next = !open
+      localStorage.setItem(PDF_OPEN_KEY, String(next))
+      return next
+    })
+  }, [])
+  // Stable lot-level uploads fetcher for the reused SourcePDFViewer.
+  const fetchPdfBlob = useCallback((filename: string) => uploadsApi.getPdfBlob(filename), [])
 
   // Focus helpers for custom tab order
   const focusSaveButton = useCallback(() => {
@@ -659,6 +714,11 @@ export function SampleModal({
     })
     .filter((pdf): pdf is string => Boolean(pdf))
 
+  // The split PDF viewer only shows when the lot has attachments AND the user
+  // hasn't collapsed it.
+  const hasPdfs = attachedPdfs.length > 0
+  const viewerOpen = pdfOpen && hasPdfs
+
   // Internal function to actually perform the submission. The submission is
   // always attributed server-side to the authenticated user; the no-PDF
   // override (handleOverrideSubmit) is a client-side authorization gate only.
@@ -785,7 +845,11 @@ export function SampleModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleCloseAttempt()}>
       <DialogContent
-        className="sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+        className={
+          viewerOpen
+            ? "w-[96vw] max-w-[1700px] sm:max-w-[1700px] h-[93vh] max-h-[93vh] overflow-hidden flex flex-col"
+            : "sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+        }
         showCloseButton={false}
         onKeyDown={(e) => {
           // Handle Escape key with unsaved changes check
@@ -831,8 +895,63 @@ export function SampleModal({
           </div>
         )}
 
-        {/* Scrollable content */}
-        <SimpleBar className="flex-1 min-h-0" style={{ maxHeight: '100%' }}>
+        {/* PDF toggle strip — only when the lot has attached lab PDFs */}
+        {hasPdfs && (
+          <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50/60 px-4 py-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={togglePdf}
+            >
+              {viewerOpen ? (
+                <>
+                  <PanelLeftClose className="mr-1.5 h-3.5 w-3.5" /> Hide lab PDF
+                </>
+              ) : (
+                <>
+                  <PanelLeftOpen className="mr-1.5 h-3.5 w-3.5" /> Show lab PDF
+                </>
+              )}
+            </Button>
+            <span className="text-[11px] text-slate-500">
+              {attachedPdfs.length} lab PDF{attachedPdfs.length !== 1 ? "s" : ""} attached
+            </span>
+          </div>
+        )}
+
+        {/* Body: optional PDF pane (split) + scrollable results content */}
+        <div ref={pdfSplitRef} className="flex min-h-0 flex-1">
+          {viewerOpen && (
+            <>
+              <div
+                className="flex min-w-0 flex-col border-r border-slate-200 bg-slate-50/40"
+                style={{ width: `${pdfRatio * 100}%` }}
+              >
+                <div className="flex-1 overflow-hidden p-1">
+                  <SourcePDFViewer
+                    lotId={lot.id}
+                    productId={0}
+                    sourcePdfs={attachedPdfs}
+                    fetchBlob={fetchPdfBlob}
+                  />
+                </div>
+              </div>
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                onPointerDown={startPdfDrag}
+                title="Drag to resize"
+                className="group relative w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-blue-400"
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1" />
+              </div>
+            </>
+          )}
+
+          {/* Scrollable content */}
+          <SimpleBar className="min-w-0 flex-1" style={{ maxHeight: '100%' }}>
           <div className="px-6 py-4">
           {isLoadingResults ? (
             <div className="flex items-center justify-center py-16">
@@ -994,7 +1113,8 @@ export function SampleModal({
             </>
           )}
           </div>
-        </SimpleBar>
+          </SimpleBar>
+        </div>
 
         {/* Unsaved changes warning dialog */}
         {showUnsavedWarning && (

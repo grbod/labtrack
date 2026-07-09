@@ -17,12 +17,51 @@ export const lotKeys = {
   archived: () => [...lotKeys.all, "archived"] as const,
   archivedList: (filters: ArchivedLotFilters) => [...lotKeys.archived(), filters] as const,
   reviewThread: (id: number) => [...lotKeys.detail(id), "review-thread"] as const,
+  search: (q: string) => [...lotKeys.all, "search", q] as const,
 }
 
 export function useLots(filters: LotFilters = {}) {
   return useQuery({
     queryKey: lotKeys.list(filters),
     queryFn: () => lotsApi.list(filters),
+  })
+}
+
+/**
+ * Global header search. Pass an already-debounced query; the hook is disabled
+ * (and returns no data) until the query has at least 1 non-space character.
+ */
+export function useLotSearch(q: string) {
+  const trimmed = q.trim()
+  return useQuery({
+    queryKey: lotKeys.search(trimmed),
+    queryFn: () => lotsApi.search(trimmed),
+    enabled: trimmed.length > 0,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * Fetch ALL lots matching the filters by walking every page (no silent cap).
+ * Used by the Sample Tracker Kanban board, which needs the complete active
+ * board to be meaningful. Active (non-terminal) lots are bounded in practice;
+ * we accumulate every page and expose the true total.
+ */
+export function useAllLots(
+  filters: Omit<LotFilters, "page" | "page_size"> = {},
+  pageSize = 100
+) {
+  return useQuery({
+    queryKey: [...lotKeys.lists(), "all", filters, pageSize] as const,
+    queryFn: async () => {
+      const first = await lotsApi.list({ ...filters, page: 1, page_size: pageSize })
+      const items = [...first.items]
+      for (let page = 2; page <= first.total_pages; page++) {
+        const next = await lotsApi.list({ ...filters, page, page_size: pageSize })
+        items.push(...next.items)
+      }
+      return { items, total: first.total, total_pages: first.total_pages }
+    },
   })
 }
 

@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import { ClipboardList, Loader2 } from "lucide-react"
 
-import { useLots } from "@/hooks/useLots"
+import { useLots, useAllLots } from "@/hooks/useLots"
 import { useSystemSettings } from "@/hooks/useSettings"
 import { KanbanBoard } from "@/components/domain/KanbanBoard"
 import { SampleTable } from "@/components/domain/SampleTable"
@@ -27,12 +27,46 @@ export function SampleTrackerPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [scrollToRetests, setScrollToRetests] = useState(false)
 
-  // Fetch lots for kanban (active workflow statuses only)
-  // Exclude approved, released, awaiting_release, rejected - they appear in Release Queue/Archive
-  const { data: lotsData, isLoading } = useLots({
-    page_size: 100,
-    exclude_statuses: ["approved", "released", "awaiting_release", "rejected"],
+  // Active workflow statuses only (exclude approved/released/awaiting_release/
+  // rejected — those live in the Release Queue / Archive).
+  const EXCLUDED_STATUSES = useMemo(
+    () => ["approved", "released", "awaiting_release", "rejected"] as const,
+    []
+  )
+
+  // Kanban board: accumulate ALL active lots (no 100-row cap) so the board and
+  // its column counts are complete.
+  const { data: allLotsData, isLoading } = useAllLots({
+    exclude_statuses: [...EXCLUDED_STATUSES],
   })
+
+  // Table view: real server-side pagination + search + status filter.
+  const [tablePage, setTablePage] = useState(1)
+  const [tablePageSize, setTablePageSize] = useState(25)
+  const [tableSearchInput, setTableSearchInput] = useState("")
+  const [tableSearch, setTableSearch] = useState("")
+  const [tableStatus, setTableStatus] = useState("all")
+
+  // Debounce the table search box before it hits the server.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setTableSearch(tableSearchInput)
+      setTablePage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [tableSearchInput])
+
+  const { data: tableData, isFetching: isTableFetching, isLoading: isTableLoading } = useLots({
+    page: tablePage,
+    page_size: tablePageSize,
+    search: tableSearch || undefined,
+    // Always scope to active lots; the status dropdown narrows within them.
+    status: tableStatus === "all" ? undefined : (tableStatus as Lot["status"]),
+    exclude_statuses: [...EXCLUDED_STATUSES],
+  })
+
+  // The full active list backs modal prev/next navigation.
+  const navLots = allLotsData?.items ?? []
 
   // Get stale thresholds from system settings
   const { settings: systemSettings } = useSystemSettings()
@@ -56,20 +90,19 @@ export function SampleTrackerPage() {
 
   // After submission, navigate to next under_review sample or close
   const handleSubmitSuccess = () => {
-    if (!selectedLot || !lotsData?.items) {
+    if (!selectedLot || navLots.length === 0) {
       handleCloseModal()
       return
     }
 
     // Find next under_review sample (excluding the one just submitted)
-    const currentIndex = lotsData.items.findIndex(l => l.id === selectedLot.id)
-    const items = lotsData.items
+    const currentIndex = navLots.findIndex(l => l.id === selectedLot.id)
 
     // Look forward first, then wrap around
-    for (let i = 1; i < items.length; i++) {
-      const idx = (currentIndex + i) % items.length
-      if (items[idx].status === "under_review") {
-        setSelectedLot(items[idx])
+    for (let i = 1; i < navLots.length; i++) {
+      const idx = (currentIndex + i) % navLots.length
+      if (navLots[idx].status === "under_review") {
+        setSelectedLot(navLots[idx])
         return
       }
     }
@@ -79,22 +112,22 @@ export function SampleTrackerPage() {
   }
 
   const handleNavigate = (direction: "prev" | "next") => {
-    if (!selectedLot || !lotsData?.items || lotsData.items.length === 0) return
-    const currentIndex = lotsData.items.findIndex(l => l.id === selectedLot.id)
-    const totalItems = lotsData.items.length
+    if (!selectedLot || navLots.length === 0) return
+    const currentIndex = navLots.findIndex(l => l.id === selectedLot.id)
+    const totalItems = navLots.length
 
     // Loop around when reaching ends
     if (direction === "prev") {
       const newIndex = currentIndex <= 0 ? totalItems - 1 : currentIndex - 1
-      setSelectedLot(lotsData.items[newIndex])
+      setSelectedLot(navLots[newIndex])
     } else {
       const newIndex = currentIndex >= totalItems - 1 ? 0 : currentIndex + 1
-      setSelectedLot(lotsData.items[newIndex])
+      setSelectedLot(navLots[newIndex])
     }
   }
 
   // Navigation is never disabled when looping (except if only 1 item)
-  const hasMultipleItems = (lotsData?.items?.length ?? 0) > 1
+  const hasMultipleItems = navLots.length > 1
   const prevDisabled = !hasMultipleItems
   const nextDisabled = !hasMultipleItems
 
@@ -118,13 +151,20 @@ export function SampleTrackerPage() {
             <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
           </div>
         ) : (
-          <KanbanBoard
-            lots={lotsData?.items || []}
-            onCardClick={handleCardClick}
-            staleWarningDays={systemSettings.staleWarningDays}
-            staleCriticalDays={systemSettings.staleCriticalDays}
-            highlightRef={highlightRef}
-          />
+          <>
+            <div className="mb-3 flex justify-end">
+              <span className="text-xs text-slate-400">
+                {allLotsData?.total ?? 0} active sample{(allLotsData?.total ?? 0) !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <KanbanBoard
+              lots={allLotsData?.items || []}
+              onCardClick={handleCardClick}
+              staleWarningDays={systemSettings.staleWarningDays}
+              staleCriticalDays={systemSettings.staleCriticalDays}
+              highlightRef={highlightRef}
+            />
+          </>
         )}
       </div>
 
@@ -135,7 +175,7 @@ export function SampleTrackerPage() {
           <h2 className="text-[15px] font-semibold text-slate-900">All Samples</h2>
         </div>
 
-        {isLoading ? (
+        {isTableLoading ? (
           <div className="rounded-xl border border-slate-200/60 bg-white shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] overflow-hidden">
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-7 w-7 animate-spin text-slate-300" />
@@ -143,12 +183,28 @@ export function SampleTrackerPage() {
           </div>
         ) : (
           <SampleTable
-            lots={lotsData?.items || []}
+            lots={tableData?.items || []}
             onRowClick={handleCardClick}
             onRetestSubRowClick={handleRetestSubRowClick}
             staleWarningDays={systemSettings.staleWarningDays}
             staleCriticalDays={systemSettings.staleCriticalDays}
-            pageSize={25}
+            total={tableData?.total ?? 0}
+            page={tablePage}
+            pageSize={tablePageSize}
+            totalPages={tableData?.total_pages ?? 0}
+            onPageChange={setTablePage}
+            onPageSizeChange={(size) => {
+              setTablePageSize(size)
+              setTablePage(1)
+            }}
+            search={tableSearchInput}
+            onSearchChange={setTableSearchInput}
+            statusFilter={tableStatus}
+            onStatusChange={(value) => {
+              setTableStatus(value)
+              setTablePage(1)
+            }}
+            isFetching={isTableFetching}
           />
         )}
       </div>

@@ -1,6 +1,7 @@
 import { Outlet, Navigate, Link } from "react-router-dom"
 import { useAuthStore } from "@/store/auth"
 import { Sidebar } from "./Sidebar"
+import { GlobalSearch } from "./GlobalSearch"
 import { Bell, HelpCircle, LogOut, Moon, Settings, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/hooks/useTheme"
@@ -19,10 +20,13 @@ export function AppLayout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Header Bar */}
         <header className="flex h-14 items-center justify-between border-b border-slate-200/80 bg-white px-6 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-500 tracking-wide">Quality Assurance</span>
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <span className="hidden shrink-0 text-sm font-medium tracking-wide text-slate-500 lg:inline">Quality Assurance</span>
+            <div className="min-w-0 flex-1 sm:max-w-md">
+              <GlobalSearch />
+            </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1 pl-4">
             <Button
               variant="ghost"
               size="sm"

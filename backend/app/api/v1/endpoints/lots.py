@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.dependencies import (
@@ -30,6 +30,7 @@ from app.schemas.lot import (
     LotListResponse,
     LotResponse,
     LotReturnRequest,
+    LotSearchResult,
     LotStatusRecalculationResponse,
     LotStatusUpdate,
     LotSubmitRequest,
@@ -213,6 +214,89 @@ async def list_lots(
         page_size=page_size,
         total_pages=total_pages,
     )
+
+
+@router.get("/search", response_model=List[LotSearchResult])
+async def search_lots(
+    db: DbSession,
+    current_user: CurrentUser,
+    q: str = Query(..., min_length=1, max_length=100),
+    limit: int = Query(10, ge=1, le=25),
+) -> List[LotSearchResult]:
+    """Lightweight lot lookup for the global header search.
+
+    Matches on reference number, lot number, sublot number, and product
+    name/brand/flavor. Read-only; available to any authenticated user.
+    """
+    term = f"%{q.strip()}%"
+
+    # Lots reachable via a matching sublot number.
+    sublot_lot_ids = db.query(Sublot.parent_lot_id).filter(
+        Sublot.sublot_number.ilike(term)
+    )
+    # Lots reachable via a matching product name/brand/flavor.
+    product_lot_ids = (
+        db.query(LotProduct.lot_id)
+        .join(Product, LotProduct.product_id == Product.id)
+        .filter(
+            or_(
+                Product.product_name.ilike(term),
+                Product.brand.ilike(term),
+                Product.flavor.ilike(term),
+            )
+        )
+    )
+
+    lots = (
+        db.query(Lot)
+        .options(
+            joinedload(Lot.lot_products).joinedload(LotProduct.product),
+            selectinload(Lot.sublots),
+        )
+        .filter(
+            or_(
+                Lot.reference_number.ilike(term),
+                Lot.lot_number.ilike(term),
+                Lot.id.in_(sublot_lot_ids),
+                Lot.id.in_(product_lot_ids),
+            )
+        )
+        .order_by(Lot.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    results: List[LotSearchResult] = []
+    for lot in lots:
+        products = [lp.product for lp in lot.lot_products if lp.product]
+        primary = products[0] if products else None
+        label = None
+        if primary:
+            label = primary.display_name
+            if len(products) > 1:
+                label = f"{label} +{len(products) - 1} more"
+
+        # Surface which sublot matched (if the hit came via a sublot).
+        matched_sublot = None
+        for sublot in lot.sublots:
+            if q.strip().lower() in (sublot.sublot_number or "").lower():
+                matched_sublot = sublot.sublot_number
+                break
+
+        results.append(
+            LotSearchResult(
+                id=lot.id,
+                reference_number=lot.reference_number,
+                lot_number=lot.lot_number,
+                lot_type=lot.lot_type,
+                status=lot.status,
+                product_label=label,
+                primary_product_id=primary.id if primary else None,
+                matched_sublot=matched_sublot,
+            )
+        )
+
+    return results
 
 
 @router.get("/status-counts")

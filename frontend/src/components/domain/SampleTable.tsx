@@ -3,14 +3,11 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
   flexRender,
   createColumnHelper,
   type SortingState,
-  type ColumnFiltersState,
 } from "@tanstack/react-table"
-import { ArrowUpDown, ArrowUp, ArrowDown, FileText, Search, ChevronLeft, ChevronRight, ChevronDown, RefreshCw } from "lucide-react"
+import { ArrowUpDown, ArrowUp, ArrowDown, FileText, Search, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, Loader2 } from "lucide-react"
 
 import {
   Table,
@@ -49,12 +46,24 @@ const PAGE_SIZE_OPTIONS: SelectOption[] = [
 ]
 
 interface SampleTableProps {
+  /** Current page of rows (already paginated server-side). */
   lots: Lot[]
   onRowClick: (lot: Lot) => void
   onRetestSubRowClick?: (lot: Lot) => void  // Triggers when retest sub-row clicked
   staleWarningDays?: number
   staleCriticalDays?: number
-  pageSize?: number
+  // Server-side pagination + filtering (controlled by the parent page).
+  total: number
+  page: number            // 1-based
+  pageSize: number
+  totalPages: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (size: number) => void
+  search: string
+  onSearchChange: (value: string) => void
+  statusFilter: string
+  onStatusChange: (value: string) => void
+  isFetching?: boolean
 }
 
 /**
@@ -75,12 +84,19 @@ export function SampleTable({
   onRetestSubRowClick,
   staleWarningDays = 7,
   staleCriticalDays = 12,
-  pageSize: initialPageSize = 25,
+  total,
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusChange,
+  isFetching = false,
 }: SampleTableProps) {
   const [sorting, setSorting] = useState<SortingState>([])
-  const [globalFilter, setGlobalFilter] = useState("")
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [statusFilter, setStatusFilter] = useState("all")
   const [expandedLotIds, setExpandedLotIds] = useState<Set<number>>(new Set())
 
   const toggleExpand = useCallback((lotId: number, e: React.MouseEvent) => {
@@ -272,48 +288,21 @@ export function SampleTable({
     [staleWarningDays, staleCriticalDays, expandedLotIds, toggleExpand]
   )
 
-  // Apply status filter
-  const filteredData = useMemo(() => {
-    if (statusFilter === "all") return lots
-    return lots.filter((lot) => lot.status === statusFilter)
-  }, [lots, statusFilter])
-
+  // Rows are already the current server page; sorting is applied client-side to
+  // that page only. Search, status filter, and pagination are all server-side.
   const table = useReactTable({
-    data: filteredData,
+    data: lots,
     columns,
     state: {
       sorting,
-      globalFilter,
-      columnFilters,
     },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const searchValue = filterValue.toLowerCase()
-      const referenceNumber = row.original.reference_number?.toLowerCase() ?? ""
-      const lotNumber = row.original.lot_number?.toLowerCase() ?? ""
-
-      // Also search product fields
-      const products = row.original.products ?? []
-      const productMatch = products.some(p =>
-        p.brand.toLowerCase().includes(searchValue) ||
-        p.product_name.toLowerCase().includes(searchValue) ||
-        (p.flavor?.toLowerCase().includes(searchValue) ?? false)
-      )
-
-      return referenceNumber.includes(searchValue) || lotNumber.includes(searchValue) || productMatch
-    },
-    initialState: {
-      pagination: {
-        pageSize: initialPageSize,
-      },
-    },
   })
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, total)
 
   /**
    * Get row background class based on age
@@ -337,16 +326,19 @@ export function SampleTable({
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
-            placeholder="Search by Reference #, Lot #..."
-            value={globalFilter ?? ""}
-            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder="Search by Reference #, Lot #, product..."
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
             className="pl-10 h-11 bg-white border-slate-200 rounded-lg shadow-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-shadow"
           />
+          {isFetching && (
+            <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-slate-300" />
+          )}
         </div>
         <div className="w-48">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => onStatusChange(e.target.value)}
             className="h-11 w-full bg-white border border-slate-200 rounded-lg px-3 text-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
           >
             {STATUS_OPTIONS.map((opt) => (
@@ -429,17 +421,18 @@ export function SampleTable({
           </TableBody>
         </Table>
 
-        {/* Pagination */}
+        {/* Pagination (server-side) */}
         <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
           <div className="flex items-center gap-4">
             <p className="text-[14px] text-slate-500">
-              {table.getFilteredRowModel().rows.length} sample
-              {table.getFilteredRowModel().rows.length !== 1 ? "s" : ""}
+              {total === 0
+                ? "No samples"
+                : `${rangeStart}–${rangeEnd} of ${total} sample${total !== 1 ? "s" : ""}`}
             </p>
             <div className="w-40">
               <select
-                value={String(table.getState().pagination.pageSize)}
-                onChange={(e) => table.setPageSize(Number(e.target.value))}
+                value={String(pageSize)}
+                onChange={(e) => onPageSizeChange(Number(e.target.value))}
                 className="h-9 w-full bg-white border border-slate-200 rounded-lg px-3 text-sm focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
               >
                 {PAGE_SIZE_OPTIONS.map((opt) => (
@@ -451,15 +444,14 @@ export function SampleTable({
 
           <div className="flex items-center gap-2">
             <p className="text-[14px] text-slate-500">
-              Page {table.getState().pagination.pageIndex + 1} of{" "}
-              {table.getPageCount() || 1}
+              Page {totalPages === 0 ? 0 : page} of {totalPages || 1}
             </p>
             <div className="flex gap-1">
               <Button
                 variant="outline"
                 size="icon-sm"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
+                onClick={() => onPageChange(page - 1)}
+                disabled={page <= 1}
                 className="border-slate-200 hover:bg-slate-50"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -467,8 +459,8 @@ export function SampleTable({
               <Button
                 variant="outline"
                 size="icon-sm"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
+                onClick={() => onPageChange(page + 1)}
+                disabled={page >= totalPages}
                 className="border-slate-200 hover:bg-slate-50"
               >
                 <ChevronRight className="h-4 w-4" />

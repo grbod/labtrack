@@ -22,6 +22,18 @@ export interface ForkResult {
   inherited_result_count: number
 }
 
+/** A lightweight lot hit from the global header search (GET /lots/search). */
+export interface LotSearchResult {
+  id: number
+  reference_number: string
+  lot_number: string
+  lot_type: LotType
+  status: LotStatus
+  product_label: string | null
+  primary_product_id: number | null
+  matched_sublot: string | null
+}
+
 export interface LotFilters {
   page?: number
   page_size?: number
@@ -92,6 +104,13 @@ export const lotsApi = {
     if (filters.lot_type) params.append("lot_type", filters.lot_type)
 
     const response = await api.get<PaginatedResponse<Lot>>(`/lots?${params}`)
+    return response.data
+  },
+
+  /** Global header search: matches ref #, lot #, sublot #, and product name. */
+  search: async (q: string, limit = 10): Promise<LotSearchResult[]> => {
+    const params = new URLSearchParams({ q, limit: limit.toString() })
+    const response = await api.get<LotSearchResult[]>(`/lots/search?${params}`)
     return response.data
   },
 

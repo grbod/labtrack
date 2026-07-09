@@ -24,6 +24,17 @@ export const uploadsApi = {
   },
 
   /**
+   * Fetch an uploaded PDF as a blob (with auth). Used by the inline PDF viewer
+   * in the Sample Modal.
+   */
+  getPdfBlob: async (filename: string): Promise<Blob> => {
+    const response = await api.get(`/uploads/${encodeURIComponent(filename)}`, {
+      responseType: "blob",
+    })
+    return new Blob([response.data], { type: "application/pdf" })
+  },
+
+  /**
    * Upload a PDF file and associate it with a lot
    * Returns metadata including the filename
    */

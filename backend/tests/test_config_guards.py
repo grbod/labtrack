@@ -15,6 +15,7 @@ def test_production_with_default_secrets_raises():
     with pytest.raises(ValidationError) as exc_info:
         Settings(
             app_env="production",
+            ai_provider="openrouter",
             secret_key=_DEFAULT_SECRET_KEY,
             jwt_secret_key=_DEFAULT_JWT_SECRET_KEY,
         )
@@ -28,6 +29,7 @@ def test_production_with_default_jwt_only_raises():
     with pytest.raises(ValidationError) as exc_info:
         Settings(
             app_env="production",
+            ai_provider="openrouter",
             secret_key="a-real-strong-secret",
             jwt_secret_key=_DEFAULT_JWT_SECRET_KEY,
         )
@@ -42,10 +44,23 @@ def test_production_with_real_secrets_ok():
     """Production env with overridden secrets must construct fine."""
     settings = Settings(
         app_env="production",
+        ai_provider="openrouter",
         secret_key="a-real-strong-secret",
         jwt_secret_key="another-real-strong-secret",
     )
     assert settings.environment == "production"
+
+
+def test_production_with_mock_ai_provider_raises():
+    """Production env must use a live extraction provider."""
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            app_env="production",
+            ai_provider="mock",
+            secret_key="a-real-strong-secret",
+            jwt_secret_key="another-real-strong-secret",
+        )
+    assert "AI_PROVIDER=mock" in str(exc_info.value)
 
 
 def test_development_with_default_secrets_ok():

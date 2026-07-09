@@ -103,12 +103,14 @@ class ProductTestSpecification(BaseModel):
         Returns:
             bool: True if passes, False if fails
         """
-        from app.utils.spec_matcher import specification_matches
+        from app.specs import VerdictKind, evaluate
 
-        # ProductTestSpecification.specification is NOT NULL (validated non-empty),
-        # so the None→True shortcut in specification_matches will never trigger here;
-        # behaviour is identical to the original implementation.
-        return specification_matches(self.specification, self.test_unit, result_value)
+        verdict = evaluate(
+            self.specification,
+            result_value,
+            result_unit=self.test_unit,
+        )
+        return verdict.kind == VerdictKind.PASS
 
     def __repr__(self):
         """String representation."""

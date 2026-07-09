@@ -53,9 +53,9 @@ class TestSpecificationMatches:
             specification_matches("Positive", "Positive/Negative", "Positive") is True
         )
 
-    def test_positive_negative_unit_positive_spec_accepts_detected(self):
+    def test_positive_negative_unit_positive_spec_rejects_detected(self):
         assert (
-            specification_matches("Positive", "Positive/Negative", "Detected") is True
+            specification_matches("Positive", "Positive/Negative", "Detected") is False
         )
 
     def test_positive_negative_unit_positive_spec_rejects_negative(self):
@@ -84,10 +84,10 @@ class TestSpecificationMatches:
     def test_negative_spec_accepts_bdl(self):
         assert specification_matches("Negative", None, "BDL") is True
 
-    def test_negative_spec_accepts_less_than_value(self):
-        # "<X" result values are accepted for Negative specs
-        assert specification_matches("Negative", None, "< 0.5") is True
-        assert specification_matches("Negative", None, "<10") is True
+    def test_negative_spec_rejects_less_than_value(self):
+        # Censored numeric values cannot prove a negative-required spec.
+        assert specification_matches("Negative", None, "< 0.5") is False
+        assert specification_matches("Negative", None, "<10") is False
 
     def test_negative_in_xg_spec_accepts_negative(self):
         # "Negative in 10g" style specs start with "negative" so same branch
@@ -96,8 +96,8 @@ class TestSpecificationMatches:
     def test_negative_in_xg_spec_accepts_nd(self):
         assert specification_matches("Negative in 10g", None, "ND") is True
 
-    def test_negative_in_xg_spec_accepts_less_than(self):
-        assert specification_matches("Negative in 10g", None, "<0.1") is True
+    def test_negative_in_xg_spec_rejects_less_than(self):
+        assert specification_matches("Negative in 10g", None, "<0.1") is False
 
     def test_negative_in_xg_spec_rejects_positive(self):
         assert specification_matches("Negative in 10g", None, "Positive") is False
@@ -107,14 +107,14 @@ class TestSpecificationMatches:
     def test_positive_spec_accepts_positive(self):
         assert specification_matches("Positive", None, "positive") is True
 
-    def test_positive_spec_accepts_detected(self):
-        assert specification_matches("Positive", None, "Detected") is True
+    def test_positive_spec_rejects_detected(self):
+        assert specification_matches("Positive", None, "Detected") is False
 
-    def test_positive_spec_accepts_present(self):
-        assert specification_matches("Positive", None, "present") is True
+    def test_positive_spec_rejects_present(self):
+        assert specification_matches("Positive", None, "present") is False
 
-    def test_positive_spec_accepts_plus_sign(self):
-        assert specification_matches("Positive", None, "+") is True
+    def test_positive_spec_rejects_plus_sign(self):
+        assert specification_matches("Positive", None, "+") is False
 
     def test_positive_spec_rejects_negative(self):
         assert specification_matches("Positive", None, "Negative") is False

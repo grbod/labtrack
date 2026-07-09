@@ -118,7 +118,7 @@ async def preview_result_import(
 async def preview_result_import_with_overrides(
     import_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
     request: ResultImportPreviewRequest | None = None,
     lot_id: int = Query(..., ge=1),
 ) -> ResultImportPreview:
@@ -179,7 +179,7 @@ async def cancel_result_import(
 async def revert_result_import(
     import_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: LabTechOrAbove,
 ) -> ResultImportRead:
     try:
         return _serialize(

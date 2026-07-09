@@ -659,13 +659,14 @@ export function SampleModal({
     })
     .filter((pdf): pdf is string => Boolean(pdf))
 
-  // Internal function to actually perform the submission
-  const performSubmission = useCallback(async (overrideUserId?: number, note?: string) => {
+  // Internal function to actually perform the submission. The submission is
+  // always attributed server-side to the authenticated user; the no-PDF
+  // override (handleOverrideSubmit) is a client-side authorization gate only.
+  const performSubmission = useCallback(async (note?: string) => {
     if (!lot) return
     try {
       await submitForReviewMutation.mutateAsync({
         id: lot.id,
-        overrideUserId,
         returnResponseNote: note,
       })
 
@@ -681,7 +682,7 @@ export function SampleModal({
   // Confirm the return-response dialog: submit with the note
   const handleReturnResponseConfirm = useCallback(async () => {
     if (!returnResponseNote.trim()) return
-    await performSubmission(undefined, returnResponseNote.trim())
+    await performSubmission(returnResponseNote.trim())
     setShowReturnResponseDialog(false)
     setReturnResponseNote("")
   }, [returnResponseNote, performSubmission])
@@ -742,9 +743,10 @@ export function SampleModal({
         return
       }
 
-      // Override verified - submit with override user ID
+      // Override verified (authorization gate only). The submission is always
+      // attributed server-side to the authenticated user.
       setShowOverrideModal(false)
-      await performSubmission(result.user_id ?? undefined)
+      await performSubmission()
     } catch {
       setOverrideError("Failed to verify credentials")
     } finally {

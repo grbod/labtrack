@@ -33,7 +33,7 @@ async def upload_pdf(
     file: UploadFile = File(...),
     lot_id: Optional[int] = Form(None),
     db: DbSession = None,
-    current_user: CurrentUser = None,
+    current_user: LabTechOrAbove = None,
 ) -> UploadResponse:
     """
     Upload a PDF file and optionally associate it with a lot.

@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
@@ -292,7 +293,7 @@ async def get_coa_data(
 async def regenerate_coa(
     release_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> dict:
     """
     Force regeneration of the COA PDF.
@@ -789,7 +790,18 @@ async def approve_release_by_lot_product(
                 },
             )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Partial unique index uq_release_released guarantees at most one
+        # RELEASED COARelease per (lot, product). A concurrent request that
+        # already released this pair (TOCTOU past the status check above) trips
+        # the constraint here — surface it as a clean 409 rather than a 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This COA has already been released",
+        )
     db.refresh(coa_release)
     db.refresh(lot)
 
@@ -1198,7 +1210,7 @@ async def regenerate_coa_by_lot_product(
     lot_id: int,
     product_id: int,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> dict:
     """
     Force regeneration of the COA PDF for a lot+product pair.
@@ -1448,7 +1460,7 @@ async def save_draft_by_lot_product(
     product_id: int,
     request: DraftSaveRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> ReleaseDetailsByLotProduct:
     """
     Save draft data (customer_id, notes, mfg_date, exp_date) for a lot+product pair.
@@ -1606,7 +1618,7 @@ async def send_email_by_lot_product(
     product_id: int,
     request: EmailSendRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> EmailHistoryResponse:
     """
     Log an email sent for a lot+product's COARelease.
@@ -1773,7 +1785,7 @@ async def save_draft(
     id: int,
     draft: DraftSaveRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> COAReleaseWithSourcePdfs:
     """
     Save draft data for a COARelease (auto-saved on blur).
@@ -1820,6 +1832,14 @@ async def approve_release(
             db=db,
             id=id,
             user_id=current_user.id,
+        )
+    except IntegrityError:
+        # uq_release_released tripped: another RELEASED COARelease already exists
+        # for this (lot, product) pair (concurrent double-release). 409, not 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This COA has already been released",
         )
     except ValueError as e:
         raise HTTPException(
@@ -1871,7 +1891,7 @@ async def log_email_sent(
     id: int,
     request: EmailSendRequest,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: QCManagerOrAdmin,
 ) -> EmailHistoryResponse:
     """
     Log that an email was sent for a COARelease.

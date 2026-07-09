@@ -15,6 +15,7 @@ from app.schemas.release import (
     ApproveByLotProductRequest,
     ApproveByLotProductResponse,
     ApproveReleaseResponse,
+    COANotTestedRow,
     COAPreviewData,
     COAReleaseResponse,
     COAReleaseWithSourcePdfs,
@@ -786,6 +787,64 @@ async def regenerate_coa_by_lot_product(
         )
 
 
+def _context_to_preview_data(context) -> COAPreviewData:
+    """Serialise a canonical ``COAContext`` into the frontend preview shape."""
+    tests = [
+        COATestResult(
+            id=row.id,
+            name=row.name,
+            method=row.method,
+            result=row.result_value,
+            unit=row.unit,
+            specification=row.spec_text,  # None -> render "—"; never fabricated
+            status=row.status_display,
+            verdict=row.verdict,
+        )
+        for row in context.test_rows
+    ]
+    not_tested = [
+        COANotTestedRow(
+            name=row.name,
+            method=row.method,
+            specification=row.spec_text,
+            status=row.status_display,
+        )
+        for row in context.not_tested_rows
+    ]
+
+    return COAPreviewData(
+        # Company / lab info
+        company_name=context.lab.company_name,
+        company_address=context.lab.address,
+        company_phone=context.lab.phone,
+        company_email=context.lab.email,
+        company_logo_url=context.lab.logo_url,
+        # Product info
+        product_name=context.product.product_name,
+        brand=context.product.brand or "",
+        # Lot info
+        lot_number=context.lot.lot_number,
+        reference_number=context.lot.reference_number,
+        mfg_date=context.lot.mfg_date,
+        exp_date=context.lot.exp_date,
+        # Test results
+        tests=tests,
+        not_tested=not_tested,
+        # Document identity + deviation note
+        document_id=context.document.document_id,
+        deviation_note=context.document.deviation_note,
+        # Notes
+        notes=context.notes,
+        # Generation / approver info (approver strictly from the release record)
+        generated_date=context.document.generated_date,
+        released_by=context.approver.name,
+        released_by_title=context.approver.title,
+        released_by_email=context.approver.email or "(Preview)",
+        signature_url=context.approver.signature_url,
+        released_at=context.document.release_date,
+    )
+
+
 @router.get("/{lot_id}/{product_id}/preview-data", response_model=COAPreviewData)
 async def get_preview_data_by_lot_product(
     lot_id: int,
@@ -795,12 +854,15 @@ async def get_preview_data_by_lot_product(
 ) -> COAPreviewData:
     """
     Get COA preview data for frontend rendering.
-    Returns all data needed to render a WYSIWYG COA preview.
+
+    Delegates to the canonical ``coa_context_builder`` — the single source of
+    truth shared with the PDF renderer — then serialises the resulting
+    ``COAContext`` into the ``COAPreviewData`` shape the frontend consumes.
     """
-    from datetime import datetime
+    from sqlalchemy.orm import joinedload
 
     from app.models import LotProduct, Product
-    from app.models.test_result import TestResult
+    from app.services.coa_context_builder import build_context
 
     # Verify lot exists
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
@@ -830,155 +892,18 @@ async def get_preview_data_by_lot_product(
             detail="Product not associated with this lot",
         )
 
-    # Get all test results for this lot that have values and are flagged for COA inclusion.
-    # Results with include_on_coa=False are internal/investigative and must not appear
-    # on the customer-facing COA.
-    test_results = (
-        db.query(TestResult)
-        .filter(
-            TestResult.lot_id == lot_id,
-            TestResult.result_value.isnot(None),
-            TestResult.result_value != "",
-            TestResult.include_on_coa.is_(True),
-        )
-        .all()
-    )
-
-    # Get category order configuration and sort tests
-    from app.models.lab_test_type import LabTestType
-    from app.services.coa_category_order_service import coa_category_order_service
-
-    category_order = coa_category_order_service.get_ordered_categories(db)
-
-    # Build a lookup for test_type -> category from LabTestType
-    test_type_names = [r.test_type for r in test_results]
-    lab_test_types = (
-        (db.query(LabTestType).filter(LabTestType.test_name.in_(test_type_names)).all())
-        if test_type_names
-        else []
-    )
-    category_lookup = {lt.test_name.lower(): lt.test_category for lt in lab_test_types}
-
-    def get_category(test_type: str) -> str:
-        """Get category for a test type, defaulting to 'Other' if not found."""
-        return category_lookup.get(test_type.lower(), "Other")
-
-    def sort_key(result: TestResult) -> tuple:
-        """Sort key: category order index, then category name, then test name alphabetically."""
-        category = get_category(result.test_type)
-        try:
-            cat_index = category_order.index(category)
-        except ValueError:
-            cat_index = len(category_order)  # Unconfigured categories at end
-        return (cat_index, category, result.test_type.lower())
-
-    # Sort test results by category order, then alphabetically within category
-    test_results.sort(key=sort_key)
-
-    # Get product test specifications for fallback
-    from app.models.product_test_spec import ProductTestSpecification
-
-    product_specs = (
-        db.query(ProductTestSpecification)
-        .filter(ProductTestSpecification.product_id == product_id)
-        .all()
-    )
-    # Build lookup dict by test name (case-insensitive)
-    spec_lookup = {spec.test_name.lower(): spec.specification for spec in product_specs}
-
-    # Format test results
-    tests = []
-    for result in test_results:
-        # Try to get specification from:
-        # 1. TestResult.specification (what was entered/saved with the result)
-        # 2. ProductTestSpec (product's default specification for this test type)
-        # 3. Default fallback
-        specification = result.specification
-        if not specification:
-            # Look up from product specs
-            specification = spec_lookup.get(result.test_type.lower())
-        if not specification:
-            specification = "Within limits"
-
-        tests.append(
-            COATestResult(
-                name=result.test_type,
-                result=result.result_value or "N/D",
-                unit=result.unit,
-                specification=specification,
-                status="Pass",  # All approved results are considered passing
-            )
-        )
-
-    # Check for existing COARelease to get notes and release info
-    from sqlalchemy.orm import joinedload
-
+    # Existing release (if any) supplies the approver, notes, dates, and — when
+    # RELEASED — drives the verdict display policy. The approver comes ONLY from
+    # this record; the current viewer is never used as a signature fallback.
     coa_release = (
         db.query(COARelease)
-        .options(joinedload(COARelease.released_by))
+        .options(joinedload(COARelease.released_by), joinedload(COARelease.customer))
         .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
         .first()
     )
 
-    notes = None
-    released_by = None
-    released_by_title = None
-    released_by_email = None
-    released_at = None
-    if coa_release:
-        notes = coa_release.notes
-        if coa_release.draft_data:
-            notes = coa_release.draft_data.get("notes") or notes
-        if coa_release.released_by:
-            released_by = (
-                coa_release.released_by.full_name or coa_release.released_by.username
-            )
-            released_by_title = coa_release.released_by.title
-            released_by_email = coa_release.released_by.email
-        if coa_release.released_at:
-            released_at = coa_release.released_at.strftime("%B %d, %Y")
-
-    # Get lab info from database
-    lab_info = lab_info_service.get_or_create_default(db)
-
-    # Build signature URL - use released_by user's signature if released, else current user's
-    signature_url = None
-    if (
-        coa_release
-        and coa_release.released_by
-        and coa_release.released_by.signature_path
-    ):
-        signature_url = f"/uploads/{coa_release.released_by.signature_path}"
-    elif current_user.signature_path:
-        signature_url = f"/uploads/{current_user.signature_path}"
-
-    return COAPreviewData(
-        # Company info from database
-        company_name=lab_info.company_name,
-        company_address=lab_info.full_address,
-        company_phone=lab_info.phone,
-        company_email=lab_info.email,
-        company_logo_url=lab_info_service.get_logo_url(lab_info.logo_path),
-        # Product info
-        product_name=product.display_name,
-        brand=product.brand,
-        # Lot info
-        lot_number=lot.lot_number,
-        reference_number=lot.reference_number,
-        mfg_date=lot.mfg_date.strftime("%B %d, %Y") if lot.mfg_date else None,
-        exp_date=lot.exp_date.strftime("%B %d, %Y") if lot.exp_date else None,
-        # Test results
-        tests=tests,
-        # Notes
-        notes=notes,
-        # Generation info
-        generated_date=datetime.now().strftime("%B %d, %Y"),
-        released_by=released_by,
-        released_by_title=released_by_title,
-        released_by_email=released_by_email or "(Preview)",
-        signature_url=signature_url,
-        released_at=released_at,
-    )
+    context = build_context(db, lot_id, product_id, release=coa_release)
+    return _context_to_preview_data(context)
 
 
 @router.get("/{lot_id}/{product_id}/source-pdfs/{filename:path}")

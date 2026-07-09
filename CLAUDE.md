@@ -12,8 +12,8 @@ LabTrack is a lab testing and COA management system that replaces the legacy Exc
 - **Backend**: Python 3.10+ with FastAPI, SQLAlchemy ORM, Pydantic settings
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
 - **Database**: SQLite (upgradeable to PostgreSQL)
-- **AI Integration**: PydanticAI with Google Gemini (mock provider available)
-- **PDF Processing**: PyPDF2, python-docx for generation
+- **AI Integration**: LLM-based lab-report extraction via OpenRouter (`app/services/result_extraction_provider.py`)
+- **PDF Processing**: PyPDF2 for reading; ReportLab for COA generation
 - **Authentication**: JWT-based with role-based access control
 
 ### Project Structure
@@ -45,23 +45,27 @@ Endpoints in `backend/app/api/v1/endpoints/` handle routing and auth only; they 
 - Support for standard lots, parent lots with sublots, and multi-SKU composites
 - Product catalog with standardized naming
 
-### 2. PDF Processing
-- Drag-and-drop PDF upload
-- AI-powered extraction (currently mock, ready for real AI)
-- Manual review queue for low-confidence extractions
-- Folder watching for automatic processing
+### 2. Result Import (lab-report extraction)
+- Drag-and-drop upload of a lab-report PDF
+- LLM extraction via OpenRouter parses the report into candidate test rows
+- A review modal lets the user confirm/edit the extracted rows before applying
+- Confirmed rows are written as **DRAFT** test results for QC approval
+- (There is no mock provider, parsing queue, or folder watcher — those are gone)
 
-### 3. Approval Workflow
-- Three-stage approval: Draft → Reviewed → Approved
+### 3. Approval & Release Workflow
+- Test results: **DRAFT → APPROVED** (QC Manager/Admin)
+- Lot lifecycle runs through the **canonical state machine** (8 statuses),
+  enforced server-side — see "Release Flow & State Machine" below
+- A **release gate** must pass before a COA can issue
 - Role-based permissions (Admin, QC Manager, Lab Tech, Read-Only)
-- Bulk approval operations
-- Complete audit trail
+- Bulk approval; complete audit trail
 
-### 4. COA Generation
-- Generate from approved test results
-- Multiple template support
-- Export as Word documents
-- Batch generation capabilities
+### 4. COA Generation & Snapshots
+- Rendered from the canonical `coa_context_builder` context (ReportLab PDF)
+- On release the COA is frozen as an **immutable snapshot** with an issued
+  serial `COA-YYYY-NNNNNN`; released COAs are served from the snapshot and
+  never regenerated
+- Void returns a lot to the queue; re-release mints the next snapshot revision
 
 ## Commands
 
@@ -134,9 +138,9 @@ excel_data = buffer.getvalue()
 ```
 
 ### Issue: Status transition errors
-**Solution**: Follow proper status transitions:
-- TestResult: Draft → Reviewed → Approved
-- Lot: Pending → Tested → Approved → Released
+**Solution**: A lot's status must change through `LotWorkflowService` (see
+"Release Flow & State Machine"), never a raw `lot.status = ...` assignment — the
+enforcement guard rejects raw assignments. Test results go DRAFT → APPROVED.
 
 ### Issue: Authentication not working
 **Solution**: Ensure UserService is used for authentication, not hardcoded values
@@ -146,15 +150,48 @@ excel_data = buffer.getvalue()
 ### Sample Tracker Page
 The "Sample Tracker" page displays all submitted samples/lots with their workflow status.
 
-**Status Labels (display text → backend enum):**
+**Status Labels (display text → backend enum). There are 8 lot statuses:**
 | Display Label | Backend Value | Description |
 |---------------|---------------|-------------|
-| Awaiting Results | `pending` | Sample submitted, no test results yet |
-| Partial Results | `partial_results` | Some results received, more expected |
-| Under QC Review | `under_review` | All results in, awaiting QC approval |
-| Approved | `approved` | QC approved, ready for COA generation |
-| Released | `released` | COA generated and published |
-| Rejected | `rejected` | QC rejected, can be retried |
+| Awaiting Results | `awaiting_results` | Sample submitted, no results yet |
+| Partial Results | `partial_results` | Some results in, required tests still missing |
+| Needs Attention | `needs_attention` | All required tests in but one or more FAIL specs |
+| Under Review | `under_review` | All required tests in and passing; awaiting QC |
+| Awaiting Release | `awaiting_release` | Submitted to the Release Queue for QC release |
+| Approved | `approved` | Legacy/transitional; not part of the normal flow |
+| Released | `released` | COA released (immutable snapshot issued) |
+| Rejected | `rejected` | QC rejected; can be resubmitted to Under Review |
+
+Frontend label source of truth: `frontend/src/lib/status-config.ts`.
+
+## Release Flow & State Machine
+
+### Canonical lot state machine (enforced)
+Lot status is owned by `app/workflow/lot_workflow_service.py`. `settings.workflow_enforce_transitions` defaults to **True**: a raw `lot.status = ...` on a persisted lot raises. Change status only via:
+- `LotWorkflowService().transition(db, lot, target, actor, ...)` — validated gate/manual transitions; raises `WorkflowTransitionError` on a denied move.
+- `.apply_auto(...)` — applies a status computed by `LotService.calculate_lot_status` (trigger="auto").
+- `.apply_system(...)` — system moves the manual gates don't model (e.g. result-import pullback).
+- `set_status_unchecked(lot, status)` — seed/fixture scaffolding only. Loaders/seeders set status at object construction (id is None → exempt).
+
+`transition()` acquires a `SELECT ... FOR UPDATE` row lock on the lot (real on Postgres, no-op on SQLite).
+
+### Release gate
+Before a lot can go AWAITING_RELEASE → RELEASED the gate (`app/services/release_gate_service.py`) must pass:
+- **Missing required lab tests** block (legacy-import lots exempt).
+- **FAIL** verdicts block; a QC Manager/Admin **override** (with a reason) may release anyway — the reason prints on the COA as a **deviation**.
+- **INDETERMINATE** verdicts are a non-blocking **warning**.
+- Each **sensory/organoleptic** row of the product panel must be **attested** on that release; attested rows print "Pass".
+- All test results must be APPROVED.
+A blocked release returns HTTP 409 `{code, reason, missing_tests, failing_tests}`.
+
+### Snapshots (immutability)
+Releasing freezes an **immutable snapshot** (`coa_snapshot_service.create_snapshot`) inside the release transaction — an issued serial `COA-YYYY-NNNNNN` (yearly reset), the frozen render context, and the rendered PDF. Released COAs (preview-data, preview/download PDFs) are served **from the snapshot**, never regenerated; a released COA with no snapshot 404s and points at the backfill script. **Void** (admin) voids the snapshot and returns the lot to AWAITING_RELEASE; **re-release** creates the next revision (`supersedes_id`) and keeps the voided one. At most one active (non-voided) snapshot per release (partial unique index).
+
+Backfill snapshots for pre-snapshot released COAs:
+```bash
+cd backend && .venv/bin/python scripts/backfill_coa_snapshots.py --dry-run   # report only
+cd backend && .venv/bin/python scripts/backfill_coa_snapshots.py --commit    # reconstructed snapshots (no serial)
+```
 
 ## Database Models
 
@@ -163,15 +200,19 @@ The "Sample Tracker" page displays all submitted samples/lots with their workflo
 - **Product**: Standardized product catalog (204 products, 40 brands)
 - **ProductTestSpecification**: Links products to required lab tests with acceptance criteria (954 specs seeded from legacy COA register)
 - **Lot**: Production lots with parent/sublot relationships
-- **TestResult**: Lab test results with approval status
-- **ParsingQueue**: PDF parsing queue and status
+- **TestResult**: Lab test results with approval status (+ `created_by_id`)
+- **ResultImport / ResultImportLedger**: LLM-extracted lab-report import + review
+- **COARelease**: Per-(lot, product) release record (+ deviation/void trail)
+- **COASnapshot / COASerialCounter**: Immutable released-COA snapshot + serial issuance
+- **ReleaseSensoryAttest**: QC sign-off of a sensory row for a release
 - **AuditLog**: Complete audit trail
 
 ### Enums
 - **UserRole**: ADMIN, QC_MANAGER, LAB_TECH, READ_ONLY
 - **LotType**: STANDARD, PARENT_LOT, SUBLOT, MULTI_SKU_COMPOSITE
-- **LotStatus**: PENDING, TESTED, APPROVED, RELEASED, REJECTED
-- **TestResultStatus**: DRAFT, REVIEWED, APPROVED
+- **LotStatus** (8): AWAITING_RESULTS, PARTIAL_RESULTS, NEEDS_ATTENTION, UNDER_REVIEW, AWAITING_RELEASE, APPROVED (legacy/transitional), RELEASED, REJECTED
+- **TestResultStatus**: DRAFT, APPROVED
+- **COAReleaseStatus**: AWAITING_RELEASE, RELEASED
 
 ## Seed Data
 
@@ -206,7 +247,7 @@ The register has one row per lab reference (`RefID`). Rows group into three lot 
 
 ### Status rules (per lot)
 The lead row's `QC Approval`, the `ToPrint` flag, and whether the row has any results together set status:
-- `QC Approval` populated **and not** `NEEDS METALS` → `RELEASED`, with a `COARelease(status=RELEASED)` per product and test results `APPROVED`. No COA PDF is generated (rendered on demand). Releases/approvals are attributed to the `qcmanager` user; the real approver name is stored in the release note.
+- `QC Approval` populated **and not** `NEEDS METALS` → `RELEASED`, with a `COARelease(status=RELEASED)` per product and test results `APPROVED`. No COA PDF is generated (rendered on demand). Releases/approvals are attributed to the `qcmanager` user; the release note currently carries a **hardcoded** approver name (`"Loaded from COA register (QC: Tattyana Villegas)"`), NOT the per-row approver — known Phase 5 fix.
 - `ToPrint = "NEEDS METALS"` → `PARTIAL_RESULTS` (micro tests in, metals pending). **Not** released, even when `QC Approval` is populated.
 - `QC Approval` empty **but the row has results** → `AWAITING_RELEASE`. Appears in the **Release Queue**; results are marked `APPROVED` so a COA can generate on Approve & Release.
 - `QC Approval` empty **and no results** → `AWAITING_RESULTS`. Appears in the Sample Tracker.
@@ -263,8 +304,7 @@ Known issues:
 
 ## Future Enhancements
 
-1. **Real AI Integration**: Replace MockAIProvider with OpenAI/Anthropic
-2. **Email Notifications**: Implement approval notifications
-3. **Advanced Reporting**: Add trend analysis and KPI dashboards
-4. **API Integration**: RESTful API for external systems
-5. **Multi-tenancy**: Support for multiple companies/divisions
+1. **Email Notifications**: Implement approval notifications
+2. **Advanced Reporting**: Add trend analysis and KPI dashboards
+3. **API Integration**: RESTful API for external systems
+4. **Multi-tenancy**: Support for multiple companies/divisions

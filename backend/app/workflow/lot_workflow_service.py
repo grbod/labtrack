@@ -67,6 +67,7 @@ class LotWorkflowService(BaseService[Lot]):
         """Validate and apply a lot status transition without committing."""
 
         old_status = lot.status
+        self._lock_lot_row(db, lot)
         ctx = self.build_context(
             db,
             lot,
@@ -184,6 +185,7 @@ class LotWorkflowService(BaseService[Lot]):
         override: bool,
     ) -> Lot:
         old_status = lot.status
+        self._lock_lot_row(db, lot)
         with _allow_lot_status_assignment(lot):
             lot.status = target
         self._log_audit(
@@ -231,6 +233,21 @@ class LotWorkflowService(BaseService[Lot]):
             override_reason=reason,
             trigger=trigger,  # type: ignore[arg-type]
         )
+
+    @staticmethod
+    def _lock_lot_row(db: Session, lot: Lot) -> None:
+        """Acquire a row lock on the lot for the rest of the transaction.
+
+        Serialises concurrent transitions on the same lot on Postgres
+        (SELECT ... FOR UPDATE). A silent no-op on SQLite, which does not
+        support row-level locks — keeps the SQLite test suite green.
+        """
+        if getattr(lot, "id", None) is None:
+            return
+        bind = db.get_bind()
+        if bind is not None and bind.dialect.name == "sqlite":
+            return
+        db.query(Lot).filter(Lot.id == lot.id).with_for_update().first()
 
     @staticmethod
     def _audit_action(target: LotStatus, override: bool) -> AuditAction:

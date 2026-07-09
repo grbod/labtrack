@@ -10,6 +10,7 @@ import type {
   CreateCustomerData,
   COAPreviewData,
   ReleaseGateStatus,
+  ReleaseSibling,
 } from "@/types/release"
 import type { PaginatedResponse } from "@/types"
 
@@ -124,9 +125,25 @@ export const releaseApi = {
     return response.data
   },
 
-  /** Void a released COA and return the lot to the release queue (Admin only) */
-  voidRelease: async (releaseId: number, reason: string): Promise<ReleaseDetails> => {
-    const response = await api.post<ReleaseDetails>(`/release/${releaseId}/void`, { reason })
+  /** Other RELEASED COAs on the same lot (the void-sibling prompt list) */
+  getSiblings: async (releaseId: number): Promise<ReleaseSibling[]> => {
+    const response = await api.get<ReleaseSibling[]>(`/release/${releaseId}/siblings`)
+    return response.data
+  },
+
+  /**
+   * Void a released COA and return the lot to the release queue (Admin only).
+   * `alsoVoidReleaseIds` voids sibling COAs on the same lot in one action.
+   */
+  voidRelease: async (
+    releaseId: number,
+    reason: string,
+    alsoVoidReleaseIds: number[] = []
+  ): Promise<ReleaseDetails> => {
+    const response = await api.post<ReleaseDetails>(`/release/${releaseId}/void`, {
+      reason,
+      also_void_release_ids: alsoVoidReleaseIds,
+    })
     return response.data
   },
 

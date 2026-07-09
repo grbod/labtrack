@@ -41,8 +41,10 @@ function makeGate(overrides: Partial<ReleaseGateStatus> = {}): ReleaseGateStatus
     product_id: 2,
     is_legacy_import: false,
     results_all_approved: true,
+    is_composite: false,
     missing_tests: [],
     failing_tests: [],
+    union_missing_tests: [],
     indeterminate_tests: [],
     sensory_rows: [],
     sensory_all_attested: true,
@@ -81,6 +83,23 @@ describe("ReleaseGatePanel", () => {
     expect(await screen.findByText("Blocking Issues")).toBeInTheDocument()
     expect(screen.getByText("Missing: Salmonella spp.")).toBeInTheDocument()
     expect(screen.getByText(/Lead: 12 ppm \(spec: < 10 ppm\)/)).toBeInTheDocument()
+    expect(screen.queryByText("All release gate checks passed")).not.toBeInTheDocument()
+  })
+
+  it("shows the composite union-incomplete banner when it blocks every member", async () => {
+    vi.mocked(releaseApi.getGate).mockResolvedValue(
+      makeGate({
+        is_composite: true,
+        can_release: false,
+        union_missing_tests: ["Arsenic"],
+      })
+    )
+    renderWithQuery(<ReleaseGatePanel lotId={1} productId={2} isReleased={false} />)
+
+    expect(
+      await screen.findByText("Composite Incomplete — Blocks Every Member")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Missing: Arsenic")).toBeInTheDocument()
     expect(screen.queryByText("All release gate checks passed")).not.toBeInTheDocument()
   })
 

@@ -69,6 +69,10 @@ class TestResult(BaseModel):
     lab_test_type_id = Column(Integer, ForeignKey("lab_test_types.id"), nullable=True)
     include_on_coa = Column(Boolean, default=True, nullable=False)
 
+    # Provenance for inherited results (copied onto a re-sample fork), e.g.
+    # "Tested as composite C040726, 2026-04-07".
+    provenance_note = Column(String(255), nullable=True)
+
     # Relationships
     lot = relationship("Lot", back_populates="test_results")
     approved_by_user = relationship(

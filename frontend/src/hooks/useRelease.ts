@@ -183,12 +183,28 @@ export function useAttestSensory() {
 }
 
 /** Void a released COA and return the lot to the release queue (Admin only) */
+/** Sibling released COAs on the same lot (for the void-together prompt) */
+export function useReleaseSiblings(releaseId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: [...releaseKeys.all, "siblings", releaseId] as const,
+    queryFn: () => releaseApi.getSiblings(releaseId as number),
+    enabled: enabled && releaseId != null,
+  })
+}
+
 export function useVoidRelease() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ releaseId, reason }: { releaseId: number; reason: string }) =>
-      releaseApi.voidRelease(releaseId, reason),
+    mutationFn: ({
+      releaseId,
+      reason,
+      alsoVoidReleaseIds,
+    }: {
+      releaseId: number
+      reason: string
+      alsoVoidReleaseIds?: number[]
+    }) => releaseApi.voidRelease(releaseId, reason, alsoVoidReleaseIds),
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to void release"))
     },

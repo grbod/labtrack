@@ -23,7 +23,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.coa_release import COARelease
-from app.models.enums import TestResultStatus
+from app.models.enums import COAReleaseStatus, LotType, TestResultStatus
 from app.models.product_test_spec import ProductTestSpecification
 from app.models.release_sensory_attest import ReleaseSensoryAttest
 from app.models.test_result import TestResult
@@ -68,6 +68,62 @@ def _required_sensory_specs(
     return out
 
 
+def _norm(value: Optional[str]) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _composite_union_missing_tests(db: Session, lot) -> List[str]:
+    """Union of every non-forked member's required non-sensory lab panel that the
+    lot's shared results do not yet cover.
+
+    A composite's members share one set of lab results, so a test any member
+    requires but that is absent from the shared results blocks the whole
+    composite. Members whose release is FORKED have left the composite and are
+    excluded from the union.
+    """
+    forked_product_ids = {
+        r.product_id
+        for r in db.query(COARelease)
+        .filter(
+            COARelease.lot_id == lot.id,
+            COARelease.status == COAReleaseStatus.FORKED,
+        )
+        .all()
+    }
+
+    results = db.query(TestResult).filter(TestResult.lot_id == lot.id).all()
+    covered = {
+        _norm(r.test_type)
+        for r in results
+        if r.result_value is not None and str(r.result_value).strip() != ""
+    }
+
+    missing: List[str] = []
+    seen: set[str] = set()
+    for lot_product in lot.lot_products:
+        if lot_product.product_id in forked_product_ids:
+            continue
+        product = lot_product.product
+        if product is None:
+            continue
+        for spec in product.test_specifications:
+            if not spec.is_required or not spec.lab_test_type_id:
+                continue
+            category = spec.test_category or (
+                spec.lab_test_type.test_category if spec.lab_test_type else None
+            )
+            if _is_sensory(category):
+                continue
+            name = spec.test_name
+            if not name or _norm(name) in covered:
+                continue
+            if _norm(name) in seen:
+                continue
+            seen.add(_norm(name))
+            missing.append(name)
+    return missing
+
+
 def compute_gate(
     db: Session,
     lot_id: int,
@@ -80,6 +136,7 @@ def compute_gate(
 
     lot = db.query(Lot).filter(Lot.id == lot_id).first()
     is_legacy = _is_legacy_import(lot) if lot else False
+    is_composite = bool(lot and lot.lot_type == LotType.MULTI_SKU_COMPOSITE)
 
     context = build_context(db, lot_id, product_id, release=release)
 
@@ -126,7 +183,20 @@ def compute_gate(
         all(r.status == TestResultStatus.APPROVED for r in results) if results else True
     )
 
+    # Composite completeness: the union of ALL (non-forked) members' required
+    # panels must be covered by the shared results. A missing union test blocks
+    # EVERY member (this one included), even tests this product does not itself
+    # require.
+    union_missing_tests: List[str] = []
+    if is_composite and not is_legacy:
+        union_missing_tests = _composite_union_missing_tests(db, lot)
+
     blocking: List[str] = []
+    if union_missing_tests:
+        blocking.append(
+            "Composite incomplete — missing shared tests: "
+            + ", ".join(union_missing_tests)
+        )
     if missing_tests and not is_legacy:
         blocking.append("Missing required tests: " + ", ".join(missing_tests))
     if failing_tests:
@@ -145,8 +215,10 @@ def compute_gate(
         lot_id=lot_id,
         product_id=product_id,
         is_legacy_import=is_legacy,
+        is_composite=is_composite,
         results_all_approved=results_all_approved,
         missing_tests=missing_tests if not is_legacy else [],
+        union_missing_tests=union_missing_tests,
         failing_tests=failing_tests,
         indeterminate_tests=indeterminate_tests,
         sensory_rows=sensory_rows,

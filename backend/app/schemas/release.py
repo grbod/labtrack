@@ -22,6 +22,11 @@ class ReleaseQueueItem(BaseModel):
     flavor: Optional[str] = None
     size: Optional[str] = None
     created_at: datetime
+    # Release status for this member. "forked" members were individualized out
+    # of a composite and are not actionable in the queue.
+    release_status: str = "awaiting_release"
+    forked_to_lot_id: Optional[int] = None
+    forked_to_reference: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -217,6 +222,9 @@ class ReleaseDetailsByLotProduct(BaseModel):
     product: ProductInRelease
     source_pdfs: List[str] = []
     customer: Optional[CustomerInRelease] = None
+    # Fork lineage: set when this member was forked out (status == "forked").
+    forked_to_lot_id: Optional[int] = None
+    forked_to_reference: Optional[str] = None
 
 
 # Request for creating/approving release by lot+product
@@ -267,9 +275,15 @@ class ReleaseGateStatus(BaseModel):
     product_id: int
     is_legacy_import: bool = False
     results_all_approved: bool = True
+    # Composite: True when this lot is a multi-SKU composite (member view).
+    is_composite: bool = False
     # Red (blocking) items
     missing_tests: List[str] = []
     failing_tests: List[GateTestRef] = []
+    # Composite-only: union of ALL (non-forked) member products' required lab
+    # panels not yet covered by the lot's shared results. A missing union test
+    # blocks EVERY member's release.
+    union_missing_tests: List[str] = []
     # Amber (non-blocking) warnings
     indeterminate_tests: List[GateTestRef] = []
     # Sensory attest checklist
@@ -294,6 +308,40 @@ class VoidReleaseRequest(BaseModel):
     """Request to void a released COA and return the lot to the queue."""
 
     reason: str
+    # Decision 24: also void these sibling releases (same lot, same shared
+    # results). Validated to belong to the same lot and be RELEASED.
+    also_void_release_ids: List[int] = []
+
+
+class ReleaseSibling(BaseModel):
+    """A sibling released COA on the same composite lot (for the void prompt)."""
+
+    id: int
+    product_id: int
+    product_name: Optional[str] = None
+    brand: Optional[str] = None
+    reference_number: Optional[str] = None
+
+
+class ForkRequest(BaseModel):
+    """Request to fork a product out of a lot into a fresh re-sample lot."""
+
+    product_id: int
+
+
+class ForkResponse(BaseModel):
+    """New lot created by a fork."""
+
+    lot_id: int
+    lot_number: str
+    reference_number: str
+    product_id: int
+    status: LotStatus
+    forked_from_lot_id: int
+    fork_context: Optional[str] = None
+    inherited_result_count: int = 0
+
+    model_config = {"from_attributes": True}
 
 
 # COA Preview Data schemas

@@ -1,7 +1,7 @@
 """Archive schemas for request/response validation."""
 
-from datetime import datetime, date
-from typing import Optional, List
+from datetime import date, datetime
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -85,12 +85,17 @@ class ArchiveItem(BaseModel):
     released_by: Optional[str] = None
     coa_file_path: Optional[str] = None
     notes: Optional[str] = None
+    # Post-release supersede: reference of the re-sample fork COA that replaced
+    # this one (History renders "Superseded by {ref}").
+    superseded_by_release_id: Optional[int] = None
+    superseded_by_reference: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
     @classmethod
     def from_release(cls, release) -> "ArchiveItem":
         """Create archive item from COARelease model."""
+        superseded_by = getattr(release, "superseded_by", None)
         return cls(
             id=release.id,
             lot_id=release.lot_id,
@@ -106,6 +111,12 @@ class ArchiveItem(BaseModel):
             released_by=release.released_by.username if release.released_by else None,
             coa_file_path=release.coa_file_path,
             notes=release.notes,
+            superseded_by_release_id=release.superseded_by_release_id,
+            superseded_by_reference=(
+                superseded_by.lot.reference_number
+                if superseded_by and superseded_by.lot
+                else None
+            ),
         )
 
 

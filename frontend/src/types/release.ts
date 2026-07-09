@@ -1,5 +1,5 @@
 // Release status types
-export type ReleaseStatus = "awaiting_release" | "released"
+export type ReleaseStatus = "awaiting_release" | "released" | "forked"
 
 // Customer type
 export interface Customer {
@@ -24,6 +24,11 @@ export interface ReleaseQueueItem {
   flavor: string | null
   size: string | null
   created_at: string
+  // Per-member release status. "forked" members were individualized out of a
+  // composite and are not actionable in the queue.
+  release_status?: ReleaseStatus
+  forked_to_lot_id?: number | null
+  forked_to_reference?: string | null
 }
 
 // Archive item (released COAs with lot_id and product_id)
@@ -39,6 +44,9 @@ export interface ArchiveItem {
   size: string | null
   released_at: string
   customer_name: string | null
+  // Post-release supersede: the re-sample fork COA that replaced this one.
+  superseded_by_release_id?: number | null
+  superseded_by_reference?: string | null
 }
 
 // Legacy queue item type (deprecated, use ReleaseQueueItem or ArchiveItem)
@@ -76,6 +84,9 @@ export interface ReleaseDetails {
   }
   customer: Customer | null
   source_pdfs: string[]
+  // Fork lineage: set when this member was forked out (status === "forked").
+  forked_to_lot_id?: number | null
+  forked_to_reference?: string | null
 }
 
 // Legacy release type (deprecated, use ReleaseDetails)
@@ -224,15 +235,29 @@ export interface GateSensoryRow {
   attested: boolean
 }
 
+// A sibling released COA on the same composite lot (for the void prompt)
+export interface ReleaseSibling {
+  id: number
+  product_id: number
+  product_name: string | null
+  brand: string | null
+  reference_number: string | null
+}
+
 // Green/amber/red gate summary for releasing a (lot, product) COA
 export interface ReleaseGateStatus {
   lot_id: number
   product_id: number
   is_legacy_import: boolean
   results_all_approved: boolean
+  // True when this lot is a multi-SKU composite (member view).
+  is_composite: boolean
   // Red (blocking) items
   missing_tests: string[]
   failing_tests: GateTestRef[]
+  // Composite-only: union of all members' required tests not yet covered by the
+  // shared results. A missing union test blocks EVERY member.
+  union_missing_tests: string[]
   // Amber (non-blocking) warnings
   indeterminate_tests: GateTestRef[]
   // Sensory attest checklist

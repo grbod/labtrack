@@ -11,6 +11,17 @@ import type {
   ReviewThreadResponse,
 } from "@/types"
 
+export interface ForkResult {
+  lot_id: number
+  lot_number: string
+  reference_number: string
+  product_id: number
+  status: LotStatus
+  forked_from_lot_id: number
+  fork_context: string | null
+  inherited_result_count: number
+}
+
 export interface LotFilters {
   page?: number
   page_size?: number
@@ -86,6 +97,17 @@ export const lotsApi = {
 
   get: async (id: number): Promise<LotWithProducts> => {
     const response = await api.get<LotWithProducts>(`/lots/${id}`)
+    return response.data
+  },
+
+  /**
+   * Fork a product out of a lot into a fresh re-sample lot (QC Manager/Admin).
+   * Inherits the source's passing results; the rest is re-tested.
+   */
+  fork: async (lotId: number, productId: number): Promise<ForkResult> => {
+    const response = await api.post<ForkResult>(`/lots/${lotId}/fork`, {
+      product_id: productId,
+    })
     return response.data
   },
 

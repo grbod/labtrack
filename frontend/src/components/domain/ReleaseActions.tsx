@@ -12,7 +12,9 @@ import {
   ChevronDown,
   ShieldAlert,
   MailCheck,
+  GitFork,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -41,7 +43,7 @@ import {
   useDownloadCoa,
   useReleaseGate,
 } from "@/hooks/useRelease"
-import { useReturnLotForReview } from "@/hooks/useLots"
+import { useReturnLotForReview, useForkLot } from "@/hooks/useLots"
 import { useRetestRequests } from "@/hooks/useRetests"
 import { formatDate } from "@/lib/date-utils"
 import { extractApiErrorMessage, extractGateBlockedDetail } from "@/lib/api-utils"
@@ -90,6 +92,9 @@ export function ReleaseActions({
   } | null>(null)
   const [showOverrideDialog, setShowOverrideDialog] = useState(false)
   const [overrideReason, setOverrideReason] = useState("")
+  const [showForkDialog, setShowForkDialog] = useState(false)
+  const navigate = useNavigate()
+  const forkLot = useForkLot()
 
   // Clear stale error when navigating between release items
   useEffect(() => {
@@ -212,6 +217,20 @@ export function ReleaseActions({
     } catch (error: unknown) {
       setShowOverrideDialog(false)
       handleApproveError(error)
+    }
+  }
+
+  const handleForkConfirm = async () => {
+    try {
+      const result = await forkLot.mutateAsync({ lotId, productId })
+      setShowForkDialog(false)
+      toast.success(
+        `Created sample ${result.lot_number} (${result.reference_number}) — ` +
+          `${result.inherited_result_count} passing result(s) inherited, the rest awaiting testing.`
+      )
+      navigate("/tracker")
+    } catch {
+      /* useForkLot already shows an error toast */
     }
   }
 
@@ -567,6 +586,19 @@ export function ReleaseActions({
           </Button>
         )}
 
+        {!isReleased && canAct && gateBlocked && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-sky-300 text-sky-700 hover:bg-sky-50"
+            onClick={() => setShowForkDialog(true)}
+            disabled={forkLot.isPending}
+          >
+            <GitFork className="h-4 w-4" />
+            Fork Sample
+          </Button>
+        )}
+
         {isReleased && (
           <div className="space-y-2">
             <p className="text-center text-[13px] text-emerald-600 font-medium py-2">
@@ -806,6 +838,50 @@ export function ReleaseActions({
             >
               {isApproving && <Loader2 className="h-4 w-4 animate-spin" />}
               Override & Release
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fork Sample Dialog */}
+      <Dialog open={showForkDialog} onOpenChange={setShowForkDialog}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Fork Sample for Re-testing</DialogTitle>
+            <DialogDescription>
+              Individualize{" "}
+              <span className="font-medium text-slate-800">
+                {release.product.product_name}
+                {release.product.flavor && ` - ${release.product.flavor}`}
+              </span>{" "}
+              into its own sample.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-[13px] text-slate-600 space-y-2">
+            <p>This creates a new standard sample (a “B” / “C” suffix on the lot):</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Passing shared results are inherited and marked with their provenance.</li>
+              <li>Failing or untested analytes are left blank for fresh testing.</li>
+              {release.lot.reference_number && gate?.is_composite && (
+                <li>
+                  This member is marked <span className="font-medium">Forked</span> on
+                  composite {release.lot.reference_number} and no longer blocks it.
+                </li>
+              )}
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowForkDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleForkConfirm}
+              disabled={forkLot.isPending}
+              className="bg-sky-600 hover:bg-sky-700 text-white"
+            >
+              {forkLot.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Create Forked Sample
             </Button>
           </DialogFooter>
         </DialogContent>

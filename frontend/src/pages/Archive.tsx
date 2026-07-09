@@ -398,7 +398,13 @@ export function ArchivePage() {
                       {item.customer_name || "—"}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="emerald" className="text-[11px]">Released</Badge>
+                      {item.superseded_by_reference ? (
+                        <Badge variant="outline" className="text-[11px] border-purple-300 text-purple-700">
+                          Superseded → {item.superseded_by_reference}
+                        </Badge>
+                      ) : (
+                        <Badge variant="emerald" className="text-[11px]">Released</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1.5">

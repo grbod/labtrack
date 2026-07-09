@@ -63,6 +63,11 @@ class COARelease(BaseModel):
     voided_note = Column(Text, nullable=True)
     voided_at = Column(DateTime, nullable=True)
     voided_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Post-release supersede link: set on the ORIGINAL release when a re-sample
+    # fork's own release is issued. History renders "Superseded by {fork ref}".
+    superseded_by_release_id = Column(
+        Integer, ForeignKey("coa_releases.id"), nullable=True
+    )
 
     # Relationships
     lot = relationship("Lot", back_populates="coa_releases")
@@ -70,6 +75,11 @@ class COARelease(BaseModel):
     customer = relationship("Customer", back_populates="coa_releases")
     released_by = relationship("User", foreign_keys=[released_by_id])
     voided_by = relationship("User", foreign_keys=[voided_by_id])
+    superseded_by = relationship(
+        "COARelease",
+        remote_side="COARelease.id",
+        foreign_keys=[superseded_by_release_id],
+    )
     email_history = relationship(
         "EmailHistory", back_populates="coa_release", cascade="all, delete-orphan"
     )

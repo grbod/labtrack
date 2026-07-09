@@ -50,6 +50,34 @@ export function useLotStatusCounts() {
   })
 }
 
+/**
+ * Fork a product out of a lot into a fresh re-sample lot (QC Manager/Admin).
+ * Invalidates the queue, the source lot, and status counts.
+ */
+export function useForkLot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ lotId, productId }: { lotId: number; productId: number }) =>
+      lotsApi.fork(lotId, productId),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to fork sample"))
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: lotKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.statusCounts() })
+      queryClient.invalidateQueries({ queryKey: lotKeys.detail(variables.lotId) })
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.detail(variables.lotId, variables.productId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.gate(variables.lotId, variables.productId),
+      })
+    },
+  })
+}
+
 export function useCreateLot() {
   const queryClient = useQueryClient()
 

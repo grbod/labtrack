@@ -133,8 +133,13 @@ export function ReleasePage() {
     saveDraft.mutate({ lotId, productId, data })
   }
 
-  const handleApprove = async (customerId?: number, notes?: string) => {
-    await approveRelease.mutateAsync({ lotId, productId, customerId, notes })
+  const handleApprove = async (
+    customerId?: number,
+    notes?: string,
+    override?: boolean,
+    overrideReason?: string
+  ) => {
+    await approveRelease.mutateAsync({ lotId, productId, customerId, notes, override, overrideReason })
     // Success popup in ReleaseActions handles navigation
   }
 

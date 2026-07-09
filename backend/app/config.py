@@ -1,9 +1,10 @@
 """Configuration settings for LabTrack."""
 
-from typing import Optional
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from typing import Optional
+
 from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings
 
 # Shipped defaults for secrets — must be overridden in production.
 _DEFAULT_SECRET_KEY = "your-secret-key-here-change-in-production"
@@ -23,19 +24,15 @@ class Settings(BaseSettings):
         return self.app_env
 
     # Database
-    database_url: str = Field(
-        default="sqlite:///./labtrack.db", env="DATABASE_URL"
-    )
+    database_url: str = Field(default="sqlite:///./labtrack.db", env="DATABASE_URL")
 
     # Security
-    secret_key: str = Field(
-        default=_DEFAULT_SECRET_KEY, env="SECRET_KEY"
-    )
-    jwt_secret_key: str = Field(
-        default=_DEFAULT_JWT_SECRET_KEY, env="JWT_SECRET_KEY"
-    )
+    secret_key: str = Field(default=_DEFAULT_SECRET_KEY, env="SECRET_KEY")
+    jwt_secret_key: str = Field(default=_DEFAULT_JWT_SECRET_KEY, env="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
-    access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    access_token_expire_minutes: int = Field(
+        default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
 
     # AI Configuration
     ai_provider: str = Field(default="mock", env="AI_PROVIDER")
@@ -43,7 +40,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
     openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
-    openrouter_model: str = Field(default="google/gemini-2.5-flash", env="OPENROUTER_MODEL")
+    openrouter_model: str = Field(
+        default="google/gemini-2.5-flash", env="OPENROUTER_MODEL"
+    )
 
     @model_validator(mode="after")
     def validate_production_ai_provider(self) -> "Settings":
@@ -56,9 +55,7 @@ class Settings(BaseSettings):
     # File paths
     template_folder: Path = Field(default=Path("./templates"), env="TEMPLATE_FOLDER")
     templates_path: Path = Field(default=Path("./templates"), env="TEMPLATES_PATH")
-    coa_output_folder: Path = Field(
-        default=Path("./COAs"), env="COA_OUTPUT_FOLDER"
-    )
+    coa_output_folder: Path = Field(default=Path("./COAs"), env="COA_OUTPUT_FOLDER")
     upload_path: Path = Field(default=Path("./uploads"), env="UPLOAD_PATH")
     export_path: Path = Field(default=Path("./exports"), env="EXPORT_PATH")
 
@@ -68,8 +65,12 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = Field(default="", env="R2_SECRET_ACCESS_KEY")
     r2_bucket_name: str = Field(default="coa-files", env="R2_BUCKET_NAME")
     r2_endpoint: str = Field(default="", env="R2_ENDPOINT")
-    storage_backend: str = Field(default="local", env="STORAGE_BACKEND")  # "local" or "r2"
-    presigned_url_expiry: int = Field(default=3600, env="PRESIGNED_URL_EXPIRY")  # 1 hour
+    storage_backend: str = Field(
+        default="local", env="STORAGE_BACKEND"
+    )  # "local" or "r2"
+    presigned_url_expiry: int = Field(
+        default=3600, env="PRESIGNED_URL_EXPIRY"
+    )  # 1 hour
 
     # Aliases for compatibility
     @property
@@ -92,7 +93,7 @@ class Settings(BaseSettings):
     enable_audit_logging: bool = Field(default=True, env="ENABLE_AUDIT")
     enable_ai_parsing: bool = Field(default=True, env="ENABLE_AI_PARSING")
     workflow_enforce_transitions: bool = Field(
-        default=False, env="WORKFLOW_ENFORCE_TRANSITIONS"
+        default=True, env="WORKFLOW_ENFORCE_TRANSITIONS"
     )
 
     # Limits

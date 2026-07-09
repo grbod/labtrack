@@ -3,28 +3,25 @@
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-)
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
-
-from sqlalchemy.orm import Session, joinedload
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.models import Lot, TestResult, User
-from app.models.retest_request import RetestRequest, RetestItem
-from app.models.enums import RetestStatus, AuditAction, LotStatus
+from app.models.enums import AuditAction, LotStatus, RetestStatus
+from app.models.retest_request import RetestItem, RetestRequest
 from app.services.base import BaseService
+from app.services.daane_coc_service import daane_coc_service
 from app.services.lab_info_service import lab_info_service
 from app.services.storage_service import get_storage_service
-from app.services.daane_coc_service import daane_coc_service
 from app.utils.logger import logger
 
 
@@ -43,9 +40,7 @@ class RetestService(BaseService[RetestRequest]):
         """Initialize retest service."""
         super().__init__(RetestRequest)
 
-    def generate_retest_reference(
-        self, db: Session, lot_id: int
-    ) -> Tuple[str, int]:
+    def generate_retest_reference(self, db: Session, lot_id: int) -> Tuple[str, int]:
         """
         Generate next -R1, -R2, etc. reference for a lot.
 
@@ -65,9 +60,7 @@ class RetestService(BaseService[RetestRequest]):
 
         # Count existing retest requests for this lot
         existing_count = (
-            db.query(RetestRequest)
-            .filter(RetestRequest.lot_id == lot_id)
-            .count()
+            db.query(RetestRequest).filter(RetestRequest.lot_id == lot_id).count()
         )
 
         retest_number = existing_count + 1
@@ -126,9 +119,7 @@ class RetestService(BaseService[RetestRequest]):
             # Create retest items and snapshot original values
             for test_result_id in test_result_ids:
                 test_result = (
-                    db.query(TestResult)
-                    .filter(TestResult.id == test_result_id)
-                    .first()
+                    db.query(TestResult).filter(TestResult.id == test_result_id).first()
                 )
                 if not test_result:
                     raise ValueError(f"Test result with ID {test_result_id} not found")
@@ -150,7 +141,15 @@ class RetestService(BaseService[RetestRequest]):
 
             # Move lot to Partial Results if it was in Needs Attention (failing tests need re-entry)
             if lot.status == LotStatus.NEEDS_ATTENTION:
-                lot.status = LotStatus.PARTIAL_RESULTS
+                from app.workflow.lot_workflow_service import LotWorkflowService
+
+                LotWorkflowService().apply_auto(
+                    db,
+                    lot,
+                    LotStatus.PARTIAL_RESULTS,
+                    actor_id=user_id,
+                    reason="Retest requested: failing tests need re-entry",
+                )
 
             db.flush()
 
@@ -207,9 +206,7 @@ class RetestService(BaseService[RetestRequest]):
             .first()
         )
 
-    def get_retests_for_lot(
-        self, db: Session, lot_id: int
-    ) -> List[RetestRequest]:
+    def get_retests_for_lot(self, db: Session, lot_id: int) -> List[RetestRequest]:
         """
         Get all retest requests for a lot.
 
@@ -472,9 +469,7 @@ class RetestService(BaseService[RetestRequest]):
 
         return retest_request
 
-    def generate_retest_pdf(
-        self, db: Session, retest_request_id: int
-    ) -> bytes:
+    def generate_retest_pdf(self, db: Session, retest_request_id: int) -> bytes:
         """
         Generate a PDF retest request form.
 
@@ -506,6 +501,7 @@ class RetestService(BaseService[RetestRequest]):
 
         finally:
             import os
+
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
@@ -627,7 +623,9 @@ class RetestService(BaseService[RetestRequest]):
             if len(products) == 1:
                 product_name = products[0].display_name
             elif len(products) > 1:
-                product_name = "Multi-SKU: " + ", ".join(p.display_name for p in products[:3])
+                product_name = "Multi-SKU: " + ", ".join(
+                    p.display_name for p in products[:3]
+                )
                 if len(products) > 3:
                     product_name += f" +{len(products) - 3} more"
 

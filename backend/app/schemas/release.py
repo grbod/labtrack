@@ -225,6 +225,10 @@ class ApproveByLotProductRequest(BaseModel):
 
     customer_id: Optional[int] = None
     notes: Optional[str] = None
+    # Release-gate override: bypass blocking (red) gate items. Requires
+    # QC Manager/Admin and a non-empty reason; the reason prints on the COA.
+    override: bool = False
+    override_reason: Optional[str] = None
 
 
 class ApproveByLotProductResponse(BaseModel):
@@ -236,6 +240,60 @@ class ApproveByLotProductResponse(BaseModel):
     all_products_released: bool
 
     model_config = {"from_attributes": True}
+
+
+# --- Release gate ---------------------------------------------------------
+class GateTestRef(BaseModel):
+    """A test row referenced by the gate (failing / indeterminate)."""
+
+    name: str
+    result_value: Optional[str] = None
+    spec_text: Optional[str] = None
+
+
+class GateSensoryRow(BaseModel):
+    """A sensory/organoleptic panel row requiring attestation."""
+
+    lab_test_type_id: int
+    name: str
+    spec_text: Optional[str] = None
+    attested: bool = False
+
+
+class ReleaseGateStatus(BaseModel):
+    """Green/amber/red gate summary for releasing a (lot, product) COA."""
+
+    lot_id: int
+    product_id: int
+    is_legacy_import: bool = False
+    results_all_approved: bool = True
+    # Red (blocking) items
+    missing_tests: List[str] = []
+    failing_tests: List[GateTestRef] = []
+    # Amber (non-blocking) warnings
+    indeterminate_tests: List[GateTestRef] = []
+    # Sensory attest checklist
+    sensory_rows: List[GateSensoryRow] = []
+    sensory_all_attested: bool = True
+    # Overall
+    blocking_reasons: List[str] = []
+    can_release: bool = True
+    # Re-release notice: populated when a prior release for this pair was voided
+    # and had email history.
+    prior_email_recipients: List[str] = []
+    prior_email_date: Optional[datetime] = None
+
+
+class SensoryAttestRequest(BaseModel):
+    """Request to attest sensory rows for a release."""
+
+    lab_test_type_ids: List[int] = []
+
+
+class VoidReleaseRequest(BaseModel):
+    """Request to void a released COA and return the lot to the queue."""
+
+    reason: str
 
 
 # COA Preview Data schemas

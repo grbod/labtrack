@@ -1,22 +1,25 @@
 """Approval service for managing approval workflows."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_
+from sqlalchemy import func as db_func
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func as db_func
-from app.models.test_result import TestResult
-from app.models.lot import Lot, LotProduct
-from app.models.user import User
+
+from app.models.audit import AuditLog
 from app.models.coa_release import COARelease
 from app.models.enums import (
-    TestResultStatus,
-    LotStatus,
-    LotType,
-    UserRole,
     AuditAction,
     COAReleaseStatus,
+    LotStatus,
+    LotType,
+    TestResultStatus,
+    UserRole,
 )
-from app.models.audit import AuditLog
+from app.models.lot import Lot, LotProduct
+from app.models.test_result import TestResult
+from app.models.user import User
 from app.services.base import BaseService
 from app.utils.logger import logger
 
@@ -80,6 +83,13 @@ class ApprovalService(BaseService[TestResult]):
         if test_result.status == TestResultStatus.APPROVED:
             raise ValueError("Test result is already approved")
 
+        # Self-approval: the approver is the same person who created the result.
+        # Allowed, but flagged with a distinct audit entry and a warning.
+        is_self_approval = (
+            test_result.created_by_id is not None
+            and test_result.created_by_id == approver_user_id
+        )
+
         # Perform approval
         old_values = test_result.to_dict()
 
@@ -104,6 +114,18 @@ class ApprovalService(BaseService[TestResult]):
             metadata=audit_metadata,
         )
 
+        if is_self_approval:
+            self._log_audit(
+                db=db,
+                action=AuditAction.SELF_APPROVAL,
+                record_id=test_result.id,
+                old_values=None,
+                new_values={"approved_by_id": approver_user_id},
+                user_id=approver_user_id,
+                reason="Result approved by its creator (self-approval)",
+                metadata=audit_metadata,
+            )
+
         db.commit()
         db.refresh(test_result)
 
@@ -116,6 +138,9 @@ class ApprovalService(BaseService[TestResult]):
 
         # Refresh to get updated lot status
         db.refresh(test_result)
+
+        # Transient flag consumed by the endpoint to warn the caller.
+        test_result._self_approval = is_self_approval
 
         return test_result
 
@@ -421,12 +446,12 @@ class ApprovalService(BaseService[TestResult]):
         # Determine new status based on completeness and test results
         if not completeness["is_complete"]:
             # Missing required tests - set to PARTIAL_RESULTS
-            lot.status = LotStatus.PARTIAL_RESULTS
+            target = LotStatus.PARTIAL_RESULTS
             reason = f"Partial results - missing required tests: {', '.join(completeness['missing_required'])}"
         else:
             # All required tests present - set to UNDER_REVIEW for manual approval
             # Manual review is required even if all tests pass
-            lot.status = LotStatus.UNDER_REVIEW
+            target = LotStatus.UNDER_REVIEW
             all_passing = self._check_all_tests_passing(test_results)
             if all_passing:
                 reason = (
@@ -435,21 +460,16 @@ class ApprovalService(BaseService[TestResult]):
             else:
                 reason = "All required tests present but some failing specifications - awaiting manual QC review"
 
-        # Log the change if status changed
-        if lot.status != old_status:
-            AuditLog.log_change(
-                session=db,
-                table_name="lots",
-                record_id=lot.id,
-                action=AuditAction.UPDATE,
-                old_values={"status": old_status.value},
-                new_values={"status": lot.status.value},
-                user=user_id,
-                reason=reason,
+        # Apply the change if status changed (auto-recalculation)
+        if target != old_status:
+            from app.workflow.lot_workflow_service import LotWorkflowService
+
+            LotWorkflowService().apply_auto(
+                db, lot, target, actor_id=user_id, reason=reason
             )
 
             logger.info(
-                f"Lot {lot.lot_number} automatically updated from {old_status.value} to {lot.status.value} status - {reason}"
+                f"Lot {lot.lot_number} automatically updated from {old_status.value} to {target.value} status - {reason}"
             )
 
             # Commit the lot status change
@@ -594,16 +614,12 @@ class ApprovalService(BaseService[TestResult]):
 
         # If we have some results but missing required tests, set to PARTIAL_RESULTS
         if lot.test_results and not completeness["is_complete"]:
-            old_status = lot.status
-            lot.status = LotStatus.PARTIAL_RESULTS
+            from app.workflow.lot_workflow_service import LotWorkflowService
 
-            # Log the status change
-            self._log_audit(
-                db=db,
-                action="update",
-                record_id=lot.id,
-                old_values={"status": old_status.value},
-                new_values={"status": lot.status.value},
+            LotWorkflowService().apply_auto(
+                db,
+                lot,
+                LotStatus.PARTIAL_RESULTS,
                 reason="Automatic update - partial test results received",
             )
 
@@ -684,23 +700,19 @@ class ApprovalService(BaseService[TestResult]):
 
         lot = db.query(Lot).filter(Lot.id == lot_id).first()
         if lot and lot.status == LotStatus.AWAITING_RESULTS:
-            old_status = lot.status
-            lot.status = check["status_recommendation"]
+            from app.workflow.lot_workflow_service import LotWorkflowService
 
-            # Log the change
-            self._log_audit(
-                db=db,
-                action=AuditAction.UPDATE,
-                record_id=lot.id,
-                old_values={"status": old_status.value},
-                new_values={"status": lot.status.value},
+            LotWorkflowService().apply_auto(
+                db,
+                lot,
+                check["status_recommendation"],
                 reason=f"Auto-update based on test completeness. Missing: {check['missing_required']}",
             )
 
             db.commit()
 
             logger.info(
-                f"Updated lot {lot.lot_number} from {old_status.value} to {lot.status.value}. "
+                f"Updated lot {lot.lot_number} to {lot.status.value}. "
                 f"Missing tests: {check['missing_required']}"
             )
 

@@ -291,6 +291,19 @@ def build_context(
 
     is_released = bool(release and release.status == COAReleaseStatus.RELEASED)
 
+    # Sensory rows attested by QC on this release print "Pass" regardless of the
+    # (JUDGMENT/INDETERMINATE) machine verdict — a human signed off on them.
+    attested_sensory_ids: set = set()
+    if release is not None and getattr(release, "id", None) is not None:
+        from app.models.release_sensory_attest import ReleaseSensoryAttest
+
+        attested_sensory_ids = {
+            a.lab_test_type_id
+            for a in db.query(ReleaseSensoryAttest)
+            .filter(ReleaseSensoryAttest.release_id == release.id)
+            .all()
+        }
+
     # --- test results ---
     # Every test performed on the lot (print-all policy), then split:
     #   * ``coa_results`` (include_on_coa) become the rendered rows;
@@ -348,6 +361,9 @@ def build_context(
         has_spec = bool(spec_text)
         verdict = _compute_verdict(spec_text, result.result_value, result.unit)
         status = _status_display(verdict.kind, has_spec, is_released)
+        # A QC-attested sensory row prints "Pass".
+        if _is_sensory(category) and result.lab_test_type_id in attested_sensory_ids:
+            status = "Pass"
         test_rows.append(
             TestRow(
                 id=result.id,

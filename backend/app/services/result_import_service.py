@@ -655,6 +655,7 @@ class ResultImportService(BaseService[ResultImport]):
                     status=TestResultStatus.DRAFT,
                     lab_test_type_id=lab_test_type_id,
                     include_on_coa=True,
+                    created_by_id=user_id,
                 )
                 db.add(result)
                 db.flush()
@@ -737,15 +738,14 @@ class ResultImportService(BaseService[ResultImport]):
         )
 
         if lot.status == LotStatus.AWAITING_RELEASE:
-            lot.status = LotStatus.UNDER_REVIEW
-            self._audit_entity(
+            # System-driven pullback out of the release queue (not a QC gate).
+            from app.workflow.lot_workflow_service import LotWorkflowService
+
+            LotWorkflowService().apply_system(
                 db,
-                table_name="lots",
-                action=AuditAction.UPDATE,
-                record_id=lot.id,
-                old_values={"status": LotStatus.AWAITING_RELEASE.value},
-                new_values={"status": LotStatus.UNDER_REVIEW.value},
-                user_id=user_id,
+                lot,
+                LotStatus.UNDER_REVIEW,
+                actor_id=user_id,
                 reason="Result import: lot pulled back from release queue into review",
             )
 
@@ -923,9 +923,11 @@ class ResultImportService(BaseService[ResultImport]):
                     db,
                     lot,
                     row,
-                    lab_test_type_override
-                    if row_id in override_by_row_id
-                    else row.get("matched_lab_test_type_id"),
+                    (
+                        lab_test_type_override
+                        if row_id in override_by_row_id
+                        else row.get("matched_lab_test_type_id")
+                    ),
                     row.get("test_name_normalized") or row.get("test_name_raw"),
                 )
             )

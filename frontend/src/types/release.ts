@@ -28,6 +28,7 @@ export interface ReleaseQueueItem {
 
 // Archive item (released COAs with lot_id and product_id)
 export interface ArchiveItem {
+  id: number // COARelease id - required to void a release
   lot_id: number
   product_id: number
   reference_number: string
@@ -198,4 +199,52 @@ export interface COAPreviewData {
   released_by_email: string | null
   signature_url: string | null  // URL to signature image for COA
   released_at: string | null  // Release date (if different from generated_date)
+}
+
+// --- Release gate ---------------------------------------------------------
+
+// A test row referenced by the gate (failing / indeterminate)
+export interface GateTestRef {
+  name: string
+  result_value: string | null
+  spec_text: string | null
+}
+
+// A sensory/organoleptic panel row requiring attestation
+export interface GateSensoryRow {
+  lab_test_type_id: number
+  name: string
+  spec_text: string | null
+  attested: boolean
+}
+
+// Green/amber/red gate summary for releasing a (lot, product) COA
+export interface ReleaseGateStatus {
+  lot_id: number
+  product_id: number
+  is_legacy_import: boolean
+  results_all_approved: boolean
+  // Red (blocking) items
+  missing_tests: string[]
+  failing_tests: GateTestRef[]
+  // Amber (non-blocking) warnings
+  indeterminate_tests: GateTestRef[]
+  // Sensory attest checklist
+  sensory_rows: GateSensoryRow[]
+  sensory_all_attested: boolean
+  // Overall
+  blocking_reasons: string[]
+  can_release: boolean
+  // Re-release notice: populated when a prior release for this pair was voided
+  // and had email history
+  prior_email_recipients: string[]
+  prior_email_date: string | null
+}
+
+// Structured 409 body returned when approve is blocked by the release gate
+export interface GateBlockedDetail {
+  code: string
+  reason: string
+  missing_tests: string[]
+  failing_tests: string[]
 }

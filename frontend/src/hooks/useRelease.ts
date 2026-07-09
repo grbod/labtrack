@@ -13,6 +13,8 @@ export const releaseKeys = {
   details: () => [...releaseKeys.all, "detail"] as const,
   detail: (lotId: number, productId: number) =>
     [...releaseKeys.details(), lotId, productId] as const,
+  gate: (lotId: number, productId: number) =>
+    [...releaseKeys.all, "gate", lotId, productId] as const,
   previewData: (lotId: number, productId: number) =>
     [...releaseKeys.all, "preview-data", lotId, productId] as const,
   emailHistory: (lotId: number, productId: number) =>
@@ -46,6 +48,15 @@ export function useReleaseDetails(lotId: number, productId: number) {
   return useQuery({
     queryKey: releaseKeys.detail(lotId, productId),
     queryFn: () => releaseApi.getDetails(lotId, productId),
+    enabled: lotId > 0 && productId > 0,
+  })
+}
+
+/** Fetch the release gate status (missing/failing tests, sensory checklist, etc.) */
+export function useReleaseGate(lotId: number, productId: number) {
+  return useQuery({
+    queryKey: releaseKeys.gate(lotId, productId),
+    queryFn: () => releaseApi.getGate(lotId, productId),
     enabled: lotId > 0 && productId > 0,
   })
 }
@@ -111,12 +122,16 @@ export function useApproveRelease() {
       productId,
       customerId,
       notes,
+      override,
+      overrideReason,
     }: {
       lotId: number
       productId: number
       customerId?: number
       notes?: string
-    }) => releaseApi.approve(lotId, productId, customerId, notes),
+      override?: boolean
+      overrideReason?: string
+    }) => releaseApi.approve(lotId, productId, customerId, notes, override, overrideReason),
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to approve release"))
     },
@@ -124,6 +139,9 @@ export function useApproveRelease() {
       queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
       queryClient.invalidateQueries({
         queryKey: releaseKeys.detail(variables.lotId, variables.productId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.gate(variables.lotId, variables.productId),
       })
       queryClient.invalidateQueries({
         queryKey: releaseKeys.previewData(variables.lotId, variables.productId),
@@ -134,6 +152,58 @@ export function useApproveRelease() {
       // Invalidate all recently released queries to refresh the list
       queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "recently-released"] })
       // Invalidate archived lots (audit trail) so it refreshes with new released items
+      queryClient.invalidateQueries({ queryKey: ["lots", "archived"] })
+    },
+  })
+}
+
+/** Attest sensory/organoleptic checklist rows for a release (QC Manager or Admin) */
+export function useAttestSensory() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      lotId,
+      productId,
+      labTestTypeIds,
+    }: {
+      lotId: number
+      productId: number
+      labTestTypeIds: number[]
+    }) => releaseApi.attestSensory(lotId, productId, labTestTypeIds),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to save attestation"))
+    },
+    onSuccess: (data, variables) => {
+      // The endpoint returns the freshly recomputed gate - write it straight into
+      // the cache instead of triggering a second round-trip.
+      queryClient.setQueryData(releaseKeys.gate(variables.lotId, variables.productId), data)
+    },
+  })
+}
+
+/** Void a released COA and return the lot to the release queue (Admin only) */
+export function useVoidRelease() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ releaseId, reason }: { releaseId: number; reason: string }) =>
+      releaseApi.voidRelease(releaseId, reason),
+    onError: (error: unknown) => {
+      toast.error(extractApiErrorMessage(error, "Failed to void release"))
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: releaseKeys.queue() })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.detail(data.lot_id, data.product_id),
+      })
+      queryClient.invalidateQueries({
+        queryKey: releaseKeys.gate(data.lot_id, data.product_id),
+      })
+      queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "archive"] })
+      queryClient.invalidateQueries({ queryKey: [...releaseKeys.all, "recently-released"] })
+      queryClient.invalidateQueries({ queryKey: ["lots"] })
+      queryClient.invalidateQueries({ queryKey: ["lots", "statusCounts"] })
       queryClient.invalidateQueries({ queryKey: ["lots", "archived"] })
     },
   })

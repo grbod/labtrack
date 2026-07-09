@@ -65,6 +65,9 @@ class TestResultResponse(BaseModel):
     updated_at: Optional[datetime] = None
     lab_test_type_id: Optional[int] = None
     include_on_coa: bool = True
+    created_by_id: Optional[int] = None
+    # True when the approver was the result's creator (self-approval).
+    self_approval_warning: bool = False
 
     model_config = {"from_attributes": True}
 

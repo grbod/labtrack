@@ -878,17 +878,24 @@ async def submit_for_review(
         )
 
     old_status = lot.status.value
-    lot.status = LotStatus.AWAITING_RELEASE
-    db.flush()
+    # Submit UNDER_REVIEW -> AWAITING_RELEASE. The endpoint already gates on
+    # status==UNDER_REVIEW (reached only when required tests are present and
+    # passing); the enforceable release gate (completeness / verdicts / sensory
+    # attest / results approved) is applied at RELEASE, so this is a system
+    # status conversion routed through the workflow service for the guard.
+    from app.workflow.lot_workflow_service import LotWorkflowService
 
-    # Log status change
-    audit_service = AuditService()
-    reason = "Submitted for QC release"
+    LotWorkflowService().apply_system(
+        db,
+        lot,
+        LotStatus.AWAITING_RELEASE,
+        actor_id=current_user.id,
+        reason="Submitted for QC release",
+    )
+
+    # Supplemental audit for the missing-PDF override context.
     if override_user_id:
-        reason = (
-            "Submitted for review without required PDF attachment (admin/QC override)"
-        )
-        audit_service.log_action(
+        AuditService().log_action(
             db=db,
             table_name="lots",
             record_id=lot.id,
@@ -896,18 +903,7 @@ async def submit_for_review(
             user_id=override_user_id,
             old_values={"status": old_status},
             new_values={"status": lot.status.value},
-            reason=reason,
-        )
-    else:
-        audit_service.log_action(
-            db=db,
-            table_name="lots",
-            record_id=lot.id,
-            action=AuditAction.UPDATE,
-            user_id=current_user.id,
-            old_values={"status": old_status},
-            new_values={"status": lot.status.value},
-            reason=reason,
+            reason="Submitted for review without required PDF attachment (admin/QC override)",
         )
 
     db.commit()
@@ -1075,32 +1071,28 @@ async def resubmit_lot(
             detail=f"Cannot resubmit from status '{lot.status.value}'. Must be 'rejected'.",
         )
 
-    # Capture old values
-    old_values = {
-        "status": lot.status.value,
-        "rejection_reason": lot.rejection_reason,
-    }
-
-    # Clear rejection reason and move back to awaiting_release
+    # Clear rejection reason and return to review (canonical resubmit target).
     lot.rejection_reason = None
-    lot.status = LotStatus.AWAITING_RELEASE
-    db.flush()
-
-    # Log the resubmission
-    audit_service = AuditService()
-    audit_service.log_action(
-        db=db,
-        table_name="lots",
-        record_id=lot.id,
-        action=AuditAction.UPDATE,
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values={
-            "status": lot.status.value,
-            "rejection_reason": None,
-        },
-        reason="Lot resubmitted for QC review after rejection",
+    from app.workflow.lot_workflow_service import (
+        LotWorkflowService,
+        WorkflowTransitionError,
     )
+
+    try:
+        LotWorkflowService().transition(
+            db,
+            lot,
+            LotStatus.UNDER_REVIEW,
+            current_user,
+            reason="Lot resubmitted for QC review after rejection",
+            trigger="manual",
+        )
+    except WorkflowTransitionError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=exc.reason,
+        )
 
     db.commit()
     db.refresh(lot)

@@ -56,6 +56,9 @@ class TestResult(BaseModel):
     )
     approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
+    # User who created this result (manual entry / import confirm). Used to warn
+    # on self-approval (approver == creator).
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text, nullable=True)
 
     # Additional fields for specific test types
@@ -71,6 +74,7 @@ class TestResult(BaseModel):
     approved_by_user = relationship(
         "User", back_populates="approved_results", foreign_keys=[approved_by_id]
     )
+    created_by_user = relationship("User", foreign_keys=[created_by_id])
 
     # Indexes for performance
     __table_args__ = (

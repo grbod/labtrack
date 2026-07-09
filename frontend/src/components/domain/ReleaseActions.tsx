@@ -10,6 +10,8 @@ import {
   Building2,
   RefreshCw,
   ChevronDown,
+  ShieldAlert,
+  MailCheck,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -31,11 +33,18 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { CustomerQuickAdd } from "./CustomerQuickAdd"
-import { useCustomers, useEmailHistory, useSendEmail, useDownloadCoa } from "@/hooks/useRelease"
+import { ReleaseGatePanel } from "./ReleaseGatePanel"
+import {
+  useCustomers,
+  useEmailHistory,
+  useSendEmail,
+  useDownloadCoa,
+  useReleaseGate,
+} from "@/hooks/useRelease"
 import { useReturnLotForReview } from "@/hooks/useLots"
 import { useRetestRequests } from "@/hooks/useRetests"
 import { formatDate } from "@/lib/date-utils"
-import { extractApiErrorMessage } from "@/lib/api-utils"
+import { extractApiErrorMessage, extractGateBlockedDetail } from "@/lib/api-utils"
 import { useAuthStore } from "@/store/auth"
 import type { ReleaseDetails, Customer, SaveDraftData } from "@/types/release"
 
@@ -44,7 +53,12 @@ interface ReleaseActionsProps {
   lotId: number
   productId: number
   onSaveDraft: (data: SaveDraftData) => void
-  onApprove: (customerId?: number, notes?: string) => Promise<void>
+  onApprove: (
+    customerId?: number,
+    notes?: string,
+    override?: boolean,
+    overrideReason?: string
+  ) => Promise<void>
   onDone: () => void
   isSaving?: boolean
   isApproving?: boolean
@@ -70,14 +84,24 @@ export function ReleaseActions({
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
   const [approveError, setApproveError] = useState<string | null>(null)
+  const [approveErrorLists, setApproveErrorLists] = useState<{
+    missing_tests: string[]
+    failing_tests: string[]
+  } | null>(null)
+  const [showOverrideDialog, setShowOverrideDialog] = useState(false)
+  const [overrideReason, setOverrideReason] = useState("")
 
   // Clear stale error when navigating between release items
   useEffect(() => {
     setApproveError(null)
+    setApproveErrorLists(null)
   }, [lotId, productId])
 
   const { user } = useAuthStore()
   const canAct = user?.role === "admin" || user?.role === "qc_manager"
+
+  const { data: gate } = useReleaseGate(lotId, productId)
+  const gateBlocked = !!gate && !gate.can_release
 
   const returnMutation = useReturnLotForReview()
   const [returnOpen, setReturnOpen] = useState(false)
@@ -142,21 +166,52 @@ export function ReleaseActions({
     setShowApproveConfirm(true)
   }
 
+  const handleApproveError = (error: unknown) => {
+    console.error("Failed to approve release:", error)
+    const gateDetail = extractGateBlockedDetail(error)
+    if (gateDetail) {
+      setApproveError(gateDetail.reason)
+      setApproveErrorLists({
+        missing_tests: gateDetail.missing_tests,
+        failing_tests: gateDetail.failing_tests,
+      })
+      toast.error(gateDetail.reason, { duration: 5000 })
+      return
+    }
+    setApproveErrorLists(null)
+    const message = extractApiErrorMessage(error, "Failed to approve release", {
+      403: "You don't have permission to approve releases. QC Manager or Admin role required.",
+      400: "Cannot approve release. Check the error details below.",
+    })
+    setApproveError(message)
+    toast.error(message, { duration: 5000 })
+  }
+
   const handleApproveConfirm = async () => {
     setApproveError(null)
+    setApproveErrorLists(null)
     try {
       await onApprove(customerId ?? undefined, notes || undefined)
       setShowApproveConfirm(false)
       setShowSuccessDialog(true) // Show success dialog instead of navigating
     } catch (error: unknown) {
-      console.error("Failed to approve release:", error)
       setShowApproveConfirm(false)
-      const message = extractApiErrorMessage(error, "Failed to approve release", {
-        403: "You don't have permission to approve releases. QC Manager or Admin role required.",
-        400: "Cannot approve release. Check the error details below.",
-      })
-      setApproveError(message)
-      toast.error(message, { duration: 5000 })
+      handleApproveError(error)
+    }
+  }
+
+  const handleOverrideConfirm = async () => {
+    if (!overrideReason.trim()) return
+    setApproveError(null)
+    setApproveErrorLists(null)
+    try {
+      await onApprove(customerId ?? undefined, notes || undefined, true, overrideReason.trim())
+      setShowOverrideDialog(false)
+      setOverrideReason("")
+      setShowSuccessDialog(true)
+    } catch (error: unknown) {
+      setShowOverrideDialog(false)
+      handleApproveError(error)
     }
   }
 
@@ -213,6 +268,36 @@ export function ReleaseActions({
 
   return (
     <div className="space-y-5">
+      {/* Release Gate */}
+      <ReleaseGatePanel lotId={lotId} productId={productId} isReleased={isReleased} />
+
+      {/* Prior-release email notice (shown after a void + re-release) */}
+      {!isReleased && !!gate?.prior_email_recipients.length && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-sky-700">
+            <MailCheck className="h-3.5 w-3.5" />
+            Previously Emailed
+          </div>
+          <p className="mt-1 text-[12px] text-sky-700">
+            This COA was previously sent to {gate.prior_email_recipients.join(", ")}
+            {gate.prior_email_date ? ` on ${formatDate(gate.prior_email_date)}` : ""}.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-2 w-full border-sky-300 text-sky-700 hover:bg-sky-100"
+            onClick={() => {
+              setEmailRecipient(gate.prior_email_recipients[0] ?? "")
+              setShowEmailDialog(true)
+            }}
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Notify Previous Recipients
+          </Button>
+        </div>
+      )}
+
       {/* Product Info Card */}
       <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
         <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3">
@@ -395,6 +480,16 @@ export function ReleaseActions({
               <div>
                 <p className="text-sm font-medium text-red-800">Release Failed</p>
                 <p className="mt-1 text-xs text-red-700">{approveError}</p>
+                {(approveErrorLists?.missing_tests.length || approveErrorLists?.failing_tests.length) ? (
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-red-700">
+                    {approveErrorLists.missing_tests.map((name) => (
+                      <li key={`err-missing-${name}`}>Missing: {name}</li>
+                    ))}
+                    {approveErrorLists.failing_tests.map((name) => (
+                      <li key={`err-failing-${name}`}>Failing: {name}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 {/signature/i.test(approveError) && (
                   <Button
                     variant="link"
@@ -430,14 +525,14 @@ export function ReleaseActions({
 
         {!isReleased && (
           <TooltipProvider>
-            <Tooltip open={hasPendingRetest ? undefined : false}>
+            <Tooltip open={hasPendingRetest || gateBlocked ? undefined : false}>
               <TooltipTrigger asChild>
-                <span className={hasPendingRetest ? "cursor-not-allowed w-full" : "w-full"}>
+                <span className={hasPendingRetest || gateBlocked ? "cursor-not-allowed w-full" : "w-full"}>
                   <Button
                     type="button"
                     className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
                     onClick={handleApproveClick}
-                    disabled={isApproving || hasPendingRetest}
+                    disabled={isApproving || hasPendingRetest || gateBlocked}
                   >
                     {isApproving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -449,10 +544,27 @@ export function ReleaseActions({
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Cannot release while retest is pending</p>
+                <p>
+                  {hasPendingRetest
+                    ? "Cannot release while retest is pending"
+                    : "Resolve blocking gate issues before releasing"}
+                </p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+        )}
+
+        {!isReleased && canAct && gateBlocked && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
+            onClick={() => setShowOverrideDialog(true)}
+            disabled={isApproving}
+          >
+            <ShieldAlert className="h-4 w-4" />
+            Override & Release
+          </Button>
         )}
 
         {isReleased && (
@@ -645,6 +757,55 @@ export function ReleaseActions({
             >
               {returnMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Return for Review
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Override Release Gate Dialog */}
+      <Dialog
+        open={showOverrideDialog}
+        onOpenChange={(open) => { setShowOverrideDialog(open); if (!open) setOverrideReason("") }}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Override Release Gate</DialogTitle>
+            <DialogDescription>
+              This bypasses the blocking gate issues shown above and releases the COA anyway.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-2">
+            <Label htmlFor="overrideReason" className="text-[12px]">
+              Override Reason (required)
+            </Label>
+            <Textarea
+              id="overrideReason"
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="Explain why this release is being overridden..."
+              rows={3}
+              autoFocus
+            />
+            <p className="text-xs text-slate-500">
+              This reason prints on the COA as a deviation.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { setShowOverrideDialog(false); setOverrideReason("") }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleOverrideConfirm}
+              disabled={!overrideReason.trim() || isApproving}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isApproving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Override & Release
             </Button>
           </DialogFooter>
         </DialogContent>

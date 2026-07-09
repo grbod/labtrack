@@ -9,6 +9,7 @@ from app.models import (
     TestResult, User
 )
 from app.models.enums import LotType, LotStatus, TestResultStatus, UserRole
+from app.workflow.lot_workflow_service import set_status_unchecked
 from app.services import (
     ProductService, LotService, ApprovalService, LabTestTypeService
 )
@@ -379,7 +380,7 @@ class TestLotProductTestWorkflow:
         test_db.commit()
         
         # Update lot status to PARTIAL_RESULTS
-        lot.status = LotStatus.PARTIAL_RESULTS
+        set_status_unchecked(lot, LotStatus.PARTIAL_RESULTS)
         test_db.commit()
         
         # Verify we can identify missing tests
@@ -545,7 +546,7 @@ class TestLotProductTestWorkflow:
         assert failed_tests[0]["test"] == "Total Plate Count"
         
         # Lot should be REJECTED due to failed test
-        lot.status = LotStatus.REJECTED
+        set_status_unchecked(lot, LotStatus.REJECTED)
         test_db.commit()
         assert lot.status == LotStatus.REJECTED
 

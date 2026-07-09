@@ -147,10 +147,19 @@ export interface CreateCustomerData {
 export interface COATestResult {
   id?: number  // Test result ID for retest original value matching
   name: string
+  method?: string | null  // TestResult.method (e.g. "USP <2021>")
   result: string
   unit: string | null
-  specification: string
-  status: string  // "Pass" or "Fail"
+  specification: string | null  // null when no spec exists -> render "—"; never fabricated
+  status: string  // "Pass", "Fail", or "—"
+  verdict?: string | null  // machine-readable verdict kind
+}
+
+export interface COANotTestedRow {
+  name: string
+  method?: string | null
+  specification?: string | null
+  status: string  // "Not Tested"
 }
 
 export interface COAPreviewData {
@@ -173,6 +182,11 @@ export interface COAPreviewData {
 
   // Test results
   tests: COATestResult[]
+  not_tested: COANotTestedRow[]
+
+  // Document identity + deviation note (release-gate override, if any)
+  document_id?: string | null
+  deviation_note?: string | null
 
   // Notes
   notes: string | null

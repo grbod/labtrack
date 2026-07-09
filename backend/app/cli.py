@@ -1,23 +1,23 @@
 """Command-line interface for LabTrack."""
 
+from datetime import date, datetime
+
 import click
-from datetime import datetime, date
+import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-import pandas as pd
 
 # Load environment variables
 load_dotenv()
 
 from .config import settings
 from .database import Base, SessionLocal
-from .models import Product, Lot, LotType, LotStatus, UserRole
+from .models import Lot, LotStatus, LotType, Product, UserRole
 from .services import (
-    ProductService,
     LotService,
+    ProductService,
     UserService,
-    COAGeneratorService,
 )
 from .utils.logger import logger
 
@@ -209,33 +209,9 @@ def coa():
     pass
 
 
-@coa.command("generate")
-@click.option("--lot", prompt="Lot number", help="Lot number to generate COA for")
-@click.option("--template", default="standard", help="Template to use")
-@click.option("--format", type=click.Choice(["pdf", "docx", "both"]), default="pdf")
-def generate_coa(lot, template, format):
-    """Generate COA for a lot."""
-    db = SessionLocal()
-    try:
-        # Find lot
-        lot_obj = db.query(Lot).filter_by(lot_number=lot).first()
-        if not lot_obj:
-            click.echo(f"❌ Lot '{lot}' not found", err=True)
-            return
-
-        service = COAGeneratorService(db)
-        result = service.generate_coa(
-            lot_id=lot_obj.id, template=template, output_format=format
-        )
-
-        click.echo("✅ COA generated successfully!")
-        for file in result["files"]:
-            click.echo(f"   📄 {file}")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-    finally:
-        db.close()
+# NOTE: The legacy `coa generate` CLI command was removed along with the dead
+# docx COAGeneratorService. COA PDFs are now produced through the release
+# workflow (app.services.coa_generation_service, driven by coa_context_builder).
 
 
 @coa.command("status")

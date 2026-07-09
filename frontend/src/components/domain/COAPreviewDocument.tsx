@@ -9,6 +9,21 @@ import {
 import { Input } from "@/components/ui/input"
 import type { COAPreviewData } from "@/types/release"
 
+// Status color: Pass=green, Fail=red, everything else ("—", "Not Tested")=muted.
+function statusClass(status: string): string {
+  if (status === "Pass") return "text-[#059669]"
+  if (status === "Fail") return "text-[#dc2626]"
+  return "text-[#94a3b8]"
+}
+
+function cellStyle(isLast: boolean): React.CSSProperties {
+  return {
+    padding: "10px 12px",
+    fontSize: "9pt",
+    borderBottom: isLast ? "none" : "1px solid #e2e8f0",
+  }
+}
+
 interface COAPreviewDocumentProps {
   data: COAPreviewData
   onNotesChange?: (notes: string) => void
@@ -131,7 +146,7 @@ export function COAPreviewDocument({
             Certificate of Analysis
           </h2>
           <p className="text-[#64748b] mt-1" style={{ fontSize: "9pt" }}>
-            Document #: COA-{data.reference_number}
+            Document #: {data.document_id || `COA-${data.reference_number}`}
           </p>
           <p className="text-[#64748b]" style={{ fontSize: "9pt" }}>
             Generated: {data.generated_date}
@@ -286,6 +301,28 @@ export function COAPreviewDocument({
         </div>
       </div>
 
+      {/* Deviation Note (release-gate override) */}
+      {data.deviation_note && (
+        <div
+          className="mb-6 rounded-md"
+          style={{
+            backgroundColor: "#fef2f2",
+            border: "1px solid #f87171",
+            padding: "12px",
+          }}
+        >
+          <h3
+            className="font-semibold text-[#b91c1c] uppercase tracking-wide mb-1"
+            style={{ fontSize: "10pt", letterSpacing: "0.5px" }}
+          >
+            Deviation
+          </h3>
+          <p className="text-[#7f1d1d] whitespace-pre-wrap" style={{ fontSize: "9pt" }}>
+            {data.deviation_note}
+          </p>
+        </div>
+      )}
+
       {/* Test Results Section */}
       <div className="mb-6">
         <h3
@@ -304,124 +341,96 @@ export function COAPreviewDocument({
         >
           <thead>
             <tr style={{ backgroundColor: "#f1f5f9" }}>
-              <th
-                className="text-left font-semibold text-[#475569] uppercase"
-                style={{
-                  padding: "10px 12px",
-                  fontSize: "8pt",
-                  letterSpacing: "0.5px",
-                  borderBottom: "1px solid #e2e8f0",
-                  width: "30%",
-                }}
-              >
-                Test Name
-              </th>
-              <th
-                className="text-left font-semibold text-[#475569] uppercase"
-                style={{
-                  padding: "10px 12px",
-                  fontSize: "8pt",
-                  letterSpacing: "0.5px",
-                  borderBottom: "1px solid #e2e8f0",
-                  width: "20%",
-                }}
-              >
-                Result
-              </th>
-              <th
-                className="text-left font-semibold text-[#475569] uppercase"
-                style={{
-                  padding: "10px 12px",
-                  fontSize: "8pt",
-                  letterSpacing: "0.5px",
-                  borderBottom: "1px solid #e2e8f0",
-                  width: "20%",
-                }}
-              >
-                Specification
-              </th>
-              <th
-                className="text-left font-semibold text-[#475569] uppercase"
-                style={{
-                  padding: "10px 12px",
-                  fontSize: "8pt",
-                  letterSpacing: "0.5px",
-                  borderBottom: "1px solid #e2e8f0",
-                  width: "10%",
-                }}
-              >
-                Status
-              </th>
+              {["Test Name", "Method", "Result", "Specification", "Status"].map((label, i) => (
+                <th
+                  key={label}
+                  className="text-left font-semibold text-[#475569] uppercase"
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: "8pt",
+                    letterSpacing: "0.5px",
+                    borderBottom: "1px solid #e2e8f0",
+                    width: ["26%", "16%", "18%", "22%", "18%"][i],
+                  }}
+                >
+                  {label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {data.tests.length > 0 ? (
-              data.tests.map((test, idx) => (
-                <tr
-                  key={idx}
-                  style={{
-                    backgroundColor: idx % 2 === 1 ? "#f8fafc" : "white",
-                  }}
-                >
-                  <td
-                    className="text-[#0f172a]"
-                    style={{
-                      padding: "10px 12px",
-                      fontSize: "9pt",
-                      borderBottom: idx === data.tests.length - 1 ? "none" : "1px solid #e2e8f0",
-                    }}
-                  >
-                    {test.name}
-                  </td>
-                  <td
-                    className="text-[#0f172a]"
-                    style={{
-                      padding: "10px 12px",
-                      fontSize: "9pt",
-                      borderBottom: idx === data.tests.length - 1 ? "none" : "1px solid #e2e8f0",
-                    }}
-                  >
-                    <div>
-                      {test.result} {test.unit && test.unit}
-                      {/* Show original value if test was retested */}
-                      {test.id && originalValuesMap?.has(test.id) && originalValuesMap.get(test.id) !== test.result && (
-                        <div style={{ fontSize: "7pt", color: "#94a3b8", marginTop: "2px" }}>
-                          Original: {originalValuesMap.get(test.id) || "—"}
+            {data.tests.length > 0 || data.not_tested.length > 0 ? (
+              <>
+                {data.tests.map((test, idx) => {
+                  const isLast =
+                    idx === data.tests.length - 1 && data.not_tested.length === 0
+                  return (
+                    <tr
+                      key={`t-${idx}`}
+                      style={{ backgroundColor: idx % 2 === 1 ? "#f8fafc" : "white" }}
+                    >
+                      <td className="text-[#0f172a]" style={cellStyle(isLast)}>
+                        {test.name}
+                      </td>
+                      <td className="text-[#475569]" style={cellStyle(isLast)}>
+                        {test.method || "—"}
+                      </td>
+                      <td className="text-[#0f172a]" style={cellStyle(isLast)}>
+                        <div>
+                          {test.result} {test.unit && test.unit}
+                          {/* Show original value if test was retested */}
+                          {test.id && originalValuesMap?.has(test.id) && originalValuesMap.get(test.id) !== test.result && (
+                            <div style={{ fontSize: "7pt", color: "#94a3b8", marginTop: "2px" }}>
+                              Original: {originalValuesMap.get(test.id) || "—"}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </td>
-                  <td
-                    className="text-[#0f172a]"
-                    style={{
-                      padding: "10px 12px",
-                      fontSize: "9pt",
-                      borderBottom: idx === data.tests.length - 1 ? "none" : "1px solid #e2e8f0",
-                    }}
-                  >
-                    {test.specification}
-                  </td>
-                  <td
-                    className={test.status === "Pass" ? "text-[#059669] font-semibold" : "text-[#dc2626] font-semibold"}
-                    style={{
-                      padding: "10px 12px",
-                      fontSize: "9pt",
-                      borderBottom: idx === data.tests.length - 1 ? "none" : "1px solid #e2e8f0",
-                    }}
-                  >
-                    {test.status === "Pass" ? "Pass" : "Fail"}
-                  </td>
-                </tr>
-              ))
+                      </td>
+                      <td className="text-[#0f172a]" style={cellStyle(isLast)}>
+                        {test.specification || "—"}
+                      </td>
+                      <td
+                        className={`font-semibold ${statusClass(test.status)}`}
+                        style={cellStyle(isLast)}
+                      >
+                        {test.status}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {data.not_tested.map((row, i) => {
+                  const isLast = i === data.not_tested.length - 1
+                  const idx = data.tests.length + i
+                  return (
+                    <tr
+                      key={`nt-${i}`}
+                      style={{ backgroundColor: idx % 2 === 1 ? "#f8fafc" : "white" }}
+                    >
+                      <td className="text-[#0f172a]" style={cellStyle(isLast)}>
+                        {row.name}
+                      </td>
+                      <td className="text-[#475569]" style={cellStyle(isLast)}>
+                        {row.method || "—"}
+                      </td>
+                      <td className="text-[#94a3b8] italic" style={cellStyle(isLast)}>
+                        Not Tested
+                      </td>
+                      <td className="text-[#0f172a]" style={cellStyle(isLast)}>
+                        {row.specification || "—"}
+                      </td>
+                      <td className="text-[#94a3b8] font-semibold" style={cellStyle(isLast)}>
+                        {row.status}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </>
             ) : (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="text-center text-[#64748b] italic"
-                  style={{
-                    padding: "20px",
-                    fontSize: "9pt",
-                  }}
+                  style={{ padding: "20px", fontSize: "9pt" }}
                 >
                   No test results available
                 </td>

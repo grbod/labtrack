@@ -1,12 +1,12 @@
 """Release schemas for request/response validation."""
 
 from datetime import datetime
-from typing import Optional, List
 from decimal import Decimal
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import COAReleaseStatus, LotType, LotStatus
+from app.models.enums import COAReleaseStatus, LotStatus, LotType
 
 
 # Release Queue Item schema (Lot+Product pairs, NOT COARelease)
@@ -157,7 +157,9 @@ class DraftSaveRequest(BaseModel):
 class SendBackRequest(BaseModel):
     """Request to send release back to QC review."""
 
-    reason: str = Field(..., min_length=1, description="Reason for sending back (required)")
+    reason: str = Field(
+        ..., min_length=1, description="Reason for sending back (required)"
+    )
 
 
 class EmailSendRequest(BaseModel):
@@ -238,13 +240,32 @@ class ApproveByLotProductResponse(BaseModel):
 
 # COA Preview Data schemas
 class COATestResult(BaseModel):
-    """Test result item for COA preview."""
+    """Test result item for COA preview.
 
+    Serialised from a canonical ``coa_context_builder.TestRow``.
+    """
+
+    id: Optional[int] = None
     name: str
+    method: Optional[str] = None  # TestResult.method, e.g. "USP <2021>"
     result: str
     unit: Optional[str] = None
-    specification: str
-    status: str  # "Pass" or "Fail"
+    specification: Optional[str] = (
+        None  # None when no spec exists (render "—"); never fabricated
+    )
+    status: str  # "Pass", "Fail", or "—"
+    verdict: Optional[str] = (
+        None  # machine-readable verdict kind (PASS/FAIL/NO_SPEC/INDETERMINATE/…)
+    )
+
+
+class COANotTestedRow(BaseModel):
+    """A required panel test with no result — rendered as a "Not Tested" row."""
+
+    name: str
+    method: Optional[str] = None
+    specification: Optional[str] = None
+    status: str = "Not Tested"
 
 
 class COAPreviewData(BaseModel):
@@ -269,6 +290,11 @@ class COAPreviewData(BaseModel):
 
     # Test results
     tests: List[COATestResult] = []
+    not_tested: List[COANotTestedRow] = []
+
+    # Document identity + deviation note (from the release gate override, if any)
+    document_id: Optional[str] = None
+    deviation_note: Optional[str] = None
 
     # Notes
     notes: Optional[str] = None

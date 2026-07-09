@@ -1,19 +1,18 @@
 """Services for LabTrack."""
 
-from .base import BaseService
-from .product_service import ProductService
-from .lot_service import LotService
-from .sample_service import SampleService
-from .user_service import UserService
 from .approval_service import ApprovalService
 from .audit_service import AuditService
-from .result_import_service import ResultImportService
-from .coa_generator_service import COAGeneratorService
-from .lab_test_type_service import LabTestTypeService
-from .email_template_service import EmailTemplateService
+from .base import BaseService
 from .customer_service import CustomerService
-from .retest_service import RetestService, retest_service
 from .daane_coc_service import DaaneCOCService, daane_coc_service
+from .email_template_service import EmailTemplateService
+from .lab_test_type_service import LabTestTypeService
+from .lot_service import LotService
+from .product_service import ProductService
+from .result_import_service import ResultImportService
+from .retest_service import RetestService, retest_service
+from .sample_service import SampleService
+from .user_service import UserService
 
 __all__ = [
     "BaseService",
@@ -24,7 +23,6 @@ __all__ = [
     "ApprovalService",
     "AuditService",
     "ResultImportService",
-    "COAGeneratorService",
     "LabTestTypeService",
     "EmailTemplateService",
     "CustomerService",

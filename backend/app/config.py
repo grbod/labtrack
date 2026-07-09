@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     enable_email_notifications: bool = Field(default=False, env="ENABLE_EMAIL")
     enable_audit_logging: bool = Field(default=True, env="ENABLE_AUDIT")
     enable_ai_parsing: bool = Field(default=True, env="ENABLE_AI_PARSING")
+    workflow_enforce_transitions: bool = Field(
+        default=False, env="WORKFLOW_ENFORCE_TRANSITIONS"
+    )
 
     # Limits
     max_upload_size_mb: int = Field(default=10, env="MAX_UPLOAD_SIZE_MB")

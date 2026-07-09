@@ -440,19 +440,17 @@ export function SampleModal({
     return rows
   }, [testResultsData, mergedTestSpecs, lot?.id])
 
-  // Check if there are any failing tests (for retest button visibility)
-  const hasFailingTests = useMemo(() => {
-    return testResultRows.some((r) => r.passFailStatus === "fail")
+  // Count failing tests (drives the retest button + the submit-with-warning note)
+  const failingCount = useMemo(() => {
+    return testResultRows.filter((r) => r.passFailStatus === "fail").length
   }, [testResultRows])
+  const hasFailingTests = failingCount > 0
 
-  const allTestsPassing = useMemo(() => {
-    if (testResultRows.length === 0) return false
-    return testResultRows.every((r) => r.passFailStatus === "pass")
-  }, [testResultRows])
-
+  // Failing lots may still be submitted for review — the server-side release
+  // gate enforces FAIL downstream (QC Manager/Admin override or retest at
+  // release), and a non-blocking warning is shown near the submit button.
   const canSubmitForReview =
-    (currentStatus === "under_review" || currentStatus === "needs_attention") &&
-    allTestsPassing
+    currentStatus === "under_review" || currentStatus === "needs_attention"
 
   // Separate spec tests from additional tests
   const { specTests, additionalTests } = useMemo(() => {
@@ -1416,6 +1414,17 @@ export function SampleModal({
 
             {/* Right side - Submit and Save buttons */}
             <div className="flex items-center gap-2">
+              {/* Non-blocking warning: failing lots can still be submitted; QC
+                  resolves the FAIL downstream (override or retest at release). */}
+              {canSubmitForReview && hasFailingTests && (
+                <div className="flex items-center gap-1.5 text-[12px] font-medium text-amber-700">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" />
+                  <span>
+                    {failingCount} test{failingCount === 1 ? "" : "s"} fail specification. QC will
+                    need to override or send for retest at release
+                  </span>
+                </div>
+              )}
               {/* Submit for Approval action (available to any authenticated user for under_review status) */}
               {canSubmitForReview && (
                 <Button

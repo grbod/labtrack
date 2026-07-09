@@ -20,6 +20,7 @@ from app.models import (
     UserRole,
 )
 from app.models.enums import LotStatus, LotType
+from app.workflow.lot_workflow_service import set_status_unchecked
 from app.schemas.result_import import RowAction
 from app.services.lab_test_alias_service import normalize_alias_key
 from app.services.release_service import ReleaseService
@@ -685,7 +686,7 @@ def test_confirm_audits_awaiting_release_pullback(
     sample_user,
     sample_product_with_specs,
 ):
-    sample_lot.status = LotStatus.AWAITING_RELEASE
+    set_status_unchecked(sample_lot, LotStatus.AWAITING_RELEASE)
     test_db.commit()
 
     import_row = ResultImport(
@@ -899,7 +900,7 @@ def test_confirm_pulls_awaiting_release_lot_out_of_release_queue(
     sample_user,
     sample_product_with_specs,
 ):
-    sample_lot.status = LotStatus.AWAITING_RELEASE
+    set_status_unchecked(sample_lot, LotStatus.AWAITING_RELEASE)
     import_row = ResultImport(
         original_filename="coa.pdf",
         storage_key="pdfs/result-imports/coa.pdf",

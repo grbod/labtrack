@@ -1,16 +1,22 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, ArrowRight, Download, ExternalLink, Loader2, Mail, X } from "lucide-react"
+import { toast } from "sonner"
+import { ArrowLeft, ArrowRight, Ban, Download, ExternalLink, Loader2, Mail, X } from "lucide-react"
 import {
   Dialog,
   DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { COAPreview } from "@/components/domain/COAPreview"
+import { useVoidRelease } from "@/hooks/useRelease"
+import { useAuthStore } from "@/store/auth"
 import type { ArchiveItem } from "@/types/release"
 
 interface ReleasedCOAPreviewModalProps {
@@ -45,6 +51,11 @@ export function ReleasedCOAPreviewModal({
   isDownloading,
 }: ReleasedCOAPreviewModalProps) {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === "admin"
+  const voidRelease = useVoidRelease()
+  const [showVoidDialog, setShowVoidDialog] = useState(false)
+  const [voidReason, setVoidReason] = useState("")
   const currentIndex = useMemo(() => {
     if (!currentItem) return -1
     const currentKey = itemKey(currentItem)
@@ -93,6 +104,22 @@ export function ReleasedCOAPreviewModal({
     }
   }
 
+  const handleVoidConfirm = async () => {
+    if (!currentItem || !voidReason.trim()) return
+    try {
+      await voidRelease.mutateAsync({
+        releaseId: currentItem.id,
+        reason: voidReason.trim(),
+      })
+      toast.success("Release voided and returned to the queue")
+      setShowVoidDialog(false)
+      setVoidReason("")
+      onCurrentItemChange(null)
+    } catch {
+      /* useVoidRelease surfaces its own error toast */
+    }
+  }
+
   if (!currentItem || currentIndex === -1) {
     return null
   }
@@ -100,6 +127,7 @@ export function ReleasedCOAPreviewModal({
   const downloading = isDownloading(currentItem.lot_id, currentItem.product_id)
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
@@ -183,6 +211,18 @@ export function ReleasedCOAPreviewModal({
                 <ExternalLink className="h-4 w-4" />
                 Open Full Detail
               </Button>
+              {isAdmin && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-red-200 text-red-700 hover:bg-red-50"
+                  onClick={() => setShowVoidDialog(true)}
+                >
+                  <Ban className="h-4 w-4" />
+                  Void &amp; Return to Queue
+                </Button>
+              )}
               <div className="mx-0.5 h-5 w-px bg-slate-200" />
               <DialogClose asChild>
                 <Button
@@ -207,5 +247,58 @@ export function ReleasedCOAPreviewModal({
         </div>
       </DialogContent>
     </Dialog>
+
+    <Dialog
+      open={showVoidDialog}
+      onOpenChange={(nextOpen) => {
+        setShowVoidDialog(nextOpen)
+        if (!nextOpen) setVoidReason("")
+      }}
+    >
+      <DialogContent className="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>Void Release</DialogTitle>
+          <DialogDescription>
+            This returns the lot to the release queue. The COA must be re-approved
+            before it can be released again.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label htmlFor="voidReason" className="text-[12px]">
+            Reason (required)
+          </Label>
+          <Textarea
+            id="voidReason"
+            value={voidReason}
+            onChange={(e) => setVoidReason(e.target.value)}
+            placeholder="Why is this release being voided?"
+            rows={3}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setShowVoidDialog(false)
+              setVoidReason("")
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleVoidConfirm}
+            disabled={!voidReason.trim() || voidRelease.isPending}
+            className="bg-red-600 text-white hover:bg-red-700"
+          >
+            {voidRelease.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Void &amp; Return to Queue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

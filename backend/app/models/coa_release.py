@@ -1,7 +1,18 @@
 """COARelease model for tracking COA release workflow."""
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index, JSON
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
+
 from app.models.base import BaseModel
 from app.models.enums import COAReleaseStatus
 
@@ -36,21 +47,36 @@ class COARelease(BaseModel):
     status = Column(
         Enum(COAReleaseStatus),
         nullable=False,
-        default=COAReleaseStatus.AWAITING_RELEASE
+        default=COAReleaseStatus.AWAITING_RELEASE,
     )
     released_at = Column(DateTime, nullable=True)
     released_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     coa_file_path = Column(String(500), nullable=True)
     draft_data = Column(JSON, nullable=True)  # {customer_id, notes} auto-saved
     send_back_reason = Column(Text, nullable=True)
+    # Release-gate override deviation note. Persisted here so the context builder
+    # can print it on the COA (context.document.deviation_note).
+    deviation_note = Column(Text, nullable=True)
+    # Void trail: when an admin voids a released COA and returns the lot to the
+    # release queue, the reason and actor are recorded here. voided_at is the
+    # signal used by the re-release "prior email" notice.
+    voided_note = Column(Text, nullable=True)
+    voided_at = Column(DateTime, nullable=True)
+    voided_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Relationships
     lot = relationship("Lot", back_populates="coa_releases")
     product = relationship("Product")
     customer = relationship("Customer", back_populates="coa_releases")
-    released_by = relationship("User")
+    released_by = relationship("User", foreign_keys=[released_by_id])
+    voided_by = relationship("User", foreign_keys=[voided_by_id])
     email_history = relationship(
         "EmailHistory", back_populates="coa_release", cascade="all, delete-orphan"
+    )
+    sensory_attests = relationship(
+        "ReleaseSensoryAttest",
+        back_populates="release",
+        cascade="all, delete-orphan",
     )
 
     # Indexes for performance
@@ -80,16 +106,14 @@ class COARelease(BaseModel):
     def release(self, user_id: int):
         """Mark COA as released."""
         from datetime import datetime
+
         self.status = COAReleaseStatus.RELEASED
         self.released_at = datetime.utcnow()
         self.released_by_id = user_id
 
     def save_draft(self, customer_id: int = None, notes: str = None):
         """Save draft data for auto-restore."""
-        self.draft_data = {
-            "customer_id": customer_id,
-            "notes": notes
-        }
+        self.draft_data = {"customer_id": customer_id, "notes": notes}
 
     def restore_draft(self):
         """Restore draft data."""

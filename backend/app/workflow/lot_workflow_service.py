@@ -14,6 +14,7 @@ from app.models.lot import Lot
 from app.models.product_test_spec import ProductTestSpecification
 from app.models.test_result import TestResult
 from app.services.base import BaseService
+from app.utils.logger import logger
 from app.workflow.lot_state_machine import (
     TransitionContext,
     TransitionResult,
@@ -21,6 +22,19 @@ from app.workflow.lot_state_machine import (
 )
 
 _TRANSITION_TOKEN_ATTR = "_lot_workflow_transition_token"
+
+
+class _ActorRef:
+    """Lightweight actor for auto transitions where only an id is known.
+
+    Role is irrelevant to the auto path; ``None`` role is acceptable.
+    """
+
+    __slots__ = ("id", "role")
+
+    def __init__(self, actor_id):
+        self.id = actor_id
+        self.role = None
 
 
 class WorkflowTransitionError(ValueError):
@@ -85,6 +99,106 @@ class LotWorkflowService(BaseService[Lot]):
         db.flush()
         return lot
 
+    def apply_auto(
+        self,
+        db: Session,
+        lot: Lot,
+        target: LotStatus,
+        *,
+        actor_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Lot:
+        """Apply an auto-recalculated lot status.
+
+        The decision (target) is computed upstream by
+        ``LotService.calculate_lot_status``. This routes the *application*
+        through the canonical machine as ``trigger="auto"``. When the pure
+        machine's independent recomputation disagrees with the legacy
+        calculator (a known, tolerated divergence while both coexist), the
+        change is still applied via the guard token so recalculation behaviour
+        is preserved; the divergence is logged rather than silently swallowed.
+        """
+        if lot.status == target:
+            return lot
+        actor = _ActorRef(actor_id)
+        try:
+            return self.transition(
+                db, lot, target, actor, reason=reason, trigger="auto"
+            )
+        except WorkflowTransitionError as exc:
+            logger.debug(
+                "auto-transition {}->{} diverged from state machine ({}); "
+                "applying computed status directly",
+                lot.status.value if lot.status else None,
+                target.value,
+                exc.code,
+            )
+            return self._apply_direct(
+                db,
+                lot,
+                target,
+                actor_id=actor_id,
+                reason=reason,
+                trigger="auto",
+                override=False,
+            )
+
+    def apply_system(
+        self,
+        db: Session,
+        lot: Lot,
+        target: LotStatus,
+        *,
+        actor_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Lot:
+        """Apply a system-driven status change that is not a QC-facing gate.
+
+        Used for internal corrections (e.g. pulling a lot back out of the
+        release queue when a late result import arrives) that the canonical
+        manual gates model as QC actions. Bypasses validation but still flows
+        through the service so the enforcement guard is satisfied and an audit
+        row is written.
+        """
+        if lot.status == target:
+            return lot
+        return self._apply_direct(
+            db,
+            lot,
+            target,
+            actor_id=actor_id,
+            reason=reason,
+            trigger="system",
+            override=False,
+        )
+
+    def _apply_direct(
+        self,
+        db: Session,
+        lot: Lot,
+        target: LotStatus,
+        *,
+        actor_id: Optional[int],
+        reason: Optional[str],
+        trigger: str,
+        override: bool,
+    ) -> Lot:
+        old_status = lot.status
+        with _allow_lot_status_assignment(lot):
+            lot.status = target
+        self._log_audit(
+            db=db,
+            action=self._audit_action(target, override),
+            record_id=lot.id,
+            old_values={"status": old_status.value if old_status else None},
+            new_values={"status": target.value},
+            user_id=actor_id,
+            reason=reason,
+            metadata={"trigger": trigger, "override": override},
+        )
+        db.flush()
+        return lot
+
     def build_context(
         self,
         db: Session,
@@ -124,6 +238,8 @@ class LotWorkflowService(BaseService[Lot]):
             return AuditAction.OVERRIDE
         if target == LotStatus.REJECTED:
             return AuditAction.REJECT
+        if target == LotStatus.RELEASED:
+            return AuditAction.APPROVE
         return AuditAction.UPDATE
 
 
@@ -215,7 +331,10 @@ def _machine_fail_tests(
             continue
 
         verdict_kind = getattr(verdict, "kind", verdict)
-        if verdict_kind in {VerdictKind.FAIL, VerdictKind.INDETERMINATE}:
+        # Only a hard FAIL blocks the gate. INDETERMINATE is surfaced as an
+        # amber, non-blocking warning by the release gate service (the human
+        # release decision resolves it), so it is not a machine fail here.
+        if verdict_kind == VerdictKind.FAIL:
             failing.append(result.test_type)
 
     return failing
@@ -234,6 +353,17 @@ def _is_legacy_import(lot: Lot) -> bool:
         getattr(lot, "legacy_import", False)
         or getattr(lot, "imported_from_register", False)
     )
+
+
+def set_status_unchecked(lot: Lot, status: LotStatus) -> None:
+    """Assign a lot status while bypassing the enforcement guard.
+
+    For seed/fixture/scaffolding code that sets up initial state directly (the
+    canonical transitions are exercised by the application paths). Not for
+    production workflow transitions — use ``LotWorkflowService.transition``.
+    """
+    with _allow_lot_status_assignment(lot):
+        lot.status = status
 
 
 @contextmanager

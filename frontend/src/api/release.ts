@@ -9,6 +9,7 @@ import type {
   SaveDraftData,
   CreateCustomerData,
   COAPreviewData,
+  ReleaseGateStatus,
 } from "@/types/release"
 import type { PaginatedResponse } from "@/types"
 
@@ -86,17 +87,46 @@ export const releaseApi = {
     return response.data
   },
 
-  /** Approve and release a lot/product */
+  /** Approve and release a lot/product. `override`/`overrideReason` bypass a blocked
+   *  release gate (QC Manager/Admin only) and print the reason on the COA as a deviation. */
   approve: async (
     lotId: number,
     productId: number,
     customerId?: number,
-    notes?: string
+    notes?: string,
+    override?: boolean,
+    overrideReason?: string
   ): Promise<ReleaseDetails> => {
     const response = await api.post<ReleaseDetails>(`/release/${lotId}/${productId}/approve`, {
       customer_id: customerId,
       notes,
+      override,
+      override_reason: overrideReason,
     })
+    return response.data
+  },
+
+  /** Get the release gate status (missing/failing tests, sensory checklist, etc.) */
+  getGate: async (lotId: number, productId: number): Promise<ReleaseGateStatus> => {
+    const response = await api.get<ReleaseGateStatus>(`/release/${lotId}/${productId}/gate`)
+    return response.data
+  },
+
+  /** Attest sensory/organoleptic rows for a release (QC Manager or Admin) */
+  attestSensory: async (
+    lotId: number,
+    productId: number,
+    labTestTypeIds: number[]
+  ): Promise<ReleaseGateStatus> => {
+    const response = await api.post<ReleaseGateStatus>(`/release/${lotId}/${productId}/attest`, {
+      lab_test_type_ids: labTestTypeIds,
+    })
+    return response.data
+  },
+
+  /** Void a released COA and return the lot to the release queue (Admin only) */
+  voidRelease: async (releaseId: number, reason: string): Promise<ReleaseDetails> => {
+    const response = await api.post<ReleaseDetails>(`/release/${releaseId}/void`, { reason })
     return response.data
   },
 

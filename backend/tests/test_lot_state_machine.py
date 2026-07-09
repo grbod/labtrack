@@ -22,6 +22,7 @@ from app.workflow.lot_state_machine import (
 from app.workflow.lot_workflow_service import (
     LotWorkflowService,
     WorkflowTransitionError,
+    set_status_unchecked,
 )
 
 
@@ -327,7 +328,7 @@ def test_service_context_counts_results_and_excludes_sensory_required_tests(
 def test_service_transition_applies_status_and_writes_audit(
     test_db, sample_lot, sample_user
 ):
-    sample_lot.status = LotStatus.UNDER_REVIEW
+    set_status_unchecked(sample_lot, LotStatus.UNDER_REVIEW)
     test_db.add(
         ResultRecord(
             lot_id=sample_lot.id,
@@ -362,7 +363,7 @@ def test_service_transition_applies_status_and_writes_audit(
 def test_service_legacy_import_exempts_completeness_only(
     test_db, sample_lot, sample_user
 ):
-    sample_lot.status = LotStatus.UNDER_REVIEW
+    set_status_unchecked(sample_lot, LotStatus.UNDER_REVIEW)
     sample_lot.legacy_import = True
     tpc = LabTestType(
         test_name="Total Plate Count",
@@ -396,7 +397,7 @@ def test_service_legacy_import_exempts_completeness_only(
 def test_service_legacy_import_does_not_exempt_unapproved_results(
     test_db, sample_lot, sample_user
 ):
-    sample_lot.status = LotStatus.UNDER_REVIEW
+    set_status_unchecked(sample_lot, LotStatus.UNDER_REVIEW)
     sample_lot.legacy_import = True
     test_db.add(
         ResultRecord(

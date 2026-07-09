@@ -199,7 +199,13 @@ class Lot(BaseModel):
             # Store override reason in rejection_reason field (reused for override notes)
             self.rejection_reason = f"[QC Override] {override_reason.strip()}"
 
-        self.status = new_status
+        # This model method validates the transition via can_transition_to above;
+        # route the assignment through the workflow guard token so the enforcement
+        # guard permits it (it validates rather than skipping validation).
+        from app.workflow.lot_workflow_service import _allow_lot_status_assignment
+
+        with _allow_lot_status_assignment(self):
+            self.status = new_status
 
     def __repr__(self):
         """String representation of Lot."""

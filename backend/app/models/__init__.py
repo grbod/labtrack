@@ -28,6 +28,7 @@ from app.models.lot import Lot, LotProduct, Sublot
 from app.models.product import Product
 from app.models.product_size import ProductSize
 from app.models.product_test_spec import ProductTestSpecification
+from app.models.release_sensory_attest import ReleaseSensoryAttest
 from app.models.result_import import ResultImport, ResultImportLedger
 from app.models.retest_request import RetestItem, RetestRequest
 from app.models.test_result import TestResult
@@ -64,6 +65,7 @@ __all__ = [
     "ProductTestSpecification",
     "Customer",
     "COARelease",
+    "ReleaseSensoryAttest",
     "EmailHistory",
     "EmailTemplate",
     "COACategoryOrder",

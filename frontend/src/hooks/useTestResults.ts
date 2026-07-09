@@ -101,10 +101,13 @@ export function useApproveTestResult() {
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to approve test result"))
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: testResultKeys.lists() })
       queryClient.invalidateQueries({ queryKey: testResultKeys.detail(variables.id) })
       queryClient.invalidateQueries({ queryKey: testResultKeys.pendingCount() })
+      if (result.self_approval_warning) {
+        toast.warning("You approved a result you entered yourself.")
+      }
     },
   })
 }
@@ -118,9 +121,17 @@ export function useBulkApproveTestResults() {
     onError: (error: unknown) => {
       toast.error(extractApiErrorMessage(error, "Failed to bulk approve test results"))
     },
-    onSuccess: () => {
+    onSuccess: (results) => {
       queryClient.invalidateQueries({ queryKey: testResultKeys.lists() })
       queryClient.invalidateQueries({ queryKey: testResultKeys.pendingCount() })
+      const selfApprovedCount = results.filter((r) => r.self_approval_warning).length
+      if (selfApprovedCount > 0) {
+        toast.warning(
+          selfApprovedCount === 1
+            ? "You approved a result you entered yourself."
+            : `You approved ${selfApprovedCount} results you entered yourself.`
+        )
+      }
     },
   })
 }

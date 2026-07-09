@@ -1,16 +1,17 @@
 """Release service for managing COA release workflow."""
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from sqlalchemy.orm import Session, joinedload
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy import and_
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.coa_release import COARelease
 from app.models.email_history import EmailHistory
+from app.models.enums import AuditAction, COAReleaseStatus, LotStatus
 from app.models.lot import Lot
 from app.models.test_result import TestResult
 from app.models.user import User
-from app.models.enums import COAReleaseStatus, LotStatus, AuditAction
 from app.services.base import BaseService
 from app.utils.logger import logger
 
@@ -263,7 +264,9 @@ class ReleaseService(BaseService[COARelease]):
             old_values=old_values,
             new_values={
                 "status": release.status.value,
-                "released_at": release.released_at.isoformat() if release.released_at else None,
+                "released_at": (
+                    release.released_at.isoformat() if release.released_at else None
+                ),
                 "released_by_id": user_id,
             },
             user_id=user_id,
@@ -312,7 +315,9 @@ class ReleaseService(BaseService[COARelease]):
         if not user:
             raise ValueError("User not found")
         if not user.can_approve:
-            raise ValueError(f"User {user.username} does not have permission to send back")
+            raise ValueError(
+                f"User {user.username} does not have permission to send back"
+            )
 
         # Check current status
         if release.status != COAReleaseStatus.AWAITING_RELEASE:
@@ -330,18 +335,16 @@ class ReleaseService(BaseService[COARelease]):
         # Update lot status back to UNDER_REVIEW
         lot = release.lot
         if lot:
-            old_lot_status = lot.status
-            lot.status = LotStatus.UNDER_REVIEW
+            # QC send-back from the release queue: canonical return-for-review.
+            from app.workflow.lot_workflow_service import LotWorkflowService
 
-            # Log lot status change
-            self._log_audit(
-                db=db,
-                action=AuditAction.UPDATE,
-                record_id=lot.id,
-                old_values={"status": old_lot_status.value},
-                new_values={"status": lot.status.value},
-                user_id=user_id,
+            LotWorkflowService().transition(
+                db,
+                lot,
+                LotStatus.UNDER_REVIEW,
+                user,
                 reason=f"Sent back from release: {reason}",
+                trigger="manual",
             )
 
         # Log release audit
@@ -440,34 +443,28 @@ class ReleaseService(BaseService[COARelease]):
             user_id: ID of user triggering the check
         """
         # Get all COARelease for this lot
-        releases = (
-            db.query(COARelease)
-            .filter(COARelease.lot_id == lot_id)
-            .all()
-        )
+        releases = db.query(COARelease).filter(COARelease.lot_id == lot_id).all()
 
         if not releases:
             return
 
         # Check if all are released
-        all_released = all(
-            r.status == COAReleaseStatus.RELEASED for r in releases
-        )
+        all_released = all(r.status == COAReleaseStatus.RELEASED for r in releases)
 
         if all_released:
             lot = db.query(Lot).filter(Lot.id == lot_id).first()
             if lot and lot.status == LotStatus.APPROVED:
-                old_status = lot.status
-                lot.status = LotStatus.RELEASED
+                # Legacy path: lots do not reach APPROVED in the canonical flow
+                # (they go AWAITING_RELEASE -> RELEASED directly). Kept for
+                # backward compatibility; routed through the service so the
+                # enforcement guard permits the assignment.
+                from app.workflow.lot_workflow_service import LotWorkflowService
 
-                # Log the change
-                self._log_audit(
-                    db=db,
-                    action=AuditAction.UPDATE,
-                    record_id=lot.id,
-                    old_values={"status": old_status.value},
-                    new_values={"status": lot.status.value},
-                    user_id=user_id,
+                LotWorkflowService().apply_system(
+                    db,
+                    lot,
+                    LotStatus.RELEASED,
+                    actor_id=user_id,
                     reason="All COAs released",
                 )
 

@@ -178,6 +178,8 @@ export interface TestResult {
   // Extended fields
   lot_number?: string
   lot_reference?: string
+  // True when the current user both entered and approved this result
+  self_approval_warning?: boolean
 }
 
 export type ResultImportStatus =

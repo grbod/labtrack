@@ -7,9 +7,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
-from app.dependencies import CurrentUser, DbSession, QCManagerOrAdmin
+from app.dependencies import AdminUser, CurrentUser, DbSession, QCManagerOrAdmin
 from app.models.coa_release import COARelease
-from app.models.enums import AuditAction
+from app.models.enums import AuditAction, COAReleaseStatus
 from app.models.lot import Lot
 from app.schemas.release import (
     ApproveByLotProductRequest,
@@ -27,9 +27,12 @@ from app.schemas.release import (
     LotInRelease,
     ProductInRelease,
     ReleaseDetailsByLotProduct,
+    ReleaseGateStatus,
     ReleaseQueueItem,
     ReleaseQueueResponse,
     SendBackRequest,
+    SensoryAttestRequest,
+    VoidReleaseRequest,
 )
 from app.services.audit_service import AuditService
 from app.services.coa_generation_service import coa_generation_service
@@ -489,9 +492,6 @@ async def approve_release_by_lot_product(
             detail=f"Lot must be in 'awaiting_release' status. Current status: {lot.status.value}",
         )
 
-    # Capture old lot status for audit
-    old_lot_status = lot.status.value
-
     # Validate product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -544,10 +544,41 @@ async def approve_release_by_lot_product(
         db.add(coa_release)
         db.flush()
 
+    # --- Release gate -----------------------------------------------------
+    from app.services.release_gate_service import compute_gate
+    from app.workflow.lot_workflow_service import (
+        LotWorkflowService,
+        WorkflowTransitionError,
+    )
+
+    override = bool(getattr(request, "override", False))
+    override_reason = (getattr(request, "override_reason", None) or "").strip() or None
+
+    if override and not override_reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Override requires a reason (it prints on the COA as a deviation).",
+        )
+
+    gate = compute_gate(db, lot_id, product_id, release=coa_release)
+    if not gate.can_release and not override:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "GATE_BLOCKED",
+                "reason": "; ".join(gate.blocking_reasons)
+                or "Release gate not satisfied",
+                "missing_tests": gate.missing_tests,
+                "failing_tests": [t.name for t in gate.failing_tests],
+            },
+        )
+
     # Mark as released
     coa_release.status = COAReleaseStatus.RELEASED
     coa_release.released_at = datetime.utcnow()
     coa_release.released_by_id = current_user.id
+    if override:
+        coa_release.deviation_note = override_reason
 
     # Generate COA PDF
     try:
@@ -575,34 +606,45 @@ async def approve_release_by_lot_product(
 
     all_products_released = all_product_ids == released_product_ids
 
-    # Update lot status to RELEASED if all products are released
-    if all_products_released:
-        lot.status = LotStatus.RELEASED
-
     # Log COARelease status change to audit trail
     audit_service.log_action(
         db=db,
         table_name="coa_releases",
         record_id=coa_release.id,
-        action=AuditAction.UPDATE,
+        action=AuditAction.OVERRIDE if override else AuditAction.UPDATE,
         user_id=current_user.id,
         old_values={"status": old_coa_status} if old_coa_status else None,
         new_values={"status": coa_release.status.value},
-        reason=f"COA released for {product.product_name}",
+        reason=(
+            f"COA released for {product.product_name} (override: {override_reason})"
+            if override
+            else f"COA released for {product.product_name}"
+        ),
     )
 
-    # Log lot status change to RELEASED if applicable
+    # Move the lot to RELEASED once every product is released. The canonical
+    # transition re-validates role / machine-fails (override honoured).
     if all_products_released:
-        audit_service.log_action(
-            db=db,
-            table_name="lots",
-            record_id=lot_id,
-            action=AuditAction.APPROVE,
-            user_id=current_user.id,
-            old_values={"status": old_lot_status},
-            new_values={"status": lot.status.value},
-            reason="All products released - COA approved",
-        )
+        try:
+            LotWorkflowService().transition(
+                db,
+                lot,
+                LotStatus.RELEASED,
+                current_user,
+                reason=override_reason or "All products released - COA approved",
+                override=override,
+                trigger="manual",
+            )
+        except WorkflowTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": exc.code,
+                    "reason": exc.reason,
+                    "missing_tests": gate.missing_tests,
+                    "failing_tests": [t.name for t in gate.failing_tests],
+                },
+            )
 
     db.commit()
     db.refresh(coa_release)
@@ -613,6 +655,199 @@ async def approve_release_by_lot_product(
         coa_release_id=coa_release.id,
         lot_status=lot.status,
         all_products_released=all_products_released,
+    )
+
+
+@router.get("/{lot_id}/{product_id}/gate", response_model=ReleaseGateStatus)
+async def get_release_gate(
+    lot_id: int,
+    product_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReleaseGateStatus:
+    """Green/amber/red release gate for a (lot, product) pair.
+
+    Exposes required-test completeness, per-test verdicts, the sensory attest
+    checklist, the legacy-import exemption state, and the prior-email notice for
+    a re-release after a void.
+    """
+    from app.services.release_gate_service import compute_gate
+
+    release = (
+        db.query(COARelease)
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
+        .first()
+    )
+    try:
+        return compute_gate(db, lot_id, product_id, release=release)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.post("/{lot_id}/{product_id}/attest", response_model=ReleaseGateStatus)
+async def attest_sensory_rows(
+    lot_id: int,
+    product_id: int,
+    request: SensoryAttestRequest,
+    db: DbSession,
+    current_user: QCManagerOrAdmin,
+) -> ReleaseGateStatus:
+    """Attest sensory/organoleptic rows for a release (QC Manager or Admin)."""
+    from datetime import datetime
+
+    from app.models.release_sensory_attest import ReleaseSensoryAttest
+    from app.services.release_gate_service import compute_gate
+
+    # Find or create the release row so attests can hang off it.
+    release = (
+        db.query(COARelease)
+        .filter(COARelease.lot_id == lot_id, COARelease.product_id == product_id)
+        .first()
+    )
+    if release is None:
+        release = COARelease(
+            lot_id=lot_id,
+            product_id=product_id,
+            status=COAReleaseStatus.AWAITING_RELEASE,
+        )
+        db.add(release)
+        db.flush()
+
+    if release.status == COAReleaseStatus.RELEASED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot attest a released COA",
+        )
+
+    existing = {
+        a.lab_test_type_id
+        for a in db.query(ReleaseSensoryAttest)
+        .filter(ReleaseSensoryAttest.release_id == release.id)
+        .all()
+    }
+    for lab_test_type_id in request.lab_test_type_ids:
+        if lab_test_type_id in existing:
+            continue
+        db.add(
+            ReleaseSensoryAttest(
+                release_id=release.id,
+                lab_test_type_id=lab_test_type_id,
+                attested_by_id=current_user.id,
+                attested_at=datetime.utcnow(),
+            )
+        )
+        audit_service.log_action(
+            db=db,
+            table_name="release_sensory_attests",
+            record_id=release.id,
+            action=AuditAction.APPROVE,
+            user_id=current_user.id,
+            new_values={"lab_test_type_id": lab_test_type_id},
+            reason="Sensory row attested",
+        )
+
+    db.commit()
+    db.refresh(release)
+    return compute_gate(db, lot_id, product_id, release=release)
+
+
+@router.post("/{release_id}/void", response_model=ReleaseDetailsByLotProduct)
+async def void_release(
+    release_id: int,
+    request: VoidReleaseRequest,
+    db: DbSession,
+    current_user: AdminUser,
+) -> ReleaseDetailsByLotProduct:
+    """Void a released COA and return the lot to the release queue (Admin only)."""
+    from datetime import datetime
+
+    from app.models import Product
+    from app.models.enums import LotStatus
+    from app.workflow.lot_workflow_service import (
+        LotWorkflowService,
+        WorkflowTransitionError,
+    )
+
+    reason = (request.reason or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to void a release",
+        )
+
+    release = db.query(COARelease).filter(COARelease.id == release_id).first()
+    if not release:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Release not found"
+        )
+    if release.status != COAReleaseStatus.RELEASED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only a released COA can be voided",
+        )
+
+    lot = db.query(Lot).filter(Lot.id == release.lot_id).first()
+
+    # Return the lot to the queue via the canonical VOID path (admin + reason).
+    if lot is not None and lot.status == LotStatus.RELEASED:
+        try:
+            LotWorkflowService().transition(
+                db,
+                lot,
+                LotStatus.AWAITING_RELEASE,
+                current_user,
+                reason=f"Voided release: {reason}",
+                trigger="manual",
+            )
+        except WorkflowTransitionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": exc.code, "reason": exc.reason},
+            )
+
+    # Reset the release back to a pending-equivalent state, keeping the void
+    # trail (voided_at drives the re-release "prior email" notice).
+    old_coa_status = release.status.value
+    release.status = COAReleaseStatus.AWAITING_RELEASE
+    release.voided_note = reason
+    release.voided_at = datetime.utcnow()
+    release.voided_by_id = current_user.id
+    release.released_at = None
+    release.released_by_id = None
+    release.coa_file_path = None
+
+    audit_service.log_action(
+        db=db,
+        table_name="coa_releases",
+        record_id=release.id,
+        action=AuditAction.VOID,
+        user_id=current_user.id,
+        old_values={"status": old_coa_status},
+        new_values={"status": release.status.value},
+        reason=f"Release voided: {reason}",
+    )
+
+    db.commit()
+    db.refresh(release)
+
+    product = db.query(Product).filter(Product.id == release.product_id).first()
+    source_pdfs = release_service.get_source_pdfs(db, release.lot_id)
+    return ReleaseDetailsByLotProduct(
+        lot_id=release.lot_id,
+        product_id=release.product_id,
+        status="awaiting_release",
+        customer_id=release.customer_id,
+        notes=release.notes,
+        released_at=None,
+        draft_data=release.draft_data,
+        lot=LotInRelease.model_validate(lot),
+        product=ProductInRelease.model_validate(product),
+        source_pdfs=source_pdfs,
+        customer=(
+            CustomerInRelease.model_validate(release.customer)
+            if release.customer
+            else None
+        ),
     )
 
 

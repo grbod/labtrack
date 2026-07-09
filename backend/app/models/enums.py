@@ -25,9 +25,13 @@ class LotStatus(str, enum.Enum):
 
     AWAITING_RESULTS = "awaiting_results"
     PARTIAL_RESULTS = "partial_results"  # Some results in, missing required tests
-    NEEDS_ATTENTION = "needs_attention"  # All required tests complete but some fail specs
+    NEEDS_ATTENTION = (
+        "needs_attention"  # All required tests complete but some fail specs
+    )
     UNDER_REVIEW = "under_review"  # All required tests complete and pass
-    AWAITING_RELEASE = "awaiting_release"  # Lab Tech submitted, awaiting QC Manager approval
+    AWAITING_RELEASE = (
+        "awaiting_release"  # Lab Tech submitted, awaiting QC Manager approval
+    )
     APPROVED = "approved"
     RELEASED = "released"
     REJECTED = "rejected"
@@ -61,6 +65,8 @@ class AuditAction(str, enum.Enum):
     REJECT = "reject"
     OVERRIDE = "override"
     VALIDATION_FAILED = "validation_failed"
+    SELF_APPROVAL = "self_approval"
+    VOID = "void"
 
 
 class COAReleaseStatus(str, enum.Enum):

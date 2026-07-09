@@ -296,7 +296,13 @@ class LotService(BaseService[Lot]):
                 )
 
         old_status = lot.status
-        lot.status = new_status
+        # This legacy generic setter validates against its own transition table
+        # above; route the assignment through the workflow guard token so the
+        # enforcement guard permits it without a second (divergent) validation.
+        from app.workflow.lot_workflow_service import _allow_lot_status_assignment
+
+        with _allow_lot_status_assignment(lot):
+            lot.status = new_status
 
         # Log the change
         self._log_audit(
@@ -664,14 +670,13 @@ class LotService(BaseService[Lot]):
             return False
 
         lot = calculation.lot
-        lot.status = calculation.new_status
-        self._log_audit(
-            db=db,
-            action=AuditAction.UPDATE,
-            record_id=lot.id,
-            old_values={"status": calculation.old_status.value},
-            new_values={"status": calculation.new_status.value},
-            user_id=user_id,
+        from app.workflow.lot_workflow_service import LotWorkflowService
+
+        LotWorkflowService().apply_auto(
+            db,
+            lot,
+            calculation.new_status,
+            actor_id=user_id,
             reason=f"{reason_prefix}: {calculation.reason}",
         )
         logger.info(

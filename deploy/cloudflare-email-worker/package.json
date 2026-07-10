@@ -1,0 +1,15 @@
+{
+  "name": "labtrack-email-intake",
+  "private": true,
+  "description": "Cloudflare Email Worker: forward lab-report PDFs from labs@bodytools.work into LabTrack's results importer",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "postal-mime": "^2.3.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

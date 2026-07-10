@@ -47,7 +47,7 @@ Endpoints in `backend/app/api/v1/endpoints/` handle routing and auth only; they 
 
 ### 2. Result Import (lab-report extraction)
 - Drag-and-drop upload of a lab-report PDF
-- Optional email intake: forward reports to a watched M365 mailbox (`EMAIL_INTAKE_*` env vars, off by default) — see `docs/email-intake-setup.md`
+- Optional email intake (off by default) — see `docs/email-intake-setup.md`: forward reports to `labs@bodytools.work` (Cloudflare Email Worker in `deploy/cloudflare-email-worker/` → `/api/v1/result-imports/intake` webhook, `INTAKE_WEBHOOK_TOKEN`) or to a polled M365 mailbox (`EMAIL_INTAKE_*` env vars)
 - LLM extraction via OpenRouter parses the report into candidate test rows
 - A review modal lets the user confirm/edit the extracted rows before applying
 - Confirmed rows are written as **DRAFT** test results for QC approval

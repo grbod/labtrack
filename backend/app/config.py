@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     email_intake_upload_username: str = Field(
         default="admin", env="EMAIL_INTAKE_UPLOAD_USERNAME"
     )
+    # Shared secret for the unauthenticated intake webhook
+    # (POST /api/v1/result-imports/intake, used by the Cloudflare Email
+    # Worker). Unset = endpoint disabled. Generate: openssl rand -hex 32
+    intake_webhook_token: Optional[str] = Field(
+        default=None, env="INTAKE_WEBHOOK_TOKEN"
+    )
 
     @model_validator(mode="after")
     def _validate_email_intake(self) -> "Settings":

@@ -1,10 +1,66 @@
 # Email Intake Setup (forward lab reports to an inbox)
 
-LabTrack can watch a Microsoft 365 mailbox and feed forwarded lab-report PDFs
-straight into the Lab Test Import pipeline. Forwarded reports behave exactly
-like drag-and-drop uploads: same hash dedup, same LLM extraction, same
-"Needs review" queue and review modal, and confirmed rows still land as DRAFT
-test results.
+LabTrack can ingest forwarded lab-report PDFs by email. Forwarded reports
+behave exactly like drag-and-drop uploads: same hash dedup, same LLM
+extraction, same "Needs review" queue and review modal, and confirmed rows
+still land as DRAFT test results.
+
+Two transports are supported; enable either or both:
+
+1. **Cloudflare Email Routing → intake webhook** (production setup):
+   mail to `labs@bodytools.work` hits a Cloudflare Email Worker that POSTs
+   the PDF attachments to LabTrack. Push-based, no mailbox to manage.
+2. **Microsoft 365 mailbox poller**: the backend polls a shared mailbox via
+   Graph. Useful if you'd rather keep everything in M365.
+
+Both paths attribute uploads to `EMAIL_INTAKE_UPLOAD_USERNAME` (default
+`admin`) and enforce the same `EMAIL_INTAKE_ALLOWED_SENDERS` allowlist.
+
+## Option 1: Cloudflare Email Routing (labs@bodytools.work)
+
+Flow: sender → Cloudflare Email Routing → Email Worker
+(`deploy/cloudflare-email-worker/`) → `POST /api/v1/result-imports/intake`
+on `labtrack.bodytools.work`, authenticated by a shared secret header.
+
+Behavior:
+- Only PDF attachments are ingested. A message with no PDFs, a disallowed
+  sender, or PDFs the importer rejects (size/page limits) is **bounced back
+  to the sender with the reason**, so the forwarder knows nothing landed.
+- Re-forwarding the same PDF is safe (hash dedup).
+- Sender identity is the SMTP `From` address; Cloudflare validates
+  SPF/DKIM on receipt before the worker runs.
+
+### Backend (`backend/.env` on the VPS)
+
+```bash
+INTAKE_WEBHOOK_TOKEN=<openssl rand -hex 32>
+EMAIL_INTAKE_ALLOWED_SENDERS=@bodynutrition.com,@daanelabs.com
+EMAIL_INTAKE_UPLOAD_USERNAME=admin
+```
+
+With `INTAKE_WEBHOOK_TOKEN` unset the endpoint answers 404 and the feature
+is inert. Restart the API service after editing.
+
+### Worker (one-time)
+
+```bash
+cd deploy/cloudflare-email-worker
+npm install
+npx wrangler login                       # Cloudflare account with bodytools.work
+npx wrangler secret put INTAKE_TOKEN     # paste the same token as the VPS .env
+npx wrangler deploy
+```
+
+Then in the Cloudflare dashboard for **bodytools.work**:
+1. **Email → Email Routing → Get started** (adds the MX/SPF records).
+2. **Routing rules → Create address**: `labs@bodytools.work` → action
+   **Send to a Worker** → `labtrack-email-intake`.
+
+Watch it live with `npx wrangler tail`. To test end-to-end, email a lab
+report PDF to `labs@bodytools.work` from an allowed address and check the
+Lab Test Import queue.
+
+## Option 2: Microsoft 365 mailbox poller
 
 ## How it behaves
 

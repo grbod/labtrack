@@ -100,6 +100,53 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = Field(default=10, env="MAX_UPLOAD_SIZE_MB")
     session_timeout_minutes: int = Field(default=60, env="SESSION_TIMEOUT")
 
+    # Email intake (forward lab-report PDFs to a mailbox -> results importer).
+    # Requires an Entra app registration with application permission
+    # Mail.ReadWrite, ideally scoped to the one mailbox via an application
+    # access policy (New-ApplicationAccessPolicy).
+    email_intake_enabled: bool = Field(default=False, env="EMAIL_INTAKE_ENABLED")
+    email_intake_tenant_id: Optional[str] = Field(
+        default=None, env="EMAIL_INTAKE_TENANT_ID"
+    )
+    email_intake_client_id: Optional[str] = Field(
+        default=None, env="EMAIL_INTAKE_CLIENT_ID"
+    )
+    email_intake_client_secret: Optional[str] = Field(
+        default=None, env="EMAIL_INTAKE_CLIENT_SECRET"
+    )
+    email_intake_mailbox: Optional[str] = Field(
+        default=None, env="EMAIL_INTAKE_MAILBOX"
+    )
+    email_intake_poll_seconds: int = Field(default=120, env="EMAIL_INTAKE_POLL_SECONDS")
+    # Comma-separated senders or @domains allowed to submit results
+    # (e.g. "reports@daanelabs.com,@bodynutrition.com"). Empty = allow all.
+    email_intake_allowed_senders: str = Field(
+        default="", env="EMAIL_INTAKE_ALLOWED_SENDERS"
+    )
+    # Username that email uploads are attributed to in the import ledger.
+    email_intake_upload_username: str = Field(
+        default="admin", env="EMAIL_INTAKE_UPLOAD_USERNAME"
+    )
+
+    @model_validator(mode="after")
+    def _validate_email_intake(self) -> "Settings":
+        if self.email_intake_enabled:
+            missing = [
+                name
+                for name, value in (
+                    ("EMAIL_INTAKE_TENANT_ID", self.email_intake_tenant_id),
+                    ("EMAIL_INTAKE_CLIENT_ID", self.email_intake_client_id),
+                    ("EMAIL_INTAKE_CLIENT_SECRET", self.email_intake_client_secret),
+                    ("EMAIL_INTAKE_MAILBOX", self.email_intake_mailbox),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "EMAIL_INTAKE_ENABLED=true requires: " + ", ".join(missing)
+                )
+        return self
+
     # COA Settings
     company_name: str = Field(default="Your Company Name", env="COMPANY_NAME")
     company_address: str = Field(

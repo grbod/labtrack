@@ -1,10 +1,13 @@
 """Configuration settings for LabTrack."""
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
+
+_config_logger = logging.getLogger("app.config")
 
 # Shipped defaults for secrets — must be overridden in production.
 _DEFAULT_SECRET_KEY = "your-secret-key-here-change-in-production"
@@ -100,32 +103,23 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = Field(default=10, env="MAX_UPLOAD_SIZE_MB")
     session_timeout_minutes: int = Field(default=60, env="SESSION_TIMEOUT")
 
-    # Email intake (forward lab-report PDFs to a mailbox -> results importer).
-    # Requires an Entra app registration with application permission
-    # Mail.ReadWrite, ideally scoped to the one mailbox via an application
-    # access policy (New-ApplicationAccessPolicy).
-    email_intake_enabled: bool = Field(default=False, env="EMAIL_INTAKE_ENABLED")
-    email_intake_tenant_id: Optional[str] = Field(
-        default=None, env="EMAIL_INTAKE_TENANT_ID"
-    )
-    email_intake_client_id: Optional[str] = Field(
-        default=None, env="EMAIL_INTAKE_CLIENT_ID"
-    )
-    email_intake_client_secret: Optional[str] = Field(
-        default=None, env="EMAIL_INTAKE_CLIENT_SECRET"
-    )
-    email_intake_mailbox: Optional[str] = Field(
-        default=None, env="EMAIL_INTAKE_MAILBOX"
-    )
-    email_intake_poll_seconds: int = Field(default=120, env="EMAIL_INTAKE_POLL_SECONDS")
+    # Email intake (forward lab-report PDFs to the results importer via the
+    # Cloudflare Email Worker webhook, POST /api/v1/result-imports/intake).
     # Comma-separated senders or @domains allowed to submit results
-    # (e.g. "reports@daanelabs.com,@bodynutrition.com"). Empty = allow all.
+    # (e.g. "reports@daanelabs.com,@bodynutrition.com"). Empty = DENY ALL:
+    # intake rejects every sender until an allowlist is configured.
     email_intake_allowed_senders: str = Field(
         default="", env="EMAIL_INTAKE_ALLOWED_SENDERS"
     )
     # Username that email uploads are attributed to in the import ledger.
+    # Defaults to the low-privilege `email-intake` service account (seeded).
     email_intake_upload_username: str = Field(
-        default="admin", env="EMAIL_INTAKE_UPLOAD_USERNAME"
+        default="email-intake", env="EMAIL_INTAKE_UPLOAD_USERNAME"
+    )
+    # Per-sender hourly cap on intake PDFs (each accepted PDF is a paid LLM
+    # call). A sender exceeding this in the trailing hour is rejected (429).
+    email_intake_sender_hourly_cap: int = Field(
+        default=20, env="EMAIL_INTAKE_SENDER_HOURLY_CAP"
     )
     # Shared secret for the unauthenticated intake webhook
     # (POST /api/v1/result-imports/intake, used by the Cloudflare Email
@@ -136,21 +130,25 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_email_intake(self) -> "Settings":
-        if self.email_intake_enabled:
-            missing = [
-                name
-                for name, value in (
-                    ("EMAIL_INTAKE_TENANT_ID", self.email_intake_tenant_id),
-                    ("EMAIL_INTAKE_CLIENT_ID", self.email_intake_client_id),
-                    ("EMAIL_INTAKE_CLIENT_SECRET", self.email_intake_client_secret),
-                    ("EMAIL_INTAKE_MAILBOX", self.email_intake_mailbox),
-                )
-                if not value
-            ]
-            if missing:
-                raise ValueError(
-                    "EMAIL_INTAKE_ENABLED=true requires: " + ", ".join(missing)
-                )
+        # A whitespace-only token is treated as unset so the endpoint stays
+        # inert (matching the empty case) rather than active with a guessable
+        # secret. Runs before _guard_production_secrets checks token strength.
+        if self.intake_webhook_token is not None:
+            stripped = self.intake_webhook_token.strip()
+            self.intake_webhook_token = stripped or None
+
+        # Deny-by-default: if intake is reachable (webhook token set) but no
+        # allowlist is configured, EVERY sender is rejected. Warn loudly rather
+        # than hard-fail — deny-all is the safe default.
+        allowlist_configured = any(
+            entry.strip() for entry in self.email_intake_allowed_senders.split(",")
+        )
+        if self.intake_webhook_token and not allowlist_configured:
+            _config_logger.warning(
+                "Email intake is reachable but EMAIL_INTAKE_ALLOWED_SENDERS is "
+                "empty: intake will REJECT ALL senders until an allowlist is "
+                "configured (deny-by-default)."
+            )
         return self
 
     # COA Settings
@@ -175,6 +173,15 @@ class Settings(BaseSettings):
                     "Refusing to start in production with default secret(s): "
                     f"{', '.join(offenders)}. Set a strong, unique value for each "
                     "via environment variables before deploying."
+                )
+            # A configured intake token is a shared secret guarding an
+            # unauthenticated, paid endpoint; require real entropy in prod.
+            # (Whitespace-only tokens are already normalized to None above.)
+            if self.intake_webhook_token and len(self.intake_webhook_token) < 32:
+                raise ValueError(
+                    "Refusing to start in production with a weak "
+                    "INTAKE_WEBHOOK_TOKEN (min 32 chars). Generate one with "
+                    "`openssl rand -hex 32`."
                 )
         return self
 

@@ -1,15 +1,67 @@
 """Database seeding for first-time startup."""
 
 import csv
+import secrets
 from pathlib import Path
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import User, LabTestType, Product, ProductTestSpecification
-from app.models.enums import UserRole
 from app.core.security import get_password_hash
+from app.models import LabTestType, Product, ProductTestSpecification, User
+from app.models.enums import UserRole
 from app.utils.logger import logger
+
+# Username of the low-privilege service account that email-intake uploads are
+# attributed to (see EMAIL_INTAKE_UPLOAD_USERNAME). READ_ONLY so a compromised
+# intake path cannot approve/release; create_uploads only needs a user_id.
+EMAIL_INTAKE_USERNAME = "email-intake"
+
+
+def _build_email_intake_user() -> User:
+    """Build the email-intake service account with an unusable random password."""
+    return User(
+        username=EMAIL_INTAKE_USERNAME,
+        email="email-intake@labtrack.local",
+        role=UserRole.READ_ONLY,
+        # Never used for login; email intake authenticates via a shared secret.
+        password_hash=get_password_hash(secrets.token_urlsafe(32)),
+        active=True,
+        full_name="Email Intake (service account)",
+    )
+
+
+def ensure_email_intake_user(session: Session) -> bool:
+    """Create the email-intake service account if it is missing.
+
+    Idempotent and concurrency-safe; safe to call on every startup so
+    pre-existing databases pick up the account. Returns True when a user was
+    created.
+    """
+    existing = (
+        session.query(User).filter(User.username == EMAIL_INTAKE_USERNAME).first()
+    )
+    if existing is not None:
+        # Don't silently trust a pre-existing account with this name — warn if it
+        # isn't the low-privilege service identity we expect (Codex #6).
+        if existing.role != UserRole.READ_ONLY:
+            logger.warning(
+                f"Email-intake account '{EMAIL_INTAKE_USERNAME}' already exists "
+                f"with role {existing.role}, not READ_ONLY; email uploads will run "
+                "as that role. Review this account."
+            )
+        return False
+    session.add(_build_email_intake_user())
+    try:
+        session.commit()
+    except IntegrityError:
+        # Another startup process won the race; adopt its row (Codex #5).
+        session.rollback()
+        return False
+    logger.info(f"Seeded email-intake service account '{EMAIL_INTAKE_USERNAME}'")
+    return True
+
 
 SEED_TESTS_CSV = Path(__file__).parent.parent / "seed_tests.csv"
 PRODUCT_CSV = Path(__file__).parent.parent.parent / "product_seed_data.csv"
@@ -44,13 +96,16 @@ def _build_users() -> list[User]:
             password_hash=get_password_hash("lab123"),
             active=True,
         ),
+        _build_email_intake_user(),
     ]
 
 
 def _load_lab_test_types() -> list[LabTestType]:
     """Load lab test types from the seed CSV file."""
     if not SEED_TESTS_CSV.exists():
-        logger.warning(f"Seed tests CSV not found at {SEED_TESTS_CSV}, skipping lab test types")
+        logger.warning(
+            f"Seed tests CSV not found at {SEED_TESTS_CSV}, skipping lab test types"
+        )
         return []
 
     test_types: list[LabTestType] = []
@@ -153,7 +208,9 @@ def _load_product_test_specs(session: Session) -> int:
                 continue
 
             test_names = [t.strip() for t in tests_str.split(";")]
-            specifications = [s.strip() for s in specs_str.split(";")] if specs_str else []
+            specifications = (
+                [s.strip() for s in specs_str.split(";")] if specs_str else []
+            )
 
             for i, test_name in enumerate(test_names):
                 test_id = test_lookup.get(test_name.lower())
@@ -191,6 +248,8 @@ def seed_if_empty(engine) -> None:
     try:
         user_count = session.execute(text("SELECT COUNT(*) FROM users")).scalar()
         if user_count > 0:
+            # Backfill the email-intake service account on pre-existing DBs.
+            ensure_email_intake_user(session)
             # Check if product test specs need backfill (e.g. after a partial seed)
             spec_count = session.execute(
                 text("SELECT COUNT(*) FROM product_test_specifications")

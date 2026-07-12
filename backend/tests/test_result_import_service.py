@@ -20,7 +20,6 @@ from app.models import (
     UserRole,
 )
 from app.models.enums import LotStatus, LotType
-from app.workflow.lot_workflow_service import set_status_unchecked
 from app.schemas.result_import import RowAction
 from app.services.lab_test_alias_service import normalize_alias_key
 from app.services.release_service import ReleaseService
@@ -29,6 +28,7 @@ from app.services.result_extraction_provider import (
     OpenRouterExtractionProvider,
 )
 from app.services.result_import_service import ResultImportService
+from app.workflow.lot_workflow_service import set_status_unchecked
 
 
 def _audit_row(row_id: str = "row-1", value: str = "Negative") -> dict:
@@ -251,6 +251,102 @@ def test_upload_fails_without_openrouter_key_when_live_provider(
         raise AssertionError("upload should fail without OpenRouter configuration")
 
 
+class _RecordingStorage:
+    def upload(self, content, key, content_type="application/octet-stream"):
+        return None
+
+    def delete(self, key):
+        return None
+
+
+def test_upload_rejects_pdf_named_non_pdf(test_db, sample_user, monkeypatch):
+    # Fix #8: extension/content-type says PDF but the bytes are not — the
+    # magic-byte gate must catch it (both intake paths force pdf content_type).
+    monkeypatch.setattr(
+        "app.services.result_import_service.settings.ai_provider", "mock"
+    )
+    with pytest.raises(ValueError, match="PDF"):
+        ResultImportService().create_uploads(
+            test_db,
+            [("report.pdf", b"GIF89a not a pdf", "application/pdf")],
+            sample_user.id,
+        )
+
+
+def test_upload_email_source_tags_audit_with_sender(test_db, sample_user, monkeypatch):
+    # Fix #6: an email-sourced upload records source=email + sender in the audit
+    # new_values and a distinct reason, so it isn't confused with a UI upload.
+    monkeypatch.setattr(
+        "app.services.result_import_service.settings.ai_provider", "mock"
+    )
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service",
+        lambda: _RecordingStorage(),
+    )
+    service = ResultImportService()
+    monkeypatch.setattr(service, "_page_count", lambda content: 1)
+
+    created, _ = service.create_uploads(
+        test_db,
+        [("report.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")],
+        sample_user.id,
+        source="email",
+        sender="reports@daanelabs.com",
+    )
+
+    row = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "result_imports",
+            AuditLog.record_id == created[0].id,
+            AuditLog.action == AuditAction.INSERT,
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert row is not None
+    vals = row.get_new_values_dict()
+    assert vals["source"] == "email"
+    assert vals["sender"] == "reports@daanelabs.com"
+    assert row.reason == "Result import via email intake"
+
+
+def test_upload_ui_source_audit_unchanged(test_db, sample_user, monkeypatch):
+    # Fix #6: the default UI path keeps its original reason and carries no
+    # sender (source defaults to "ui").
+    monkeypatch.setattr(
+        "app.services.result_import_service.settings.ai_provider", "mock"
+    )
+    monkeypatch.setattr(
+        "app.services.result_import_service.get_storage_service",
+        lambda: _RecordingStorage(),
+    )
+    service = ResultImportService()
+    monkeypatch.setattr(service, "_page_count", lambda content: 1)
+
+    created, _ = service.create_uploads(
+        test_db,
+        [("report.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")],
+        sample_user.id,
+    )
+
+    row = (
+        test_db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "result_imports",
+            AuditLog.record_id == created[0].id,
+            AuditLog.action == AuditAction.INSERT,
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert row is not None
+    assert row.reason == "Result import uploaded"
+    vals = row.get_new_values_dict()
+    assert vals["source"] == "ui"
+    assert "sender" not in vals
+
+
 def test_upload_duplicate_confirmed_import_returns_duplicate_summary(
     test_db, sample_lot, sample_user, monkeypatch
 ):
@@ -261,7 +357,7 @@ def test_upload_duplicate_confirmed_import_returns_duplicate_summary(
         def delete(self, key):
             raise AssertionError("duplicate upload should not delete storage")
 
-    content = b"not really a pdf"
+    content = b"%PDF-1.4 not really a pdf"
     existing = ResultImport(
         original_filename="coa-existing.pdf",
         storage_key="pdfs/result-imports/coa-existing.pdf",
@@ -2333,7 +2429,7 @@ def test_upload_failure_deletes_uploaded_file(test_db, sample_user, monkeypatch)
     try:
         service.create_uploads(
             test_db,
-            [("coa.pdf", b"not really a pdf", "application/pdf")],
+            [("coa.pdf", b"%PDF-1.4 not really a pdf", "application/pdf")],
             sample_user.id,
         )
     except RuntimeError as exc:

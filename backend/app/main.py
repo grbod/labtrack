@@ -35,23 +35,6 @@ async def _coc_cleanup_loop():
         await asyncio.sleep(24 * 60 * 60)
 
 
-async def _email_intake_loop():
-    """Poll the intake mailbox for forwarded lab-report PDFs."""
-    from app.services.email_intake_service import EmailIntakeService
-
-    service = EmailIntakeService()
-    logger.info(
-        f"Email intake enabled: polling {settings.email_intake_mailbox} "
-        f"every {settings.email_intake_poll_seconds}s"
-    )
-    while True:
-        try:
-            await service.poll_once()
-        except Exception:
-            logger.opt(exception=True).error("Email intake poll failed")
-        await asyncio.sleep(settings.email_intake_poll_seconds)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
@@ -64,15 +47,8 @@ async def lifespan(app: FastAPI):
 
     await start_result_import_worker()
     cleanup_task = asyncio.create_task(_coc_cleanup_loop())
-    email_intake_task = (
-        asyncio.create_task(_email_intake_loop())
-        if settings.email_intake_enabled
-        else None
-    )
     yield
     # Shutdown
-    if email_intake_task:
-        email_intake_task.cancel()
     cleanup_task.cancel()
     await stop_result_import_worker()
 

@@ -5,18 +5,20 @@ behave exactly like drag-and-drop uploads: same hash dedup, same LLM
 extraction, same "Needs review" queue and review modal, and confirmed rows
 still land as DRAFT test results.
 
-Two transports are supported; enable either or both:
+Transport: **Cloudflare Email Routing → intake webhook**. Mail to
+`labs@bodytools.work` hits a Cloudflare Email Worker that POSTs the PDF
+attachments to LabTrack's webhook. Push-based, no mailbox to manage.
 
-1. **Cloudflare Email Routing → intake webhook** (production setup):
-   mail to `labs@bodytools.work` hits a Cloudflare Email Worker that POSTs
-   the PDF attachments to LabTrack. Push-based, no mailbox to manage.
-2. **Microsoft 365 mailbox poller**: the backend polls a shared mailbox via
-   Graph. Useful if you'd rather keep everything in M365.
+Uploads are attributed to `EMAIL_INTAKE_UPLOAD_USERNAME` (default
+`email-intake`, a seeded READ_ONLY service account) and every sender must pass
+the `EMAIL_INTAKE_ALLOWED_SENDERS` allowlist.
 
-Both paths attribute uploads to `EMAIL_INTAKE_UPLOAD_USERNAME` (default
-`admin`) and enforce the same `EMAIL_INTAKE_ALLOWED_SENDERS` allowlist.
+> **Allowlist is deny-by-default.** An empty `EMAIL_INTAKE_ALLOWED_SENDERS`
+> rejects **every** sender (it does not accept all). Intake stays inert until
+> you configure at least one address or `@domain`. Startup logs a loud WARNING
+> if intake is reachable with an empty allowlist.
 
-## Option 1: Cloudflare Email Routing (labs@bodytools.work)
+## Cloudflare Email Routing (labs@bodytools.work)
 
 Flow: sender → Cloudflare Email Routing → Email Worker
 (`deploy/cloudflare-email-worker/`) → `POST /api/v1/result-imports/intake`
@@ -27,19 +29,47 @@ Behavior:
   sender, or PDFs the importer rejects (size/page limits) is **bounced back
   to the sender with the reason**, so the forwarder knows nothing landed.
 - Re-forwarding the same PDF is safe (hash dedup).
-- Sender identity is the SMTP `From` address; Cloudflare validates
-  SPF/DKIM on receipt before the worker runs.
+- Sender identity is the RFC 5322 **`From:` header** address (the identity
+  DMARC actually authenticates) — *not* `message.from`, which is the SMTP
+  envelope MAIL FROM and is unauthenticated/spoofable. The allowlist gates on
+  this header `From`.
+- Cloudflare runs SPF/DKIM/DMARC on receipt and stamps the verdict in an
+  `Authentication-Results` header carrying its own authserv-id
+  (`mx.cloudflare.net`). The worker evaluates DMARC **only** from that
+  Cloudflare-stamped header (so a sender-supplied `Authentication-Results:
+  dmarc=pass` can't forge a pass) and **requires `dmarc=pass`**, rejecting
+  otherwise (including a missing verdict). The trusted verdict is forwarded to
+  the backend as `X-Intake-Auth-Results` (logged as an audit signal).
+  - **Verify once with a spoof test:** this relies on Cloudflare stripping
+    inbound `Authentication-Results` bearing its own authserv-id (RFC 8601
+    §7.1). Before trusting it in production, send a test message forging
+    `From: someone@bodynutrition.com` from an unrelated domain and confirm it
+    is rejected (DMARC), and a genuine allowlisted, DMARC-passing sender is
+    accepted.
+- Rejections use a single generic bounce ("Message not accepted.") so a prober
+  cannot tell whether an address is live or on the allowlist. The specific
+  reason is logged (worker `console.error`, backend logs), never bounced.
+- Oversize attachments (> `MAX_UPLOAD_SIZE_MB`, default 10MB) are skipped, and
+  more than 5 PDFs are POSTed in batches of 5; the message succeeds if any
+  batch lands.
 
 ### Backend (`backend/.env` on the VPS)
 
 ```bash
 INTAKE_WEBHOOK_TOKEN=<openssl rand -hex 32>
 EMAIL_INTAKE_ALLOWED_SENDERS=@bodynutrition.com,@daanelabs.com
-EMAIL_INTAKE_UPLOAD_USERNAME=admin
+# Optional: defaults to the seeded READ_ONLY `email-intake` service account.
+EMAIL_INTAKE_UPLOAD_USERNAME=email-intake
+# Optional: reject a single sender submitting more than this many PDFs/hour.
+EMAIL_INTAKE_SENDER_HOURLY_CAP=20
 ```
 
-With `INTAKE_WEBHOOK_TOKEN` unset the endpoint answers 404 and the feature
-is inert. Restart the API service after editing.
+With `INTAKE_WEBHOOK_TOKEN` unset (or whitespace-only) the endpoint answers
+404 and the feature is inert. In production the token must be at least 32
+characters or the app refuses to start (`openssl rand -hex 32` gives 64).
+The endpoint is also rate-limited to 30 requests/minute per IP and to
+`EMAIL_INTAKE_SENDER_HOURLY_CAP` PDFs/hour per sender. Restart the API service
+after editing.
 
 ### Worker (one-time)
 
@@ -60,61 +90,7 @@ Watch it live with `npx wrangler tail`. To test end-to-end, email a lab
 report PDF to `labs@bodytools.work` from an allowed address and check the
 Lab Test Import queue.
 
-## Option 2: Microsoft 365 mailbox poller
-
-## How it behaves
-
-- The backend polls the mailbox inbox (default every 120s) for **unread
-  messages with attachments**.
-- PDF attachments are ingested; the message is marked read and moved to the
-  **"LabTrack Processed"** folder.
-- Messages that can't be used (sender not on the allowlist, no PDF attachment,
-  or every PDF rejected, e.g. over the page/size limit) are marked read and
-  moved to **"LabTrack Rejected"** so a human can see what was dropped.
-- Re-forwarding the same PDF is harmless: the importer's content-hash dedup
-  points at the existing import instead of creating a new one.
-- Uploads are attributed to the user in `EMAIL_INTAKE_UPLOAD_USERNAME`
-  (default `admin`) in the import ledger.
-- Transient Graph errors leave the message unread; it is retried on the next
-  poll.
-
-## One-time Azure setup
-
-1. **Create the mailbox** (e.g. `results@bodynutrition.com`) — a shared
-   mailbox is fine (no license needed).
-2. **Register an app** in Entra ID (Azure portal → App registrations → New).
-   Single tenant. No redirect URI.
-3. **Grant application permission** Microsoft Graph → Application →
-   `Mail.ReadWrite`, then click **Grant admin consent**.
-4. **Create a client secret** (Certificates & secrets) and note the value.
-5. **(Recommended) Scope the app to just this mailbox** so the credential
-   cannot read other mail. In Exchange Online PowerShell:
-
-   ```powershell
-   New-DistributionGroup -Name "LabTrack Intake Scope" -Type Security -Members results@bodynutrition.com
-   New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId "LabTrack Intake Scope" -AccessRight RestrictAccess
-   Test-ApplicationAccessPolicy -AppId <client-id> -Identity results@bodynutrition.com   # should say Granted
-   ```
-
-## Backend configuration (`backend/.env`)
-
-```bash
-EMAIL_INTAKE_ENABLED=true
-EMAIL_INTAKE_TENANT_ID=<directory (tenant) id>
-EMAIL_INTAKE_CLIENT_ID=<application (client) id>
-EMAIL_INTAKE_CLIENT_SECRET=<client secret value>
-EMAIL_INTAKE_MAILBOX=results@bodynutrition.com
-# Optional hardening / tuning:
-EMAIL_INTAKE_ALLOWED_SENDERS=reports@daanelabs.com,@bodynutrition.com
-EMAIL_INTAKE_POLL_SECONDS=120
-EMAIL_INTAKE_UPLOAD_USERNAME=admin
-```
-
-The app refuses to start if `EMAIL_INTAKE_ENABLED=true` and any credential is
-missing. With `EMAIL_INTAKE_ENABLED` unset/false the feature is completely
-inert.
-
-The poller runs inside the FastAPI process (started from the app lifespan, see
-`app/main.py`), so on the VPS nothing extra is needed beyond the `.env` keys
-and a service restart. Implementation: `app/services/email_intake_service.py`;
-tests: `tests/test_email_intake.py`.
+Implementation: worker in `deploy/cloudflare-email-worker/src/index.js`;
+backend endpoint in `app/api/v1/endpoints/result_imports.py` (intake) with the
+sender gate in `app/services/sender_allowlist.py`. Tests:
+`tests/test_result_import_intake_endpoint.py` and `tests/test_email_intake.py`.

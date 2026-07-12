@@ -33,6 +33,10 @@ def client(db, monkeypatch):
     )
     monkeypatch.setattr(settings, "email_intake_upload_username", "admin")
     monkeypatch.setattr(endpoint_module.service, "_page_count", lambda content: 1)
+    # Isolate from the per-IP slowapi limiter and the in-process per-sender cap
+    # so intake tests don't interfere with each other across the run.
+    monkeypatch.setattr(endpoint_module.limiter, "enabled", False)
+    endpoint_module._reset_intake_sender_window()
 
     async def fake_enqueue(import_id):
         fake_enqueue.enqueued.append(import_id)
@@ -76,7 +80,11 @@ def test_intake_rejects_disallowed_sender(client):
     test_client, _ = client
     response = _post(test_client, sender="spoof@evil.com")
     assert response.status_code == 403
-    assert "spoof@evil.com" in response.json()["detail"]
+    # Fix #5: the 403 detail must be generic — no sender echo, no "allow" — so
+    # it can't be used to confirm a live address or probe the allowlist.
+    detail = response.json()["detail"]
+    assert "spoof@evil.com" not in detail
+    assert "allow" not in detail.lower()
 
 
 def test_intake_ingests_pdf_and_enqueues(client):
@@ -107,6 +115,50 @@ def test_intake_rejects_non_pdf(client):
     response = _post(test_client, files=("photo.png", b"not a pdf", "image/png"))
     assert response.status_code == 400
     assert "PDF" in response.json()["detail"]
+
+
+def test_intake_rejects_pdf_named_non_pdf(client):
+    # Fix #8: both intake paths force content_type=pdf, so only the magic-byte
+    # check catches a .pdf-named payload whose bytes are not a real PDF.
+    test_client, _ = client
+    response = _post(
+        test_client, files=("report.pdf", b"totally not a pdf", "application/pdf")
+    )
+    assert response.status_code == 400
+    assert "PDF" in response.json()["detail"]
+
+
+def test_intake_per_sender_hourly_cap(client, monkeypatch):
+    # Fix #3: a single sender exceeding the hourly PDF cap gets 429; distinct
+    # file bytes each time so dedup doesn't mask the rejection.
+    test_client, _ = client
+    monkeypatch.setattr(settings, "email_intake_sender_hourly_cap", 2)
+
+    def unique_pdf(n):
+        return (
+            "report.pdf",
+            b"%PDF-1.4\n" + str(n).encode() + b"\n%%EOF",
+            "application/pdf",
+        )
+
+    assert _post(test_client, files=unique_pdf(1)).status_code == 201
+    assert _post(test_client, files=unique_pdf(2)).status_code == 201
+    third = _post(test_client, files=unique_pdf(3))
+    assert third.status_code == 429
+
+
+def test_intake_rejected_upload_does_not_burn_cap(client, monkeypatch):
+    # Codex #3: usage is charged only on accepted PDFs. A malformed upload (400)
+    # must not consume the sender's hourly quota, so a good report still lands.
+    test_client, _ = client
+    monkeypatch.setattr(settings, "email_intake_sender_hourly_cap", 1)
+
+    not_a_pdf = ("report.pdf", b"GIF89a-not-a-pdf", "application/pdf")
+    assert _post(test_client, files=not_a_pdf).status_code == 400
+    assert _post(test_client, files=not_a_pdf).status_code == 400
+    # Two prior rejects did not count; a genuine PDF is still accepted.
+    good = ("report.pdf", b"%PDF-1.4\n1\n%%EOF", "application/pdf")
+    assert _post(test_client, files=good).status_code == 201
 
 
 def test_intake_503_when_upload_user_missing(client, monkeypatch):

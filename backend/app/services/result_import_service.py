@@ -106,6 +106,8 @@ class ResultImportService(BaseService[ResultImport]):
         db: Session,
         files: Iterable[tuple[str, bytes, str]],
         user_id: int,
+        source: str = "ui",
+        sender: Optional[str] = None,
     ) -> tuple[list[ResultImport], list[ResultImport]]:
         files = list(files)
         if not files:
@@ -128,6 +130,11 @@ class ResultImportService(BaseService[ResultImport]):
             if content_type != "application/pdf" and not filename.lower().endswith(
                 ".pdf"
             ):
+                raise ValueError("Only PDF files are allowed")
+            # Magic-byte check: both intake paths force content_type=pdf, so the
+            # extension/content-type gate above is trivially spoofable. A real
+            # PDF starts with "%PDF-"; reject anything that does not.
+            if not content.startswith(b"%PDF-"):
                 raise ValueError("Only PDF files are allowed")
             if len(content) > max_size:
                 raise ValueError(
@@ -184,6 +191,16 @@ class ResultImportService(BaseService[ResultImport]):
                     openrouter_model=settings.openrouter_model,
                     warnings=[],
                 )
+                new_values: dict[str, Any] = {
+                    "original_filename": filename,
+                    "storage_key": storage_key,
+                    "source": source,
+                }
+                if source == "email":
+                    new_values["sender"] = sender
+                    reason = "Result import via email intake"
+                else:
+                    reason = "Result import uploaded"
                 try:
                     with db.begin_nested():
                         db.add(item)
@@ -192,12 +209,9 @@ class ResultImportService(BaseService[ResultImport]):
                             db,
                             action=AuditAction.INSERT,
                             record_id=item.id,
-                            new_values={
-                                "original_filename": filename,
-                                "storage_key": storage_key,
-                            },
+                            new_values=new_values,
                             user_id=user_id,
-                            reason="Result import uploaded",
+                            reason=reason,
                         )
                 except IntegrityError:
                     if storage_key in uploaded_keys:

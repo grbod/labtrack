@@ -27,6 +27,7 @@ export function serializePreviewOverrides(overrides: ResultImportPreviewOverride
 export const resultImportKeys = {
   all: ["result-imports"] as const,
   list: () => [...resultImportKeys.all, "list"] as const,
+  stats: () => [...resultImportKeys.all, "stats"] as const,
   detail: (id: number) => [...resultImportKeys.all, "detail", id] as const,
   candidates: (search: string) => [...resultImportKeys.all, "candidates", search] as const,
   preview: (id: number, lotId: number, overridesKey = "[]") =>
@@ -41,6 +42,16 @@ export function useResultImports() {
       const data = query.state.data
       return data?.items.some((item: ResultImport) => item.status === "processing") ? 2500 : false
     },
+  })
+}
+
+export function useResultImportStats() {
+  return useQuery({
+    queryKey: resultImportKeys.stats(),
+    queryFn: () => resultImportsApi.stats(),
+    // Keep the dashboard tile fresh while extractions are in flight.
+    refetchInterval: (query) =>
+      (query.state.data?.processing ?? 0) > 0 ? 2500 : 15000,
   })
 }
 

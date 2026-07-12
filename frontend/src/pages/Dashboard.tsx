@@ -8,10 +8,12 @@ import {
   FlaskConical,
   Loader2,
   TrendingUp,
+  Inbox,
 } from "lucide-react"
 
 import { useProducts } from "@/hooks/useProducts"
 import { useLots, useLotStatusCounts } from "@/hooks/useLots"
+import { useResultImportStats } from "@/hooks/useResultImports"
 import { getStatusBgClasses, getStatusLabel } from "@/lib/status-config"
 
 interface StatCardProps {
@@ -50,8 +52,13 @@ export function DashboardPage() {
   const { data: productsData, isLoading: productsLoading } = useProducts({ page_size: 1 })
   const { data: lotsData, isLoading: lotsLoading } = useLots({ page_size: 5 })
   const { data: statusCounts, isLoading: statusLoading } = useLotStatusCounts()
+  const { data: importStats, isLoading: importStatsLoading } = useResultImportStats()
 
   const activeSamples = (statusCounts?.awaiting_results ?? 0) + (statusCounts?.partial_results ?? 0) + (statusCounts?.under_review ?? 0)
+
+  const importsToReview = importStats?.needs_confirmation ?? 0
+  const importsProcessing = importStats?.processing ?? 0
+  const inboundLabs = importsToReview + importsProcessing
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -95,6 +102,20 @@ export function DashboardPage() {
           iconBg="bg-emerald-50"
           isLoading={statusLoading}
         />
+        <Link to="/import" className="block rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400">
+          <StatCard
+            title="Inbound Labs"
+            value={inboundLabs}
+            subtitle={
+              importsProcessing > 0
+                ? `${importsToReview} to review · ${importsProcessing} processing`
+                : "Awaiting review"
+            }
+            icon={<Inbox className="h-5 w-5 text-amber-600" />}
+            iconBg="bg-amber-50"
+            isLoading={importStatsLoading}
+          />
+        </Link>
       </div>
 
       {/* Two Column Layout */}

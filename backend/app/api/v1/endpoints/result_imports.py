@@ -252,6 +252,15 @@ async def list_result_imports(
     )
 
 
+@router.get("/stats", response_model=dict[str, int])
+async def result_import_stats(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> dict[str, int]:
+    """Counts of result imports by status (inbound-labs dashboard tile)."""
+    return service.status_counts(db)
+
+
 @router.get("/link-candidates", response_model=list[LinkCandidateRead])
 async def link_candidates(
     db: DbSession,

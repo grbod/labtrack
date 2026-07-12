@@ -27,6 +27,11 @@ export const resultImportsApi = {
     return response.data
   },
 
+  stats: async (): Promise<Record<string, number>> => {
+    const response = await api.get<Record<string, number>>("/result-imports/stats")
+    return response.data
+  },
+
   get: async (id: number): Promise<ResultImport> => {
     const response = await api.get<ResultImport>(`/result-imports/${id}`)
     return response.data

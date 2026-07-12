@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, Optional
 
 from PyPDF2 import PdfReader
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -333,6 +333,20 @@ class ResultImportService(BaseService[ResultImport]):
         query = db.query(ResultImport).order_by(ResultImport.created_at.desc())
         total = query.count()
         return query.offset((page - 1) * page_size).limit(page_size).all(), total
+
+    def status_counts(self, db: Session) -> dict[str, int]:
+        """Count result imports by status (for the dashboard inbound tile)."""
+        self.reap_stale_processing(db)
+        counts = {status.value: 0 for status in ResultImportStatus}
+        rows = (
+            db.query(ResultImport.status, func.count(ResultImport.id))
+            .group_by(ResultImport.status)
+            .all()
+        )
+        for status_value, count in rows:
+            key = getattr(status_value, "value", status_value)
+            counts[key] = count
+        return counts
 
     def queued_processing_ids(self, db: Session) -> list[int]:
         """Return imports left in processing state for startup requeue."""

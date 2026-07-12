@@ -112,9 +112,10 @@ class Settings(BaseSettings):
         default="", env="EMAIL_INTAKE_ALLOWED_SENDERS"
     )
     # Username that email uploads are attributed to in the import ledger.
-    # Defaults to the low-privilege `email-intake` service account (seeded).
+    # Defaults to the low-privilege `email_intake` service account (seeded).
+    # Note: underscore, not hyphen — the username validator rejects hyphens.
     email_intake_upload_username: str = Field(
-        default="email-intake", env="EMAIL_INTAKE_UPLOAD_USERNAME"
+        default="email_intake", env="EMAIL_INTAKE_UPLOAD_USERNAME"
     )
     # Per-sender hourly cap on intake PDFs (each accepted PDF is a paid LLM
     # call). A sender exceeding this in the trailing hour is rejected (429).

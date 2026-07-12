@@ -16,14 +16,14 @@ from app.utils.logger import logger
 # Username of the low-privilege service account that email-intake uploads are
 # attributed to (see EMAIL_INTAKE_UPLOAD_USERNAME). READ_ONLY so a compromised
 # intake path cannot approve/release; create_uploads only needs a user_id.
-EMAIL_INTAKE_USERNAME = "email-intake"
+EMAIL_INTAKE_USERNAME = "email_intake"
 
 
 def _build_email_intake_user() -> User:
     """Build the email-intake service account with an unusable random password."""
     return User(
         username=EMAIL_INTAKE_USERNAME,
-        email="email-intake@labtrack.local",
+        email="email_intake@labtrack.local",
         role=UserRole.READ_ONLY,
         # Never used for login; email intake authenticates via a shared secret.
         password_hash=get_password_hash(secrets.token_urlsafe(32)),

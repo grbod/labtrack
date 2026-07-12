@@ -10,7 +10,7 @@ Transport: **Cloudflare Email Routing → intake webhook**. Mail to
 attachments to LabTrack's webhook. Push-based, no mailbox to manage.
 
 Uploads are attributed to `EMAIL_INTAKE_UPLOAD_USERNAME` (default
-`email-intake`, a seeded READ_ONLY service account) and every sender must pass
+`email_intake`, a seeded READ_ONLY service account) and every sender must pass
 the `EMAIL_INTAKE_ALLOWED_SENDERS` allowlist.
 
 > **Allowlist is deny-by-default.** An empty `EMAIL_INTAKE_ALLOWED_SENDERS`
@@ -58,8 +58,8 @@ Behavior:
 ```bash
 INTAKE_WEBHOOK_TOKEN=<openssl rand -hex 32>
 EMAIL_INTAKE_ALLOWED_SENDERS=@bodynutrition.com,@daanelabs.com
-# Optional: defaults to the seeded READ_ONLY `email-intake` service account.
-EMAIL_INTAKE_UPLOAD_USERNAME=email-intake
+# Optional: defaults to the seeded READ_ONLY `email_intake` service account.
+EMAIL_INTAKE_UPLOAD_USERNAME=email_intake
 # Optional: reject a single sender submitting more than this many PDFs/hour.
 EMAIL_INTAKE_SENDER_HOURLY_CAP=20
 ```

@@ -165,3 +165,19 @@ def test_intake_503_when_upload_user_missing(client, monkeypatch):
     test_client, _ = client
     monkeypatch.setattr(settings, "email_intake_upload_username", "ghost")
     assert _post(test_client).status_code == 503
+
+
+def test_email_intake_service_account_seeds_with_valid_username(db):
+    # Regression: the seeded service-account username must satisfy the User
+    # validator (letters/numbers/underscores only). A hyphenated name
+    # ("email-intake") raised in the validator, so the account was never
+    # created and every intake upload 503'd. It must seed as a READ_ONLY user.
+    from app.models.enums import UserRole
+    from app.seed import EMAIL_INTAKE_USERNAME, ensure_email_intake_user
+
+    assert ensure_email_intake_user(db) is True
+    user = db.query(User).filter(User.username == EMAIL_INTAKE_USERNAME).first()
+    assert user is not None
+    assert user.role == UserRole.READ_ONLY
+    # Idempotent: a second call is a no-op, not a duplicate/error.
+    assert ensure_email_intake_user(db) is False

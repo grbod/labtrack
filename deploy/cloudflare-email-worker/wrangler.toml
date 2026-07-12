@@ -2,6 +2,11 @@ name = "labtrack-email-intake"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
 
+# This is an email-only worker (no `fetch` handler); it must not be reachable
+# over HTTP. Disable the public workers.dev URL and preview URLs.
+workers_dev = false
+preview_urls = false
+
 # INTAKE_URL is safe to keep as a plain var; the token is a secret:
 #   npx wrangler secret put INTAKE_TOKEN
 [vars]

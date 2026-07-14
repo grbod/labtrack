@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import openpyxl
 import pytest
@@ -367,3 +367,90 @@ def test_csv_input_dry_run_uses_same_loader_path(loader_db, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Rows read: 1" in out
     assert "released=1" in out
+
+
+def test_group_rows_separates_reused_lot_by_sku_and_blank_lots():
+    rows = [
+        loader.RegisterRow(
+            _row({loader.C_REFID: "A1", loader.C_LOT: "SHARED", loader.C_PRODUCT: "One"}),
+            2,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "A2", loader.C_LOT: "SHARED", loader.C_PRODUCT: "One"}),
+            3,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "B1", loader.C_LOT: "SHARED", loader.C_PRODUCT: "Two"}),
+            4,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "NOLOT1", loader.C_LOT: ""}),
+            5,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "NOLOT2", loader.C_LOT: "NEEDS LOT"}),
+            6,
+        ),
+    ]
+
+    groups, _ = loader.group_rows(rows)
+
+    assert [(g["kind"], g["key"], len(g["rows"])) for g in groups] == [
+        ("parent", "SHARED", 2),
+        ("standard", "SHARED", 1),
+        ("standard", "NOLOT1", 1),
+        ("standard", "NOLOT2", 1),
+    ]
+
+
+def test_append_dedupes_reused_lot_number(loader_db, tmp_path, capsys):
+    db = loader_db()
+    try:
+        db.add(
+            Lot(
+                lot_number="REUSED",
+                lot_type=LotType.STANDARD,
+                reference_number="OLDREF",
+                status=LotStatus.AWAITING_RESULTS,
+                generate_coa=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    workbook = _write_register(
+        tmp_path,
+        [_row({loader.C_REFID: "NEWREF", loader.C_LOT: "REUSED"})],
+    )
+    loader.run_load(file_path=str(workbook), commit=True, append_from_row=2)
+
+    out = capsys.readouterr().out
+    assert "deduped lot number 'REUSED' -> 'REUSED-2'" in out
+    db = loader_db()
+    try:
+        assert db.query(Lot).filter_by(lot_number="REUSED").count() == 1
+        assert db.query(Lot).filter_by(lot_number="REUSED-2").count() == 1
+    finally:
+        db.close()
+
+
+def test_date_normalization_clamps_invalid_month_end_and_future_year():
+    assert loader.to_date("06/31/2029") == date(2029, 6, 30)
+    assert loader.to_date("2/24//2026") == date(2026, 2, 24)
+    assert loader.to_date("2/29/2026") == date(2026, 2, 28)
+
+    row = loader.RegisterRow(
+        _row(
+            {
+                loader.C_REFID: "FUTURE",
+                loader.C_MFG: datetime(2029, 6, 27),
+                loader.C_RELEASE: datetime(2026, 7, 2),
+            }
+        ),
+        2,
+    )
+    flags = loader.normalize_future_mfg_typos([row])
+
+    assert row[loader.C_MFG] == date(2026, 6, 27)
+    assert "corrected future Mfg Date 2029-06-27 -> 2026-06-27" in flags[0]

@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import calendar
 import csv
 import os
 import sqlite3
@@ -136,6 +137,16 @@ def to_date(v):
                 return datetime.strptime(s, fmt).date()
             except ValueError:
                 pass
+        # The register sometimes contains impossible month-end dates such as
+        # 06/31/2029, and one duplicated slash typo. Preserve the intended
+        # month/year and clamp only an invalid day to that month's final day.
+        match = re.fullmatch(r"(\d{1,2})/+(\d{1,2})/+(\d{2}|\d{4})", s)
+        if match:
+            month, day, year = (int(part) for part in match.groups())
+            if year < 100:
+                year += 2000
+            if 1 <= month <= 12 and day >= 1:
+                return date(year, month, min(day, calendar.monthrange(year, month)[1]))
     return None
 
 
@@ -208,13 +219,37 @@ def group_rows(rows):
             flags.append(
                 f"same-SKU composite {cref} loaded as a PARENT lot ({len(grp)} batches)"
             )
-    by_lot = OrderedDict()
+    current_key, current_lot, current_rows = None, None, []
+
+    def flush_lot_group():
+        if current_rows:
+            groups.append(
+                {
+                    "kind": "parent" if len(current_rows) > 1 else "standard",
+                    "key": current_lot,
+                    "rows": list(current_rows),
+                }
+            )
+
     for r in rest:
-        by_lot.setdefault(str(r[C_LOT]).strip(), []).append(r)
-    for lot, grp in by_lot.items():
-        groups.append(
-            {"kind": "parent" if len(grp) > 1 else "standard", "key": lot, "rows": grp}
-        )
+        lot = cell_str(r[C_LOT])
+        # A blank/placeholder lot cannot safely group unrelated rows. Treat it
+        # as a standard lot and use the RefID as the lot number at load time.
+        if not lot or lot.upper() == "NEEDS LOT":
+            flush_lot_group()
+            current_key, current_lot, current_rows = None, None, []
+            groups.append({"kind": "standard", "key": cell_str(r[C_REFID]), "rows": [r]})
+            continue
+        # The register occasionally reuses a lot number for a different SKU.
+        # It can also reuse the same lot/SKU combination months later. Only
+        # contiguous rows belong to one parent-lot group.
+        key = (lot, sku_key(r))
+        if current_rows and key != current_key:
+            flush_lot_group()
+            current_rows = []
+        current_key, current_lot = key, lot
+        current_rows.append(r)
+    flush_lot_group()
     return groups, flags
 
 
@@ -369,10 +404,28 @@ def future_date_flags(rows, first_future_year=2029):
     return flags
 
 
+def normalize_future_mfg_typos(rows):
+    """Fix obvious year typos when manufacturing would occur years after release."""
+    flags = []
+    for r in rows:
+        mfg = to_date(r[C_MFG])
+        release = to_date(r[C_RELEASE])
+        if not mfg or not release or mfg.year <= release.year + 1:
+            continue
+        try:
+            corrected = mfg.replace(year=release.year)
+        except ValueError:
+            corrected = mfg.replace(year=release.year, day=28)
+        if corrected <= release:
+            r[C_MFG] = corrected
+            flags.append(
+                f"corrected future Mfg Date {mfg.isoformat()} -> "
+                f"{corrected.isoformat()} for RefID {cell_str(r[C_REFID])}"
+            )
+    return flags
+
+
 def append_conflicts(db, groups):
-    existing_lot_numbers = {
-        lot_number for (lot_number,) in db.query(Lot.lot_number).all()
-    }
     existing_refs = {
         reference_number for (reference_number,) in db.query(Lot.reference_number).all()
     }
@@ -385,17 +438,13 @@ def append_conflicts(db, groups):
         first = rows_g[0]
         if g["kind"] == "standard":
             lotnum = cell_str(first[C_LOT])
-            if lotnum.upper() == "NEEDS LOT":
+            if not lotnum or lotnum.upper() == "NEEDS LOT":
                 lotnum = cell_str(first[C_REFID])
             ref = cell_str(first[C_REFID])
-            if lotnum.upper() in existing_lot_numbers:
-                conflicts.append(("lot_number", lotnum, g["key"]))
             if ref.upper() in existing_refs:
                 conflicts.append(("reference_number", ref, g["key"]))
         elif g["kind"] == "parent":
             lotnum = g.get("lotnum_override") or cell_str(first[C_LOT])
-            if lotnum.upper() in existing_lot_numbers:
-                conflicts.append(("lot_number", lotnum, g["key"]))
             if (
                 "ref_override" in g
                 and str(g["ref_override"]).strip().upper() in existing_refs
@@ -408,8 +457,6 @@ def append_conflicts(db, groups):
                     conflicts.append(("sublot_number", sublot, g["key"]))
         else:
             cref = str(g["key"]).strip()
-            if cref.upper() in existing_lot_numbers:
-                conflicts.append(("lot_number", cref, g["key"]))
             if cref.upper() in existing_refs:
                 conflicts.append(("reference_number", cref, g["key"]))
     return conflicts
@@ -498,6 +545,7 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
     rows = load_rows(file_path, append_from_row)
     print(f"Rows read: {len(rows)}")
     groups, flags = group_rows(rows)
+    flags.extend(normalize_future_mfg_typos(rows))
     flags.extend(future_date_flags(rows))
     populated_cells = count_populated_result_cells(rows)
 
@@ -604,7 +652,13 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
             if append_mode
             else set()
         )
+        existing_lot_numbers = (
+            {lot_number for (lot_number,) in db.query(Lot.lot_number).all()}
+            if append_mode
+            else set()
+        )
         gen_ref = make_ref_generator(existing_refs)
+        used_lot_numbers = set(existing_lot_numbers)
         used_refs, used_sublots = set(existing_refs), set(existing_sublots)
         pid_cache = dict(existing)
         counts = Counter()
@@ -730,9 +784,10 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
 
             if g["kind"] == "standard":
                 lotnum = str(first[C_LOT]).strip()
-                if lotnum.upper() == "NEEDS LOT":
+                if not lotnum or lotnum.upper() == "NEEDS LOT":
                     lotnum = str(first[C_REFID]).strip()
-                    flags.append(f"NEEDS-LOT row: lot_number set to RefID {lotnum}")
+                    flags.append(f"blank/NEEDS-LOT row: lot_number set to RefID {lotnum}")
+                lotnum = uniq(lotnum, used_lot_numbers, "lot number")
                 ref = uniq(str(first[C_REFID]).strip(), used_refs, "reference")
                 lot = Lot(
                     lot_number=lotnum,
@@ -752,6 +807,7 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
 
             elif g["kind"] == "parent":
                 lotnum = g.get("lotnum_override") or str(first[C_LOT]).strip()
+                lotnum = uniq(lotnum, used_lot_numbers, "lot number")
                 mfgs = [to_date(r[C_MFG]) for r in rows_g if to_date(r[C_MFG])]
                 mfg = min(mfgs) if mfgs else None
                 ref = (
@@ -792,9 +848,10 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
 
             else:  # composite
                 cref = g["key"]
+                lotnum = uniq(cref, used_lot_numbers, "lot number")
                 ref = uniq(cref, used_refs, "reference")
                 lot = Lot(
-                    lot_number=cref,
+                    lot_number=lotnum,
                     lot_type=LotType.MULTI_SKU_COMPOSITE,
                     reference_number=ref,
                     mfg_date=to_date(first[C_MFG]),

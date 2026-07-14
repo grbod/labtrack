@@ -384,7 +384,7 @@ def test_group_rows_separates_reused_lot_by_sku_and_blank_lots():
             4,
         ),
         loader.RegisterRow(
-            _row({loader.C_REFID: "NOLOT1", loader.C_LOT: ""}),
+            _row({loader.C_REFID: "NOLOT1", loader.C_LOT: None}),
             5,
         ),
         loader.RegisterRow(

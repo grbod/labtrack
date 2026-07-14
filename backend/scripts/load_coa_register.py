@@ -783,9 +783,9 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
             qc_name = qc_approval_value(g)
 
             if g["kind"] == "standard":
-                lotnum = str(first[C_LOT]).strip()
+                lotnum = cell_str(first[C_LOT])
                 if not lotnum or lotnum.upper() == "NEEDS LOT":
-                    lotnum = str(first[C_REFID]).strip()
+                    lotnum = cell_str(first[C_REFID])
                     flags.append(f"blank/NEEDS-LOT row: lot_number set to RefID {lotnum}")
                 lotnum = uniq(lotnum, used_lot_numbers, "lot number")
                 ref = uniq(str(first[C_REFID]).strip(), used_refs, "reference")
@@ -806,7 +806,7 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
                     add_release(lot.id, get_pid(first), rel_date, qc_name)
 
             elif g["kind"] == "parent":
-                lotnum = g.get("lotnum_override") or str(first[C_LOT]).strip()
+                lotnum = g.get("lotnum_override") or cell_str(first[C_LOT])
                 lotnum = uniq(lotnum, used_lot_numbers, "lot number")
                 mfgs = [to_date(r[C_MFG]) for r in rows_g if to_date(r[C_MFG])]
                 mfg = min(mfgs) if mfgs else None

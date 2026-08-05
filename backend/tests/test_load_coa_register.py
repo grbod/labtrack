@@ -439,6 +439,7 @@ def test_date_normalization_clamps_invalid_month_end_and_future_year():
     assert loader.to_date("06/31/2029") == date(2029, 6, 30)
     assert loader.to_date("2/24//2026") == date(2026, 2, 24)
     assert loader.to_date("2/29/2026") == date(2026, 2, 28)
+    assert loader.to_date("07/20/206") == date(2026, 7, 20)
 
     row = loader.RegisterRow(
         _row(
@@ -454,3 +455,35 @@ def test_date_normalization_clamps_invalid_month_end_and_future_year():
 
     assert row[loader.C_MFG] == date(2026, 6, 27)
     assert "corrected future Mfg Date 2029-06-27 -> 2026-06-27" in flags[0]
+
+
+def test_dedupes_latest_row_and_groups_shared_non_c_ref():
+    rows = [
+        loader.RegisterRow(
+            _row({loader.C_REFID: "PARENT", loader.C_LOT: "B1"}),
+            2,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "PARENT", loader.C_LOT: "B2"}),
+            3,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "DUP", loader.C_LOT: "D1", loader.C_MFG: date(2026, 1, 1)}),
+            4,
+        ),
+        loader.RegisterRow(
+            _row({loader.C_REFID: "DUP", loader.C_LOT: "D1", loader.C_MFG: date(2026, 1, 2)}),
+            5,
+        ),
+    ]
+
+    deduped, dedupe_flags = loader.dedupe_register_rows(rows)
+    groups, group_flags = loader.group_rows(deduped)
+
+    assert [r.excel_row for r in deduped] == [2, 3, 5]
+    assert "duplicate row 4 RefID DUP, Lot D1 skipped" in dedupe_flags[0]
+    assert [(g["kind"], g["key"], len(g["rows"])) for g in groups] == [
+        ("parent", "PARENT", 2),
+        ("standard", "D1", 1),
+    ]
+    assert "shared non-C RefID PARENT loaded as a PARENT lot" in group_flags[0]

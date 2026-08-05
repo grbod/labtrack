@@ -140,11 +140,16 @@ def to_date(v):
         # The register sometimes contains impossible month-end dates such as
         # 06/31/2029, and one duplicated slash typo. Preserve the intended
         # month/year and clamp only an invalid day to that month's final day.
-        match = re.fullmatch(r"(\d{1,2})/+(\d{1,2})/+(\d{2}|\d{4})", s)
+        match = re.fullmatch(r"(\d{1,2})/+(\d{1,2})/+(\d{2,4})", s)
         if match:
-            month, day, year = (int(part) for part in match.groups())
+            month_text, day_text, year_text = match.groups()
+            month, day, year = int(month_text), int(day_text), int(year_text)
             if year < 100:
                 year += 2000
+            elif len(year_text) == 3 and 200 <= year <= 209:
+                # A recurring register typo drops the third digit from a
+                # 2020s year, e.g. 07/20/206 means 2026.
+                year += 1820
             if 1 <= month <= 12 and day >= 1:
                 return date(year, month, min(day, calendar.monthrange(year, month)[1]))
     return None
@@ -195,13 +200,33 @@ def load_rows(xlsx_path, append_from_row=None):
 
 def group_rows(rows):
     flags = []
-    c_groups, rest = OrderedDict(), []
+    c_groups, shared_ref_groups, rest = OrderedDict(), OrderedDict(), []
+    ref_occurrences = defaultdict(list)
     for r in rows:
-        (
-            c_groups.setdefault(str(r[C_REFID]).strip(), []).append(r)
-            if is_composite_ref(r[C_REFID])
-            else rest.append(r)
-        )
+        ref = cell_str(r[C_REFID])
+        if ref and not is_composite_ref(ref):
+            ref_occurrences[ref].append(r)
+
+    shared_parent_refs = set()
+    for ref, ref_rows in ref_occurrences.items():
+        excel_rows = [getattr(r, "excel_row", 0) for r in ref_rows]
+        is_contiguous = excel_rows == list(range(excel_rows[0], excel_rows[-1] + 1))
+        if (
+            len(ref_rows) > 1
+            and is_contiguous
+            and len({sku_key(r) for r in ref_rows}) == 1
+            and len({cell_str(r[C_LOT]) for r in ref_rows}) > 1
+        ):
+            shared_parent_refs.add(ref)
+
+    for r in rows:
+        ref = cell_str(r[C_REFID])
+        if is_composite_ref(ref):
+            c_groups.setdefault(ref, []).append(r)
+        elif ref in shared_parent_refs:
+            shared_ref_groups.setdefault(ref, []).append(r)
+        else:
+            rest.append(r)
     groups = []
     for cref, grp in c_groups.items():
         if len({sku_key(x) for x in grp}) > 1:
@@ -219,6 +244,19 @@ def group_rows(rows):
             flags.append(
                 f"same-SKU composite {cref} loaded as a PARENT lot ({len(grp)} batches)"
             )
+    for ref, grp in shared_ref_groups.items():
+        groups.append(
+            {
+                "kind": "parent",
+                "key": ref,
+                "rows": grp,
+                "ref_override": ref,
+                "lotnum_override": ref,
+            }
+        )
+        flags.append(
+            f"shared non-C RefID {ref} loaded as a PARENT lot ({len(grp)} batches)"
+        )
     current_key, current_lot, current_rows = None, None, []
 
     def flush_lot_group():
@@ -251,6 +289,28 @@ def group_rows(rows):
         current_rows.append(r)
     flush_lot_group()
     return groups, flags
+
+
+def dedupe_register_rows(rows):
+    """Keep the latest exact RefID/Lot/SKU occurrence in the import range."""
+    last_index = {}
+    for index, row in enumerate(rows):
+        ref, lot = cell_str(row[C_REFID]), cell_str(row[C_LOT])
+        if ref and lot:
+            last_index[(ref.upper(), lot.upper(), sku_key(row))] = index
+
+    kept, flags = [], []
+    for index, row in enumerate(rows):
+        ref, lot = cell_str(row[C_REFID]), cell_str(row[C_LOT])
+        key = (ref.upper(), lot.upper(), sku_key(row))
+        if ref and lot and last_index[key] != index:
+            flags.append(
+                f"duplicate row {row_ref(row)} RefID {ref}, Lot {lot} skipped; "
+                "latest occurrence wins"
+            )
+            continue
+        kept.append(row)
+    return kept, flags
 
 
 def build_test_values(row, ltt_by_name):
@@ -544,7 +604,9 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
 
     rows = load_rows(file_path, append_from_row)
     print(f"Rows read: {len(rows)}")
-    groups, flags = group_rows(rows)
+    rows, flags = dedupe_register_rows(rows)
+    groups, group_flags = group_rows(rows)
+    flags.extend(group_flags)
     flags.extend(normalize_future_mfg_typos(rows))
     flags.extend(future_date_flags(rows))
     populated_cells = count_populated_result_cells(rows)
@@ -788,7 +850,13 @@ def run_load(file_path=DEFAULT_XLSX, commit=False, dry_run=False, append_from_ro
                     lotnum = cell_str(first[C_REFID])
                     flags.append(f"blank/NEEDS-LOT row: lot_number set to RefID {lotnum}")
                 lotnum = uniq(lotnum, used_lot_numbers, "lot number")
-                ref = uniq(str(first[C_REFID]).strip(), used_refs, "reference")
+                source_ref = cell_str(first[C_REFID])
+                if not source_ref:
+                    source_ref = gen_ref(to_date(first[C_MFG]))
+                    flags.append(
+                        f"blank RefID row {row_ref(first)}: generated reference {source_ref}"
+                    )
+                ref = uniq(source_ref, used_refs, "reference")
                 lot = Lot(
                     lot_number=lotnum,
                     lot_type=LotType.STANDARD,
